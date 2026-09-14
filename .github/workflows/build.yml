@@ -16,7 +16,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.35.5'
           channel: 'stable'
       - run: flutter pub get
       - run: flutter build apk --release
@@ -26,17 +25,17 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
 
   build-windows:
-    runs-on: windows-latest
-    # windows-latest runner 上裝的是 VS2022，但 flutter 的 cmake 設定預設會去找 VS2019
-    # 的產生器字串，導致 "could not find any instance of Visual Studio"。
-    # 明確指定成 runner 上實際有的版本，讓 cmake 抓得到。
-    env:
-      CMAKE_GENERATOR: "Visual Studio 17 2022"
+    runs-on: windows-2022
+    # 之前用 windows-latest + 舊版 flutter 時，flutter 內部會去抓 "Visual Studio 16 2019"
+    # 當產生器字串（不吃 CMAKE_GENERATOR 環境變數，是它自己內部硬寫的 -G 參數），
+    # 但 runner 上其實裝的是 VS2022，找不到就直接建置失敗。
+    # 改成不釘版本（讓它抓最新的 stable flutter，指令偵測邏輯可能已經修過），
+    # 並且把 runner 明確釘在 windows-2022（不用 windows-latest，避免未來 runner 換了更新的
+    # image 又出現同樣的版本偵測落差）。
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.35.5'
           channel: 'stable'
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
