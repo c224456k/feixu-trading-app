@@ -27,6 +27,11 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    # windows-latest runner 上裝的是 VS2022，但 flutter 的 cmake 設定預設會去找 VS2019
+    # 的產生器字串，導致 "could not find any instance of Visual Studio"。
+    # 明確指定成 runner 上實際有的版本，讓 cmake 抓得到。
+    env:
+      CMAKE_GENERATOR: "Visual Studio 17 2022"
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
