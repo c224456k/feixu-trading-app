@@ -1,0 +1,42 @@
+name: Build Feixu App
+
+# 這支 workflow 的重點：本機那台機器記憶體很緊，實際的編譯工作
+# （Android APK 用 Gradle、Windows 用 MSVC）全部交給 GitHub 的雲端主機做，
+# 不佔用本機任何資源。編好的檔案會出現在這次 workflow run 的 Artifacts 裡，直接下載。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.5'
+          channel: 'stable'
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feixu-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.5'
+          channel: 'stable'
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feixu-windows
+          path: build/windows/x64/runner/Release/
