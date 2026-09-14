@@ -45,7 +45,7 @@ class ApiClient {
     http.Response resp;
     try {
       resp = await http.get(Uri.parse('$base$path'), headers: headers).timeout(
-            const Duration(seconds: 10),
+            const Duration(seconds: 20),
           );
     } catch (e) {
       throw ApiException('連不到伺服器，檢查一下網址或網路：$e');
@@ -66,7 +66,7 @@ class ApiClient {
     try {
       resp = await http
           .post(Uri.parse('$base$path'), headers: headers, body: jsonEncode(body))
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 20));
     } catch (e) {
       throw ApiException('連不到伺服器，檢查一下網址或網路：$e');
     }
@@ -128,7 +128,7 @@ class ApiClient {
             headers: headers,
             body: jsonEncode({'user_id': userId, 'password': password}),
           )
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 20));
     } catch (e) {
       throw ApiException('連不到伺服器，檢查一下網址或網路：$e');
     }
