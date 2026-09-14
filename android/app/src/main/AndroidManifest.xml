@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App 要連線到 feixu-api（買賣/查詢/登入都靠 HTTP 呼叫），沒有這個權限
+         Android 會直接擋掉所有網路連線（連 DNS 查詢都會失敗）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="feixu_trading"
         android:name="${applicationName}"
