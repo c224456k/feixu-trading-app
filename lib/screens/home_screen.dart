@@ -7,7 +7,6 @@ import 'package:intl/intl.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../settings_store.dart';
-import 'settings_screen.dart';
 
 // 台股習慣：紅漲、綠跌（跟美股相反），這個 App 是給台灣玩家用的，顏色要照這個規則，
 // 不能套用國外套件常見的預設「綠漲紅跌」。
@@ -15,7 +14,11 @@ const upColor = Color(0xFFFF5A5F);
 const downColor = Color(0xFF2ECC71);
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  // 登入過期（token 失效）或使用者主動登出時呼叫，交給上層（_StartupGate）決定
+  // 要導回登入頁，這個畫面本身不做導頁邏輯，職責單純一點。
+  final VoidCallback onLoggedOut;
+
+  const HomeScreen({super.key, required this.onLoggedOut});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,7 +31,6 @@ class _HomeScreenState extends State<HomeScreen> {
   FeixuSnapshot? _snapshot;
   FeixuChart? _chart;
   Portfolio? _portfolio;
-  String? _userId;
   String? _error;
   bool _loading = true;
 
@@ -47,7 +49,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _bootstrap() async {
-    _userId = await _store.getUserId();
     await _refreshAll();
     // 每 5 秒刷新一次，跟 Discord 版的「即時更新」按鈕同一個節奏
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshAll(silent: true));
@@ -58,16 +59,25 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final snapshot = await _api.fetchSnapshot();
       final chart = await _api.fetchChart();
-      Portfolio? portfolio;
-      if (_userId != null && _userId!.isNotEmpty) {
-        portfolio = await _api.fetchPortfolio(_userId!);
-      }
+      final portfolio = await _api.fetchPortfolio();
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
         _chart = chart;
         _portfolio = portfolio;
         _error = null;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (e.isAuthError) {
+        _timer?.cancel();
+        await _store.clearSession();
+        widget.onLoggedOut();
+        return;
+      }
+      setState(() {
+        _error = e.toString();
         _loading = false;
       });
     } catch (e) {
@@ -79,21 +89,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _openSettings() async {
+  Future<void> _logout() async {
     _timer?.cancel();
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SettingsScreen(onSaved: () => Navigator.of(context).pop()),
-      ),
-    );
-    await _bootstrap();
+    await _store.clearSession();
+    widget.onLoggedOut();
   }
 
   Future<void> _tradeDialog(bool isBuy) async {
-    if (_userId == null || _userId!.isEmpty) {
-      _showSnack('先去設定頁面填你的 user id');
-      return;
-    }
     final controller = TextEditingController();
     String? hint;
     if (_portfolio != null && _snapshot != null) {
@@ -133,10 +135,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (lots == null || lots <= 0) return;
 
     try {
-      final result =
-          isBuy ? await _api.buy(_userId!, lots) : await _api.sell(_userId!, lots);
+      final result = isBuy ? await _api.buy(lots) : await _api.sell(lots);
       _showSnack(result.message);
       await _refreshAll();
+    } on ApiException catch (e) {
+      if (e.isAuthError) {
+        await _store.clearSession();
+        widget.onLoggedOut();
+        return;
+      }
+      _showSnack('失敗：$e');
     } catch (e) {
       _showSnack('失敗：$e');
     }
@@ -153,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('費許（7333）'),
         actions: [
-          IconButton(onPressed: _openSettings, icon: const Icon(Icons.settings)),
+          IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: '登出'),
         ],
       ),
       body: RefreshIndicator(
@@ -176,7 +184,9 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 12),
         Text(_error ?? '', textAlign: TextAlign.center),
         const SizedBox(height: 20),
-        FilledButton(onPressed: _openSettings, child: const Text('去檢查連線設定')),
+        FilledButton(onPressed: () => _refreshAll(), child: const Text('重試')),
+        const SizedBox(height: 8),
+        TextButton(onPressed: _logout, child: const Text('登出、重新設定連線')),
       ],
     );
   }

@@ -4,9 +4,9 @@ import '../api_client.dart';
 import '../settings_store.dart';
 
 class SettingsScreen extends StatefulWidget {
-  final VoidCallback onSaved;
+  final VoidCallback onLoggedIn;
 
-  const SettingsScreen({super.key, required this.onSaved});
+  const SettingsScreen({super.key, required this.onLoggedIn});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -17,9 +17,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _serverUrlCtrl = TextEditingController();
   final _apiKeyCtrl = TextEditingController();
   final _userIdCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
 
-  bool _testing = false;
-  String? _testResult;
+  bool _loading = false;
+  String? _message;
 
   @override
   void initState() {
@@ -30,42 +31,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     _serverUrlCtrl.text = await _store.getServerUrl() ?? '';
     _apiKeyCtrl.text = await _store.getApiKey() ?? '';
-    _userIdCtrl.text = await _store.getUserId() ?? '';
     setState(() {});
   }
 
-  Future<void> _testConnection() async {
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    await _store.save(
-      serverUrl: _serverUrlCtrl.text,
-      apiKey: _apiKeyCtrl.text,
-      userId: _userIdCtrl.text,
-    );
-    final ok = await ApiClient().healthCheck();
-    setState(() {
-      _testing = false;
-      _testResult = ok ? '✅ 連線成功！' : '❌ 連不到，檢查一下網址對不對、伺服器是不是還開著';
-    });
-  }
-
-  Future<void> _saveAndContinue() async {
+  Future<void> _login() async {
     if (_serverUrlCtrl.text.trim().isEmpty ||
         _apiKeyCtrl.text.trim().isEmpty ||
-        _userIdCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('三個欄位都要填喔')),
-      );
+        _userIdCtrl.text.trim().isEmpty ||
+        _passwordCtrl.text.isEmpty) {
+      setState(() => _message = '四個欄位都要填喔');
       return;
     }
-    await _store.save(
+    setState(() {
+      _loading = true;
+      _message = null;
+    });
+    await _store.saveConnection(
       serverUrl: _serverUrlCtrl.text,
       apiKey: _apiKeyCtrl.text,
-      userId: _userIdCtrl.text,
     );
-    widget.onSaved();
+    try {
+      await ApiClient().login(_userIdCtrl.text.trim(), _passwordCtrl.text);
+      widget.onLoggedIn();
+    } catch (e) {
+      setState(() => _message = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -73,23 +65,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _serverUrlCtrl.dispose();
     _apiKeyCtrl.dispose();
     _userIdCtrl.dispose();
+    _passwordCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('連線設定')),
+      appBar: AppBar(title: const Text('登入')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              '這幾個資訊會存在這台裝置本機，不會傳給第三方。\n'
-              '目前還沒有真正的登入驗證，Discord user id 就是你的帳號，'
-              '知道 id 的人也能動這個帳號的資產，先求堪用，之後會補上真正的登入系統。',
-              style: TextStyle(color: Colors.grey),
+              '密碼要先在 Discord 私訊「股市小幫手」設定：\n'
+              '@股市小幫手 設定密碼 你的密碼\n'
+              '（一定要用私訊，不要在公開頻道打，不然密碼會被大家看到）',
+              style: TextStyle(color: Colors.orange),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -110,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               obscureText: true,
             ),
-            const SizedBox(height: 16),
+            const Divider(height: 32),
             TextField(
               controller: _userIdCtrl,
               decoration: const InputDecoration(
@@ -120,25 +113,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               keyboardType: TextInputType.number,
             ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _passwordCtrl,
+              decoration: const InputDecoration(
+                labelText: '密碼',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+              onSubmitted: (_) => _login(),
+            ),
             const SizedBox(height: 20),
-            OutlinedButton(
-              onPressed: _testing ? null : _testConnection,
-              child: _testing
+            if (_message != null) ...[
+              Text(_message!, style: const TextStyle(color: Colors.redAccent), textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+            ],
+            FilledButton(
+              onPressed: _loading ? null : _login,
+              child: _loading
                   ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('測試連線'),
-            ),
-            if (_testResult != null) ...[
-              const SizedBox(height: 8),
-              Text(_testResult!, textAlign: TextAlign.center),
-            ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _saveAndContinue,
-              child: const Text('儲存並開始使用'),
+                  : const Text('登入'),
             ),
           ],
         ),

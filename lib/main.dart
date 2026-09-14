@@ -28,8 +28,8 @@ class FeixuApp extends StatelessWidget {
   }
 }
 
-// 開機先檢查有沒有設定過伺服器/帳號，沒設定過就先導去設定頁，
-// 不要讓使用者一開 App 就看到一堆連線失敗的錯誤訊息。
+// 開機先檢查有沒有登入過，沒登入就先導去登入頁，這裡是唯一決定
+// 「現在該顯示登入頁還是首頁」的地方，登入/登出都只是改這裡的一個布林值。
 class _StartupGate extends StatefulWidget {
   const _StartupGate();
 
@@ -38,7 +38,7 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate> {
-  bool? _configured;
+  bool? _loggedIn;
 
   @override
   void initState() {
@@ -47,21 +47,23 @@ class _StartupGateState extends State<_StartupGate> {
   }
 
   Future<void> _check() async {
-    final configured = await SettingsStore().isConfigured();
+    final loggedIn = await SettingsStore().isLoggedIn();
     if (!mounted) return;
-    setState(() => _configured = configured);
+    setState(() => _loggedIn = loggedIn);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_configured == null) {
+    if (_loggedIn == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (_configured == false) {
+    if (_loggedIn == false) {
       return SettingsScreen(
-        onSaved: () => setState(() => _configured = true),
+        onLoggedIn: () => setState(() => _loggedIn = true),
       );
     }
-    return const HomeScreen();
+    return HomeScreen(
+      onLoggedOut: () => setState(() => _loggedIn = false),
+    );
   }
 }

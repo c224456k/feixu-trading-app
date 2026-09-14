@@ -1,13 +1,12 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-// 這幾個值存在手機/電腦本機（SharedPreferences），不會傳給任何第三方。
-// 目前沒有真正的登入系統，userId 就是你自己的 Discord user id（跟 Discord 版是同一個帳號、
-// 同一筆現金/持股），apiKey 是後端那組共用金鑰，serverUrl 是 Cloudflare Tunnel 網址
-// （目前還是臨時網址，重新開 tunnel 會換，換了要記得回來這裡改掉）。
+// serverUrl / apiKey 是連線用的設定；token 是登入後拿到的通行證（不是密碼本身），
+// 之後每次呼叫 API 都靠這個反推身分，伺服器不會再相信客戶端自己講的 user_id。
 class SettingsStore {
   static const _keyServerUrl = 'server_url';
   static const _keyApiKey = 'api_key';
-  static const _keyUserId = 'user_id';
+  static const _keyToken = 'auth_token';
+  static const _keyDisplayUserId = 'display_user_id';
 
   Future<String?> getServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
@@ -19,33 +18,44 @@ class SettingsStore {
     return prefs.getString(_keyApiKey);
   }
 
-  Future<String?> getUserId() async {
+  Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyUserId);
+    return prefs.getString(_keyToken);
   }
 
-  Future<void> save({
-    required String serverUrl,
-    required String apiKey,
-    required String userId,
-  }) async {
+  Future<String?> getDisplayUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyDisplayUserId);
+  }
+
+  Future<void> saveConnection({required String serverUrl, required String apiKey}) async {
     final prefs = await SharedPreferences.getInstance();
     // 去掉網址結尾的斜線，避免組出 "https://xxx//api/..." 這種雙斜線路徑
     final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
     await prefs.setString(_keyServerUrl, cleanUrl);
     await prefs.setString(_keyApiKey, apiKey.trim());
-    await prefs.setString(_keyUserId, userId.trim());
   }
 
-  Future<bool> isConfigured() async {
+  Future<void> saveSession({required String token, required String userId}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyToken, token);
+    await prefs.setString(_keyDisplayUserId, userId);
+  }
+
+  Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyToken);
+    await prefs.remove(_keyDisplayUserId);
+  }
+
+  Future<bool> hasConnectionInfo() async {
     final url = await getServerUrl();
     final key = await getApiKey();
-    final uid = await getUserId();
-    return url != null &&
-        url.isNotEmpty &&
-        key != null &&
-        key.isNotEmpty &&
-        uid != null &&
-        uid.isNotEmpty;
+    return url != null && url.isNotEmpty && key != null && key.isNotEmpty;
+  }
+
+  Future<bool> isLoggedIn() async {
+    final token = await getToken();
+    return token != null && token.isNotEmpty;
   }
 }
