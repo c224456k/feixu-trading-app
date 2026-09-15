@@ -184,3 +184,84 @@ class TradeResult {
     return TradeResult(ok: json['ok'] as bool, message: json['message'] as String);
   }
 }
+
+class BossDamageEntry {
+  final String userId;
+  final int damage;
+
+  BossDamageEntry({required this.userId, required this.damage});
+
+  factory BossDamageEntry.fromJson(Map<String, dynamic> json) {
+    return BossDamageEntry(userId: json['user_id'] as String, damage: json['damage'] as int);
+  }
+}
+
+class BossStatus {
+  final bool active;
+  final int? maxHp;
+  final int? currentHp;
+  final double? prizePool;
+  final DateTime? endsAt;
+  final int? bombCost;
+  final int? bombDamage;
+  final List<BossDamageEntry> topDamage;
+  final DateTime? nextSpawnEta;
+
+  BossStatus({
+    required this.active,
+    this.maxHp,
+    this.currentHp,
+    this.prizePool,
+    this.endsAt,
+    this.bombCost,
+    this.bombDamage,
+    this.topDamage = const [],
+    this.nextSpawnEta,
+  });
+
+  factory BossStatus.fromJson(Map<String, dynamic> json) {
+    if (json['active'] != true) {
+      return BossStatus(
+        active: false,
+        nextSpawnEta: json['next_spawn_eta'] != null
+            ? DateTime.parse(json['next_spawn_eta'] as String)
+            : null,
+      );
+    }
+    return BossStatus(
+      active: true,
+      maxHp: json['max_hp'] as int,
+      currentHp: json['current_hp'] as int,
+      prizePool: (json['prize_pool'] as num).toDouble(),
+      endsAt: DateTime.parse(json['ends_at'] as String),
+      bombCost: json['bomb_cost'] as int,
+      bombDamage: json['bomb_damage'] as int,
+      topDamage: (json['top_damage'] as List)
+          .map((e) => BossDamageEntry.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class BossAttackResult {
+  final bool ok;
+  final String message;
+  final bool defeated;
+  final BossStatus status;
+
+  BossAttackResult({
+    required this.ok,
+    required this.message,
+    required this.defeated,
+    required this.status,
+  });
+
+  factory BossAttackResult.fromJson(Map<String, dynamic> json) {
+    return BossAttackResult(
+      ok: json['ok'] as bool,
+      message: json['message'] as String,
+      defeated: json['defeated'] as bool,
+      status: BossStatus.fromJson(json['status'] as Map<String, dynamic>),
+    );
+  }
+}

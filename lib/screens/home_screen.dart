@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../api_client.dart';
 import '../models.dart';
 import '../settings_store.dart';
+import 'boss_screen.dart';
 
 // 台股習慣：紅漲、綠跌（跟美股相反），這個 App 是給台灣玩家用的，顏色要照這個規則，
 // 不能套用國外套件常見的預設「綠漲紅跌」。
@@ -161,6 +162,13 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('費許（7333）'),
         actions: [
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BossScreen()),
+            ),
+            icon: const Icon(Icons.local_fire_department),
+            tooltip: '打 Boss',
+          ),
           IconButton(onPressed: _logout, icon: const Icon(Icons.logout), tooltip: '登出'),
         ],
       ),

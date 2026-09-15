@@ -115,6 +115,16 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<BossStatus> fetchBossStatus() =>
+      _get('/api/boss/status', (j) => BossStatus.fromJson(j as Map<String, dynamic>));
+
+  Future<BossAttackResult> attackBoss() => _post(
+        '/api/boss/attack',
+        {},
+        (j) => BossAttackResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   /// 登入：用 Discord user id + 密碼（密碼要先在 Discord 私訊機器人設定）換一組 token。
   /// 成功會把 token 存到本機，之後的呼叫就不用再傳密碼。
   Future<void> login(String userId, String password) async {
