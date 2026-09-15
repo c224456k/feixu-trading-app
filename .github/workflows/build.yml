@@ -17,6 +17,17 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+      # 用固定的簽章金鑰簽 release 版，這樣玩家每次更新才會是「覆蓋安裝」而不是
+      # 「先移除舊版才能裝」，不然每次更新都會把 App 本機資料（登入 token）清光。
+      - name: 還原正式簽章金鑰
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=app/release-keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
