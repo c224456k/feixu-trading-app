@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
@@ -21,6 +22,9 @@ class ApiClient {
     final headers = {
       'Content-Type': 'application/json',
       'X-API-Key': apiKey ?? '',
+      // 讓後端知道這次是 App（手機）還是 Windows 軟體打的，Boss 攻擊會拿這個去 Discord 公告，
+      // 讓 Discord 那邊也看得到「誰在哪個平台丟了炸彈」。
+      'X-Client-Platform': Platform.isWindows ? 'windows' : 'app',
     };
     if (withAuth) {
       final token = await _settings.getToken();
@@ -146,6 +150,11 @@ class ApiClient {
     final json = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
     await _settings.saveSession(token: json['token'] as String, userId: json['user_id'] as String);
   }
+
+  Future<List<LeaderboardEntry>> fetchLeaderboard() => _get(
+        '/api/leaderboard',
+        (j) => (j as List).map((e) => LeaderboardEntry.fromJson(e as Map<String, dynamic>)).toList(),
+      );
 
   Future<bool> healthCheck() async {
     final base = await _baseUrl();

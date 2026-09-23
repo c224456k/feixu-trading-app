@@ -243,6 +243,20 @@ class BossStatus {
   }
 }
 
+class LeaderboardEntry {
+  final String userId;
+  final double totalAssets;
+
+  LeaderboardEntry({required this.userId, required this.totalAssets});
+
+  factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
+    return LeaderboardEntry(
+      userId: json['user_id'] as String,
+      totalAssets: (json['total_assets'] as num).toDouble(),
+    );
+  }
+}
+
 class BossAttackResult {
   final bool ok;
   final String message;
