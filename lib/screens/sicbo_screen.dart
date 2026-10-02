@@ -486,7 +486,7 @@ class SicBoDie extends StatelessWidget {
   final int value;
   final double size;
 
-  const SicBoDie({required this.value, required this.size});
+  const SicBoDie({super.key, required this.value, required this.size});
 
   @override
   Widget build(BuildContext context) {
