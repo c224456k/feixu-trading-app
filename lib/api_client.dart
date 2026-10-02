@@ -175,6 +175,34 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<HorseState> fetchHorseState() => _get(
+        '/api/horse/state',
+        (j) => HorseState.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  // betType 格式：win:3（壓 3 號冠軍）/ second:3（壓 3 號亞軍）
+  Future<SicBoBetResult> placeHorseBet(String betType, int amount) => _post(
+        '/api/horse/bet',
+        {'bet_type': betType, 'amount': amount},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> sitHorse(int seat) => _post(
+        '/api/horse/sit',
+        {'seat': seat},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> leaveHorse() => _post(
+        '/api/horse/leave',
+        {},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   Future<SicBoBetResult> placeSicBoBet(String betType, int amount) => _post(
         '/api/sicbo/bet',
         {'bet_type': betType, 'amount': amount},

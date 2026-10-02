@@ -1,3 +1,5 @@
+import 'package:flutter/painting.dart' show Color;
+
 // 對應 feixu_api.py 回傳的 JSON 結構。
 // 之所以每個欄位都用 num? / String? 這種寬鬆型別，是因為後端有些欄位
 // 在特定狀況下會是 null（例如查不到現價、或還沒有任何事件），前端要能安全處理。
@@ -608,6 +610,194 @@ class BaccaratState {
       poolAmount: poolAmount,
       poolPlayers: poolPlayers,
       history: (json['history'] as List).map((e) => BaccaratHistoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+    );
+  }
+}
+
+// ===== 網頁版賭馬 =====
+
+class Horse {
+  final int no;
+  final String name;
+  final Color color;
+  final double winOdds;
+  final double secondOdds;
+  final double winProb;
+
+  Horse({
+    required this.no,
+    required this.name,
+    required this.color,
+    required this.winOdds,
+    required this.secondOdds,
+    required this.winProb,
+  });
+
+  factory Horse.fromJson(Map<String, dynamic> json) {
+    final hex = (json['color'] as String).replaceFirst('#', '');
+    return Horse(
+      no: json['no'] as int,
+      name: json['name'] as String,
+      color: Color(int.parse('FF$hex', radix: 16)),
+      winOdds: (json['win_odds'] as num).toDouble(),
+      secondOdds: (json['second_odds'] as num).toDouble(),
+      winProb: (json['win_prob'] as num).toDouble(),
+    );
+  }
+}
+
+class HorseRace {
+  final List<int> order; // 名次（馬號），第 0 個是冠軍
+  final Map<int, double> finishTimes;
+  final Map<int, List<double>> tracks; // 馬號 -> 每 trackStep 秒的前進比例（0~1）
+  final double trackStep;
+  final double raceSeconds;
+
+  HorseRace({
+    required this.order,
+    required this.finishTimes,
+    required this.tracks,
+    required this.trackStep,
+    required this.raceSeconds,
+  });
+
+  // 某一時刻（比賽開始後第 t 秒）某匹馬的前進比例，兩個關鍵點之間做線性內插。
+  double progressAt(int no, double t) {
+    final list = tracks[no];
+    if (list == null || list.isEmpty) return 0;
+    if (t <= 0) return 0;
+    final x = t / trackStep;
+    final i = x.floor();
+    if (i >= list.length - 1) return list.last;
+    return list[i] + (list[i + 1] - list[i]) * (x - i);
+  }
+
+  double get lastFinish => finishTimes.values.fold(0.0, (a, b) => a > b ? a : b);
+}
+
+class HorseHistoryItem {
+  final int id;
+  final int first;
+  final int second;
+  final String firstName;
+  final String secondName;
+
+  HorseHistoryItem({
+    required this.id,
+    required this.first,
+    required this.second,
+    required this.firstName,
+    required this.secondName,
+  });
+
+  factory HorseHistoryItem.fromJson(Map<String, dynamic> json) => HorseHistoryItem(
+        id: json['id'] as int,
+        first: json['first'] as int,
+        second: json['second'] as int,
+        firstName: json['first_name'] as String,
+        secondName: json['second_name'] as String,
+      );
+}
+
+class HorseState {
+  final SicBoPhase phase;
+  final int? roundId;
+  final double secondsLeft;
+  final HorseRace? race;
+  final double secondsSinceSettled;
+  final double revealSecondsLeft;
+  final List<Horse> horses;
+  final List<SicBoSeat> seats;
+  final int? mySeat;
+  final Map<String, double> myBets; // key 例如 win:3
+  final Map<String, double> myPayouts;
+  final Map<String, double> poolAmount;
+  final List<HorseHistoryItem> history;
+  final double cash;
+  final int betSeconds;
+  final int maxBetPerRound;
+  final int idleTimeoutSeconds;
+  final double houseEdge;
+
+  HorseState({
+    required this.phase,
+    required this.roundId,
+    required this.secondsLeft,
+    required this.race,
+    required this.secondsSinceSettled,
+    required this.revealSecondsLeft,
+    required this.horses,
+    required this.seats,
+    required this.mySeat,
+    required this.myBets,
+    required this.myPayouts,
+    required this.poolAmount,
+    required this.history,
+    required this.cash,
+    required this.betSeconds,
+    required this.maxBetPerRound,
+    required this.idleTimeoutSeconds,
+    required this.houseEdge,
+  });
+
+  bool get isIdle => phase == SicBoPhase.idle;
+  bool get isOpen => phase == SicBoPhase.open;
+  bool get isSettled => phase == SicBoPhase.settled;
+  double get myTotalBet => myBets.values.fold(0.0, (a, b) => a + b);
+  double get myTotalPayout => myPayouts.values.fold(0.0, (a, b) => a + b);
+
+  Horse horse(int no) => horses.firstWhere((h) => h.no == no);
+
+  factory HorseState.fromJson(Map<String, dynamic> json) {
+    final round = json['round'] as Map<String, dynamic>;
+    final phase = switch (round['status']) {
+      'open' => SicBoPhase.open,
+      'settled' => SicBoPhase.settled,
+      _ => SicBoPhase.idle,
+    };
+    final settled = phase == SicBoPhase.settled;
+    HorseRace? race;
+    if (settled) {
+      race = HorseRace(
+        order: (round['order'] as List).map((e) => e as int).toList(),
+        finishTimes: (round['finish_times'] as Map<String, dynamic>).map((k, v) => MapEntry(int.parse(k), (v as num).toDouble())),
+        tracks: (round['tracks'] as Map<String, dynamic>).map(
+          (k, v) => MapEntry(int.parse(k), (v as List).map((e) => (e as num).toDouble()).toList()),
+        ),
+        trackStep: (round['track_step'] as num).toDouble(),
+        raceSeconds: (round['race_seconds'] as num).toDouble(),
+      );
+    }
+    final myBets = <String, double>{};
+    final myPayouts = <String, double>{};
+    for (final b in (json['my_bets'] as List)) {
+      final m = b as Map<String, dynamic>;
+      myBets[m['bet_type'] as String] = (m['amount'] as num).toDouble();
+      myPayouts[m['bet_type'] as String] = ((m['payout'] ?? 0) as num).toDouble();
+    }
+    final pool = <String, double>{};
+    (json['pool'] as Map<String, dynamic>).forEach((k, v) {
+      pool[k] = ((v as Map<String, dynamic>)['amount'] as num).toDouble();
+    });
+    return HorseState(
+      phase: phase,
+      roundId: round['id'] as int?,
+      secondsLeft: phase == SicBoPhase.open ? (round['seconds_left'] as num).toDouble() : 0,
+      race: race,
+      secondsSinceSettled: settled ? (round['seconds_since_settled'] as num).toDouble() : 0,
+      revealSecondsLeft: settled ? (round['reveal_seconds_left'] as num).toDouble() : 0,
+      horses: (json['horses'] as List).map((e) => Horse.fromJson(e as Map<String, dynamic>)).toList(),
+      seats: (json['seats'] as List).map((e) => SicBoSeat.fromJson(e as Map<String, dynamic>)).toList(),
+      mySeat: json['my_seat'] as int?,
+      myBets: myBets,
+      myPayouts: myPayouts,
+      poolAmount: pool,
+      history: (json['history'] as List).map((e) => HorseHistoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+      cash: (json['cash'] as num).toDouble(),
+      betSeconds: json['bet_seconds'] as int,
+      maxBetPerRound: json['max_bet_per_round'] as int,
+      idleTimeoutSeconds: json['idle_timeout_seconds'] as int,
+      houseEdge: (json['house_edge'] as num).toDouble(),
     );
   }
 }

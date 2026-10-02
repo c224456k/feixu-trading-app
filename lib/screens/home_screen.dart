@@ -11,6 +11,7 @@ import '../settings_store.dart';
 import '../update_checker.dart';
 import 'boss_screen.dart';
 import 'baccarat_screen.dart';
+import 'horse_screen.dart';
 import 'sicbo_screen.dart';
 import 'leaderboard_screen.dart';
 
@@ -196,6 +197,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.local_fire_department),
             tooltip: '打 Boss',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HorseScreen()),
+            ),
+            icon: const Icon(Icons.emoji_events),
+            tooltip: '賭馬',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
