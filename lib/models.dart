@@ -456,3 +456,158 @@ class SicBoBetResult {
   factory SicBoBetResult.fromJson(Map<String, dynamic> json) =>
       SicBoBetResult(ok: json['ok'] as bool, message: json['message'] as String);
 }
+
+// ===== 網頁版百家樂 =====
+
+class PlayingCard {
+  final int rank; // 1~13（1=A, 11=J, 12=Q, 13=K）
+  final int suit; // 0=♠ 1=♥ 2=♦ 3=♣
+
+  PlayingCard(this.rank, this.suit);
+
+  factory PlayingCard.fromJson(dynamic json) {
+    final l = json as List;
+    return PlayingCard(l[0] as int, l[1] as int);
+  }
+}
+
+class BaccaratBetType {
+  final String key;
+  final String shortName;
+  final String payout; // 例如「1賠0.95」
+
+  BaccaratBetType({required this.key, required this.shortName, required this.payout});
+}
+
+class BaccaratHistoryItem {
+  final int id;
+  final String result; // player / banker / tie
+  final int playerTotal;
+  final int bankerTotal;
+
+  BaccaratHistoryItem({required this.id, required this.result, required this.playerTotal, required this.bankerTotal});
+
+  factory BaccaratHistoryItem.fromJson(Map<String, dynamic> json) => BaccaratHistoryItem(
+        id: json['id'] as int,
+        result: json['result'] as String,
+        playerTotal: json['player_total'] as int,
+        bankerTotal: json['banker_total'] as int,
+      );
+}
+
+class BaccaratState {
+  final SicBoPhase phase; // 跟骰寶共用：idle / open / settled
+  final int? roundId;
+  final double secondsLeft;
+  final List<PlayingCard> playerCards;
+  final List<PlayingCard> bankerCards;
+  final int playerTotal;
+  final int bankerTotal;
+  final String result;
+  final bool playerPair;
+  final bool bankerPair;
+  final double secondsSinceSettled;
+  final double revealSecondsLeft;
+  final double cash;
+  final int betSeconds;
+  final int maxBetPerRound;
+  final int idleTimeoutSeconds;
+  final int? mySeat;
+  final List<SicBoSeat> seats;
+  final List<BaccaratBetType> betTypes;
+  final Map<String, double> myBets;
+  final Map<String, double> myPayouts;
+  final Map<String, double> poolAmount;
+  final Map<String, int> poolPlayers;
+  final List<BaccaratHistoryItem> history;
+
+  BaccaratState({
+    required this.phase,
+    required this.roundId,
+    required this.secondsLeft,
+    required this.playerCards,
+    required this.bankerCards,
+    required this.playerTotal,
+    required this.bankerTotal,
+    required this.result,
+    required this.playerPair,
+    required this.bankerPair,
+    required this.secondsSinceSettled,
+    required this.revealSecondsLeft,
+    required this.cash,
+    required this.betSeconds,
+    required this.maxBetPerRound,
+    required this.idleTimeoutSeconds,
+    required this.mySeat,
+    required this.seats,
+    required this.betTypes,
+    required this.myBets,
+    required this.myPayouts,
+    required this.poolAmount,
+    required this.poolPlayers,
+    required this.history,
+  });
+
+  bool get isIdle => phase == SicBoPhase.idle;
+  bool get isOpen => phase == SicBoPhase.open;
+  bool get isSettled => phase == SicBoPhase.settled;
+  double get myTotalBet => myBets.values.fold(0.0, (a, b) => a + b);
+  double get myTotalPayout => myPayouts.values.fold(0.0, (a, b) => a + b);
+
+  factory BaccaratState.fromJson(Map<String, dynamic> json) {
+    final round = json['round'] as Map<String, dynamic>;
+    final phase = switch (round['status']) {
+      'open' => SicBoPhase.open,
+      'settled' => SicBoPhase.settled,
+      _ => SicBoPhase.idle,
+    };
+    final settled = phase == SicBoPhase.settled;
+    final betTypes = <BaccaratBetType>[];
+    (json['bet_types'] as Map<String, dynamic>).forEach((k, v) {
+      final m = v as Map<String, dynamic>;
+      betTypes.add(BaccaratBetType(key: k, shortName: m['short'] as String, payout: m['payout'] as String));
+    });
+    final myBets = <String, double>{};
+    final myPayouts = <String, double>{};
+    for (final b in (json['my_bets'] as List)) {
+      final m = b as Map<String, dynamic>;
+      myBets[m['bet_type'] as String] = (m['amount'] as num).toDouble();
+      myPayouts[m['bet_type'] as String] = ((m['payout'] ?? 0) as num).toDouble();
+    }
+    final poolAmount = <String, double>{};
+    final poolPlayers = <String, int>{};
+    (json['pool'] as Map<String, dynamic>).forEach((k, v) {
+      final m = v as Map<String, dynamic>;
+      poolAmount[k] = (m['amount'] as num).toDouble();
+      poolPlayers[k] = m['players'] as int;
+    });
+    List<PlayingCard> cards(String key) =>
+        settled ? (round[key] as List).map(PlayingCard.fromJson).toList() : const <PlayingCard>[];
+    return BaccaratState(
+      phase: phase,
+      roundId: round['id'] as int?,
+      secondsLeft: phase == SicBoPhase.open ? (round['seconds_left'] as num).toDouble() : 0,
+      playerCards: cards('player_cards'),
+      bankerCards: cards('banker_cards'),
+      playerTotal: settled ? round['player_total'] as int : 0,
+      bankerTotal: settled ? round['banker_total'] as int : 0,
+      result: settled ? round['result'] as String : '',
+      playerPair: settled ? round['player_pair'] as bool : false,
+      bankerPair: settled ? round['banker_pair'] as bool : false,
+      secondsSinceSettled: settled ? (round['seconds_since_settled'] as num).toDouble() : 0,
+      revealSecondsLeft: settled ? (round['reveal_seconds_left'] as num).toDouble() : 0,
+      cash: (json['cash'] as num).toDouble(),
+      betSeconds: json['bet_seconds'] as int,
+      maxBetPerRound: json['max_bet_per_round'] as int,
+      idleTimeoutSeconds: json['idle_timeout_seconds'] as int,
+      mySeat: json['my_seat'] as int?,
+      seats: (json['seats'] as List).map((e) => SicBoSeat.fromJson(e as Map<String, dynamic>)).toList(),
+      betTypes: betTypes,
+      myBets: myBets,
+      myPayouts: myPayouts,
+      poolAmount: poolAmount,
+      poolPlayers: poolPlayers,
+      history: (json['history'] as List).map((e) => BaccaratHistoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+    );
+  }
+}

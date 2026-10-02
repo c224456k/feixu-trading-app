@@ -148,6 +148,33 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<BaccaratState> fetchBaccaratState() => _get(
+        '/api/baccarat/state',
+        (j) => BaccaratState.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> placeBaccaratBet(String betType, int amount) => _post(
+        '/api/baccarat/bet',
+        {'bet_type': betType, 'amount': amount},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> sitBaccarat(int seat) => _post(
+        '/api/baccarat/sit',
+        {'seat': seat},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> leaveBaccarat() => _post(
+        '/api/baccarat/leave',
+        {},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   Future<SicBoBetResult> placeSicBoBet(String betType, int amount) => _post(
         '/api/sicbo/bet',
         {'bet_type': betType, 'amount': amount},
