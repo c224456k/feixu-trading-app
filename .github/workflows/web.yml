@@ -37,6 +37,16 @@ jobs:
       - run: flutter pub get
       # --base-href 要跟 Pages 網址的路徑（/repo 名稱/）一致，不然會找不到 js / 資源檔
       - run: flutter build web --release --base-href /feixu-trading-app/
+      # 在程式檔網址後面加上這次提交的版本參數：GitHub Pages 預設讓瀏覽器快取檔案 10 分鐘，
+      # 而且「加入主畫面」的網頁版常常更久，沒有這個參數玩家會一直看到舊版畫面。
+      # 有版本參數，每次部署後只要重新開啟網頁就一定載入新的程式檔。
+      - name: 加上版本參數避免舊快取
+        run: |
+          V=${GITHUB_SHA::8}
+          sed -i "s#\"mainJsPath\":\"main.dart.js\"#\"mainJsPath\":\"main.dart.js?v=$V\"#" build/web/flutter_bootstrap.js
+          sed -i "s#src=\"flutter_bootstrap.js\"#src=\"flutter_bootstrap.js?v=$V\"#" build/web/index.html
+          grep -q "main.dart.js?v=$V" build/web/flutter_bootstrap.js
+          grep -q "flutter_bootstrap.js?v=$V" build/web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
