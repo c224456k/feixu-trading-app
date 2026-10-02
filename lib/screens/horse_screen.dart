@@ -229,7 +229,7 @@ class _HorseScreenState extends State<HorseScreen> {
 
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth;
-      final h = w * 0.78;
+      final h = w * 0.84;
       return Container(
         width: w,
         height: h,
@@ -651,26 +651,43 @@ class _TrackPainter extends CustomPainter {
       ..strokeWidth = 3;
     canvas.drawLine(Offset(cx, cy + outerR), Offset(cx, cy + inner), linePaint2);
 
-    // 馬：依前進比例沿著各自跑道的中線移動
+    // 馬：依前進比例沿著各自跑道的中線移動，朝著前進方向奔跑
+    final horseSize = laneW * 2.7;
+    final placed = <(Offset, double, Horse, double, bool)>[];
     for (var i = 0; i < horses.length; i++) {
       final h = horses[i];
       final laneRadius = outerR - (i + 0.5) * laneW;
       var f = progress[h.no] ?? 0.0;
       final ft = finishTimes[h.no];
+      var running = f > 0 && f < 1.0;
+      var speed = 1.0; // 奔跑節奏：衝線後逐漸慢下來
       if (f >= 1.0 && ft != null) {
         // 衝線後多滑行一小段、逐漸慢下來，才不會全部疊在終點線上
         final after = math.max(raceTime - ft, 0.0);
         f = 1.0 + 0.06 * (1 - math.exp(-after * 1.6));
+        speed = math.exp(-after * 1.6);
+        running = speed > 0.08;
       }
       final p = _pointOn(cx, cy, straight, laneRadius, f);
-      final r = math.max(laneW * 0.46, 4.5);
-      canvas.drawCircle(p, r + 1.5, Paint()..color = Colors.white);
-      canvas.drawCircle(p, r, Paint()..color = h.color);
+      final ahead = _pointOn(cx, cy, straight, laneRadius, f + 0.004);
+      var heading = math.atan2(ahead.dy - p.dy, ahead.dx - p.dx);
+      if (f <= 0) heading = 0; // 起跑線上：面向前方（往右）
+      final phase = running ? raceTime * 15 * speed + h.no * 0.9 : 0.0;
+      placed.add((p, heading, h, phase, running));
+    }
+    // 由上往下畫，下面的馬蓋在上面的馬前面，才有遠近層次
+    placed.sort((a, b) => a.$1.dy.compareTo(b.$1.dy));
+    for (final (p, heading, h, phase, running) in placed) {
+      drawHorseSprite(canvas, p, heading, horseSize, horseBodyColors[(h.no - 1) % horseBodyColors.length], h.color, phase, running);
+      // 馬號牌：永遠朝上顯示，不跟著馬旋轉，才讀得到
+      final badgeC = p + Offset(0, -horseSize * 0.62);
+      canvas.drawCircle(badgeC, 6.5, Paint()..color = Colors.white);
+      canvas.drawCircle(badgeC, 5.3, Paint()..color = h.color);
       final tp = TextPainter(
-        text: TextSpan(text: '${h.no}', style: TextStyle(color: Colors.black87, fontSize: r * 1.15, fontWeight: FontWeight.bold)),
+        text: TextSpan(text: '${h.no}', style: const TextStyle(color: Colors.black87, fontSize: 8, fontWeight: FontWeight.bold)),
         textDirection: ui.TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, p - Offset(tp.width / 2, tp.height / 2));
+      tp.paint(canvas, badgeC - Offset(tp.width / 2, tp.height / 2));
     }
   }
 
@@ -714,3 +731,119 @@ class _TrackPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TrackPainter old) => true;
 }
+
+// 每匹馬的毛色（自然的馬色），騎師的賽衣顏色才是這匹馬的代表色，方便辨認
+const horseBodyColors = [
+  Color(0xFF8B4A24), // 栗色
+  Color(0xFF2E2E33), // 黑
+  Color(0xFFEDE6DA), // 白
+  Color(0xFFA9622D), // 棗色
+  Color(0xFF8F9296), // 灰
+  Color(0xFFD7A24B), // 淡金
+];
+
+// 畫一匹側面的馬（朝右、腳朝下），再依 heading 旋轉到前進方向。size = 馬的全長（像素）。
+// 座標用「以馬身中心為原點、全長 = 1」的單位，所以線條粗細也會跟著放大縮小。
+void drawHorseSprite(Canvas canvas, Offset center, double heading, double size, Color body, Color silk, double phase, bool running) {
+  canvas.save();
+  canvas.translate(center.dx, center.dy);
+  canvas.rotate(heading);
+  canvas.scale(size, size);
+
+  final dark = Color.lerp(body, Colors.black, 0.5)!;
+  final fill = Paint()..color = body;
+  Paint stroke(Color c, double w) => Paint()
+    ..color = c
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = w
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
+  // 地面陰影
+  canvas.drawOval(Rect.fromCenter(center: const Offset(0, 0.30), width: 0.78, height: 0.1), Paint()..color = Colors.black26);
+
+  // 尾巴：從臀部往後甩，奔跑時上下擺動
+  final tailSwing = running ? math.sin(phase * 1.3) * 0.05 : 0.0;
+  canvas.drawPath(
+    Path()
+      ..moveTo(-0.31, -0.07)
+      ..quadraticBezierTo(-0.52, -0.08 + tailSwing, -0.55, 0.14 + tailSwing),
+    stroke(dark, 0.07),
+  );
+
+  // 四條腿：奔跑時前腿與後腿反向擺動（大腿 + 小腿兩節）
+  void leg(double x, double ph, Color color) {
+    final a = running ? math.sin(ph) * 0.75 : 0.0;
+    final hip = Offset(x, 0.09);
+    final knee = hip + Offset(math.sin(a) * 0.15, math.cos(a) * 0.14);
+    final bend = running ? math.sin(ph - 0.9) * 0.55 : 0.0;
+    final foot = knee + Offset(math.sin(a - bend) * 0.15 - 0.03, math.cos(a - bend) * 0.15);
+    canvas.drawPath(
+      Path()
+        ..moveTo(hip.dx, hip.dy)
+        ..lineTo(knee.dx, knee.dy)
+        ..lineTo(foot.dx, foot.dy),
+      stroke(color, 0.065),
+    );
+  }
+
+  leg(-0.2, phase + math.pi, dark); // 遠側的後腿
+  leg(0.16, phase + 0.5, dark); // 遠側的前腿
+  leg(-0.14, phase + math.pi + 0.55, dark.withValues(alpha: 1.0));
+  leg(0.22, phase, dark.withValues(alpha: 1.0));
+
+  // 身體
+  canvas.drawOval(Rect.fromCenter(center: const Offset(0, 0), width: 0.68, height: 0.34), fill);
+  // 脖子 + 頭
+  canvas.drawPath(
+    Path()
+      ..moveTo(0.18, -0.12)
+      ..lineTo(0.33, -0.37)
+      ..lineTo(0.44, -0.31)
+      ..lineTo(0.32, 0.0)
+      ..close(),
+    fill,
+  );
+  canvas.save();
+  canvas.translate(0.49, -0.33);
+  canvas.rotate(0.55);
+  canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 0.27, height: 0.12), fill);
+  canvas.restore();
+  // 耳朵
+  canvas.drawPath(
+    Path()
+      ..moveTo(0.38, -0.40)
+      ..lineTo(0.40, -0.49)
+      ..lineTo(0.44, -0.39)
+      ..close(),
+    Paint()..color = dark,
+  );
+  // 鬃毛
+  canvas.drawPath(
+    Path()
+      ..moveTo(0.20, -0.14)
+      ..quadraticBezierTo(0.22, -0.30, 0.33, -0.40),
+    stroke(dark, 0.06),
+  );
+
+  // 騎師：賽衣顏色 = 這匹馬的代表色；馬背上有一塊同色馬衣
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(Rect.fromLTWH(-0.08, -0.17, 0.2, 0.15), const Radius.circular(0.03)),
+    Paint()..color = silk,
+  );
+  final lean = running ? 0.02 : 0.0; // 奔跑時身體前傾
+  canvas.drawPath(
+    Path()
+      ..moveTo(-0.01, -0.15)
+      ..lineTo(0.08 + lean, -0.30),
+    stroke(silk, 0.1),
+  );
+  canvas.drawCircle(Offset(0.11 + lean, -0.35), 0.055, Paint()..color = const Color(0xFFF2C9A0)); // 臉
+  canvas.drawArc(Rect.fromCircle(center: Offset(0.11 + lean, -0.35), radius: 0.06), math.pi, math.pi, true, Paint()..color = silk); // 帽子
+  // 韁繩
+  canvas.drawLine(Offset(0.13 + lean, -0.30), const Offset(0.44, -0.30), stroke(Colors.black54, 0.012));
+
+  canvas.restore();
+}
+
+
