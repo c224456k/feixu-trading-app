@@ -279,3 +279,131 @@ class BossAttackResult {
     );
   }
 }
+
+// ===== 網頁版骰寶 =====
+
+class SicBoBetType {
+  final String key;
+  final String label;
+  final String shortName;
+  final int payout; // 1 賠 N
+
+  SicBoBetType({required this.key, required this.label, required this.shortName, required this.payout});
+}
+
+class SicBoHistoryItem {
+  final int id;
+  final List<int> dice;
+  final int total;
+  final bool triple;
+
+  SicBoHistoryItem({required this.id, required this.dice, required this.total, required this.triple});
+
+  factory SicBoHistoryItem.fromJson(Map<String, dynamic> json) => SicBoHistoryItem(
+        id: json['id'] as int,
+        dice: (json['dice'] as List).map((e) => e as int).toList(),
+        total: json['total'] as int,
+        triple: json['triple'] as bool,
+      );
+}
+
+class SicBoState {
+  final int roundId;
+  final bool isOpen; // true = 下注中；false = 已開骰（演出/看結果中）
+  final double secondsLeft; // 下注中：距離截止還有幾秒
+  final List<int> dice; // 已開骰才有
+  final int total;
+  final bool triple;
+  final double secondsSinceSettled;
+  final double revealSecondsLeft;
+  final double cash;
+  final int betSeconds;
+  final int maxBetPerRound;
+  final List<SicBoBetType> betTypes; // 依後端順序：大、小、單、雙、豹子
+  final Map<String, double> myBets;
+  final Map<String, double> myPayouts;
+  final Map<String, double> poolAmount;
+  final Map<String, int> poolPlayers;
+  final List<SicBoHistoryItem> history;
+
+  SicBoState({
+    required this.roundId,
+    required this.isOpen,
+    required this.secondsLeft,
+    required this.dice,
+    required this.total,
+    required this.triple,
+    required this.secondsSinceSettled,
+    required this.revealSecondsLeft,
+    required this.cash,
+    required this.betSeconds,
+    required this.maxBetPerRound,
+    required this.betTypes,
+    required this.myBets,
+    required this.myPayouts,
+    required this.poolAmount,
+    required this.poolPlayers,
+    required this.history,
+  });
+
+  double get myTotalBet => myBets.values.fold(0.0, (a, b) => a + b);
+  double get myTotalPayout => myPayouts.values.fold(0.0, (a, b) => a + b);
+
+  factory SicBoState.fromJson(Map<String, dynamic> json) {
+    final round = json['round'] as Map<String, dynamic>;
+    final isOpen = round['status'] == 'open';
+    final betTypes = <SicBoBetType>[];
+    (json['bet_types'] as Map<String, dynamic>).forEach((k, v) {
+      final m = v as Map<String, dynamic>;
+      betTypes.add(SicBoBetType(
+        key: k,
+        label: m['label'] as String,
+        shortName: m['short'] as String,
+        payout: m['payout'] as int,
+      ));
+    });
+    final myBets = <String, double>{};
+    final myPayouts = <String, double>{};
+    for (final b in (json['my_bets'] as List)) {
+      final m = b as Map<String, dynamic>;
+      myBets[m['bet_type'] as String] = (m['amount'] as num).toDouble();
+      myPayouts[m['bet_type'] as String] = ((m['payout'] ?? 0) as num).toDouble();
+    }
+    final poolAmount = <String, double>{};
+    final poolPlayers = <String, int>{};
+    (json['pool'] as Map<String, dynamic>).forEach((k, v) {
+      final m = v as Map<String, dynamic>;
+      poolAmount[k] = (m['amount'] as num).toDouble();
+      poolPlayers[k] = m['players'] as int;
+    });
+    return SicBoState(
+      roundId: round['id'] as int,
+      isOpen: isOpen,
+      secondsLeft: isOpen ? (round['seconds_left'] as num).toDouble() : 0,
+      dice: isOpen ? const [] : (round['dice'] as List).map((e) => e as int).toList(),
+      total: isOpen ? 0 : round['total'] as int,
+      triple: isOpen ? false : round['triple'] as bool,
+      secondsSinceSettled: isOpen ? 0 : (round['seconds_since_settled'] as num).toDouble(),
+      revealSecondsLeft: isOpen ? 0 : (round['reveal_seconds_left'] as num).toDouble(),
+      cash: (json['cash'] as num).toDouble(),
+      betSeconds: json['bet_seconds'] as int,
+      maxBetPerRound: json['max_bet_per_round'] as int,
+      betTypes: betTypes,
+      myBets: myBets,
+      myPayouts: myPayouts,
+      poolAmount: poolAmount,
+      poolPlayers: poolPlayers,
+      history: (json['history'] as List).map((e) => SicBoHistoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+    );
+  }
+}
+
+class SicBoBetResult {
+  final bool ok;
+  final String message;
+
+  SicBoBetResult({required this.ok, required this.message});
+
+  factory SicBoBetResult.fromJson(Map<String, dynamic> json) =>
+      SicBoBetResult(ok: json['ok'] as bool, message: json['message'] as String);
+}

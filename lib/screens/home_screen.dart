@@ -10,6 +10,7 @@ import '../models.dart';
 import '../settings_store.dart';
 import '../update_checker.dart';
 import 'boss_screen.dart';
+import 'sicbo_screen.dart';
 import 'leaderboard_screen.dart';
 
 // 台股習慣：紅漲、綠跌（跟美股相反），這個 App 是給台灣玩家用的，顏色要照這個規則，
@@ -194,6 +195,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.local_fire_department),
             tooltip: '打 Boss',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SicBoScreen()),
+            ),
+            icon: const Icon(Icons.casino),
+            tooltip: '骰寶',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(

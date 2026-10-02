@@ -128,6 +128,19 @@ class ApiClient {
   Future<BossStatus> fetchBossStatus() =>
       _get('/api/boss/status', (j) => BossStatus.fromJson(j as Map<String, dynamic>));
 
+  Future<SicBoState> fetchSicBoState() => _get(
+        '/api/sicbo/state',
+        (j) => SicBoState.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> placeSicBoBet(String betType, int amount) => _post(
+        '/api/sicbo/bet',
+        {'bet_type': betType, 'amount': amount},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   Future<BossAttackResult> attackBoss() => _post(
         '/api/boss/attack',
         {},
