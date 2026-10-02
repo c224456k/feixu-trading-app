@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/dice3d.dart';
 
 final _money = NumberFormat('#,##0');
 
@@ -20,7 +21,7 @@ class SicBoScreen extends StatefulWidget {
   State<SicBoScreen> createState() => _SicBoScreenState();
 }
 
-class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStateMixin {
+class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin {
   static const _chips = [1000, 10000, 50000, 100000, 500000];
   static const _rollDuration = Duration(milliseconds: 2200);
 
@@ -33,6 +34,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
   int _chip = 10000;
 
   late final AnimationController _roll;
+  late final AnimationController _idle; // 骰子靜止時微微晃動，讓桌面有生氣
   int? _animatedRoundId; // 已經演過（或跳過）開骰動畫的那一局，避免同一局重複播
   double _displayCash = 0; // 開骰動畫還沒演完前先不更新現金，不然會提前劇透輸贏
 
@@ -48,6 +50,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
           setState(() => _displayCash = _state!.cash);
         }
       });
+    _idle = AnimationController(vsync: this, duration: const Duration(milliseconds: 3200))..repeat(reverse: true);
     _load();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _load());
     // 讓倒數數字平順地每 0.1 秒更新一次（資料每秒才抓一次，中間靠本機計時補）
@@ -61,6 +64,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     _roll.dispose();
+    _idle.dispose();
     super.dispose();
   }
 
@@ -214,7 +218,8 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
                       _cashRow(s),
                       const SizedBox(height: 12),
                       _table(s),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
+                      _seats(s),
                       _seatHint(s),
                       const SizedBox(height: 12),
                       _chipRow(),
@@ -251,26 +256,15 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     );
   }
 
-  // ===== 賭桌：六個座位圍著中間的骰子 =====
-
-  static const _seatAlignments = [
-    Alignment(-0.62, -1),
-    Alignment(0.62, -1),
-    Alignment(-1, 0),
-    Alignment(1, 0),
-    Alignment(-0.62, 1),
-    Alignment(0.62, 1),
-  ];
+  // ===== 賭桌：只放骰子與倒數/結果；座位在桌子下面一排 =====
 
   Widget _table(SicBoState s) {
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth;
-      final h = math.max(360.0, w * 0.95);
-      final centerW = w - 2 * 84;
-      final dieSize = math.min(64.0, (centerW - 24) / 3);
+      final dieSize = math.min(112.0, (w - 24 - 36 - 8) / 3); // 扣掉桌子內距、三顆骰子之間的間距
       return Container(
         width: w,
-        height: h,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           gradient: const RadialGradient(
@@ -279,15 +273,18 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
           ),
           border: Border.all(color: const Color(0xFF8B6B2E), width: 3),
         ),
-        child: Stack(
-          children: [
-            Align(alignment: Alignment.center, child: _tableCenter(s, dieSize)),
-            for (var i = 0; i < _seatAlignments.length && i < s.seats.length; i++)
-              Align(alignment: _seatAlignments[i], child: _seatWidget(s, s.seats[i])),
-          ],
-        ),
+        child: _tableCenter(s, dieSize),
       );
     });
+  }
+
+  Widget _seats(SicBoState s) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 4,
+      runSpacing: 4,
+      children: s.seats.map((seat) => _seatWidget(s, seat)).toList(),
+    );
   }
 
   Widget _tableCenter(SicBoState s, double dieSize) {
@@ -307,7 +304,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
         const SizedBox(height: 6),
         if (s.isOpen) _countdown(s, remaining),
         if (s.isOpen) const SizedBox(height: 6),
-        AnimatedBuilder(animation: _roll, builder: (context, _) => _diceRow(s, dieSize)),
+        AnimatedBuilder(animation: Listenable.merge([_roll, _idle]), builder: (context, _) => _diceRow(s, dieSize)),
         const SizedBox(height: 8),
         if (s.isIdle)
           const Text('入座後，第一筆下注\n就會開始 30 秒倒數', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12)),
@@ -451,31 +448,19 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     final t = _roll.value;
     final showFinal = s.isSettled && s.dice.length == 3;
     final rolling = showFinal && t < 1;
+    // 靜止時的晃動幅度：還沒開骰（等待/下注中）晃得明顯一點，開完骰就幾乎不動
+    final wobbleBase = math.sin(_idle.value * math.pi * 2 - math.pi) * (showFinal ? 0.03 : 0.1);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(3, (i) {
-        int value;
-        double angle = 0;
-        double dy = 0;
-        if (!showFinal) {
-          value = 0; // 還沒開骰：顯示「？」
-        } else if (rolling) {
-          final eased = Curves.easeOut.transform(t);
-          if (t < 0.8) {
-            value = 1 + (((t * 22).floor() * (i + 3)) + i * 2) % 6; // 翻滾期間快速閃爍的點數
-          } else {
-            value = s.dice[i];
-          }
-          angle = (1 - eased) * (i.isEven ? 1 : -1) * 4 * math.pi;
-          dy = -(math.sin(t * math.pi * 4)).abs() * 28 * (1 - t);
-        } else {
-          value = s.dice[i];
-        }
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Transform.translate(
-            offset: Offset(0, dy),
-            child: Transform.rotate(angle: angle, child: SicBoDie(value: value, size: size)),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Dice3D(
+            value: showFinal ? s.dice[i] : 0, // 還沒開骰：正面顯示「？」
+            size: size,
+            rollT: rolling ? t : 1,
+            seed: i + 1,
+            wobble: wobbleBase * (i.isEven ? 1 : -1),
           ),
         );
       }),
@@ -624,66 +609,4 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
       ],
     );
   }
-}
-
-// 一顆骰子：白色圓角方塊 + 黑色點數。value = 0 代表「還沒開」，畫一個「？」。
-class SicBoDie extends StatelessWidget {
-  final int value;
-  final double size;
-
-  const SicBoDie({super.key, required this.value, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F8F8),
-        borderRadius: BorderRadius.circular(size * 0.18),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 8, offset: Offset(0, 4))],
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white, Color(0xFFDADADA)],
-        ),
-      ),
-      child: value == 0
-          ? Center(
-              child: Text('?', style: TextStyle(fontSize: size * 0.6, fontWeight: FontWeight.bold, color: Colors.black38)),
-            )
-          : CustomPaint(painter: _PipPainter(value)),
-    );
-  }
-}
-
-class _PipPainter extends CustomPainter {
-  final int value;
-
-  _PipPainter(this.value);
-
-  // 點數在 3x3 格子上的位置（0~2, 0~2）
-  static const _layout = {
-    1: [(1, 1)],
-    2: [(0, 0), (2, 2)],
-    3: [(0, 0), (1, 1), (2, 2)],
-    4: [(0, 0), (2, 0), (0, 2), (2, 2)],
-    5: [(0, 0), (2, 0), (1, 1), (0, 2), (2, 2)],
-    6: [(0, 0), (2, 0), (0, 1), (2, 1), (0, 2), (2, 2)],
-  };
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final pad = size.width * 0.22;
-    final step = (size.width - pad * 2) / 2;
-    final r = size.width * 0.085 + (value == 1 ? size.width * 0.04 : 0);
-    // 一點是紅色，其他是黑色（跟實體骰子一樣）
-    final paint = Paint()..color = value == 1 ? const Color(0xFFD62828) : const Color(0xFF1B1B1B);
-    for (final (cx, cy) in _layout[value] ?? const <(int, int)>[]) {
-      canvas.drawCircle(Offset(pad + cx * step, pad + cy * step), r, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _PipPainter old) => old.value != value;
 }
