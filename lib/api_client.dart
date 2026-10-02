@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
@@ -17,6 +17,12 @@ class ApiException implements Exception {
 class ApiClient {
   final SettingsStore _settings = SettingsStore();
 
+  // 不能用 dart:io 的 Platform（網頁版不支援它，會直接編譯失敗），改用 kIsWeb / defaultTargetPlatform。
+  String _clientPlatform() {
+    if (kIsWeb) return 'web';
+    return defaultTargetPlatform == TargetPlatform.windows ? 'windows' : 'app';
+  }
+
   Future<Map<String, String>> _headers({bool withAuth = false}) async {
     final apiKey = await _settings.getApiKey();
     final headers = {
@@ -24,7 +30,7 @@ class ApiClient {
       'X-API-Key': apiKey ?? '',
       // 讓後端知道這次是 App（手機）還是 Windows 軟體打的，Boss 攻擊會拿這個去 Discord 公告，
       // 讓 Discord 那邊也看得到「誰在哪個平台丟了炸彈」。
-      'X-Client-Platform': Platform.isWindows ? 'windows' : 'app',
+      'X-Client-Platform': _clientPlatform(),
     };
     if (withAuth) {
       final token = await _settings.getToken();

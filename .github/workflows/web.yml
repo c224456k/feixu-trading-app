@@ -1,0 +1,53 @@
+name: Deploy Web (GitHub Pages)
+
+# 網頁版（PWA）：玩家用 Safari / Chrome 開網址，iPhone 可以「加入主畫面」當 App 用。
+# 編譯一律交給 GitHub 雲端做（本機記憶體不夠），結果發佈到 GitHub Pages：
+#   https://c224456k.github.io/feixu-trading-app/
+#
+# - 任何分支 push 都會編譯一次（確認編得過），但只有 main 才會真的部署
+# - 跟 build.yml（Android / Windows）完全獨立，互不影響
+
+on:
+  push:
+    branches: [main, web-pwa]
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/web.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - run: flutter pub get
+      # --base-href 要跟 Pages 網址的路徑（/repo 名稱/）一致，不然會找不到 js / 資源檔
+      - run: flutter build web --release --base-href /feixu-trading-app/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -18,6 +19,8 @@ class UpdateChecker {
 
   /// 查不到、逾時、解析失敗都直接回傳 null，不要因為這個擋住正常使用 App。
   Future<UpdateInfo?> checkForUpdate() async {
+    // 網頁版每次開啟本來就是最新版，不需要（也不該）提示去下載安裝檔。
+    if (kIsWeb) return null;
     try {
       final current = await PackageInfo.fromPlatform();
       final resp = await http.get(Uri.parse(_latestReleaseApi)).timeout(const Duration(seconds: 8));
