@@ -134,6 +134,20 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<SicBoBetResult> sitSicBo(int seat) => _post(
+        '/api/sicbo/sit',
+        {'seat': seat},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> leaveSicBo() => _post(
+        '/api/sicbo/leave',
+        {},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   Future<SicBoBetResult> placeSicBoBet(String betType, int amount) => _post(
         '/api/sicbo/bet',
         {'bet_type': betType, 'amount': amount},

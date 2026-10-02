@@ -307,11 +307,43 @@ class SicBoHistoryItem {
       );
 }
 
+class SicBoSeat {
+  final int seat;
+  final String? userId; // null = 空位
+  final String? name;
+  final double bet; // 這局這個人押的總額
+  final double? payout; // 開骰後才有：這個人這局拿回多少
+  final bool isMe;
+
+  SicBoSeat({
+    required this.seat,
+    required this.userId,
+    required this.name,
+    required this.bet,
+    required this.payout,
+    required this.isMe,
+  });
+
+  bool get isEmpty => userId == null;
+
+  factory SicBoSeat.fromJson(Map<String, dynamic> json) => SicBoSeat(
+        seat: json['seat'] as int,
+        userId: json['user_id'] as String?,
+        name: json['name'] as String?,
+        bet: (json['bet'] as num).toDouble(),
+        payout: (json['payout'] as num?)?.toDouble(),
+        isMe: json['is_me'] as bool,
+      );
+}
+
+// 桌子狀態：idle = 閒置（沒人下注，還沒開局）；open = 下注倒數中；settled = 已開骰（演出/看結果中）
+enum SicBoPhase { idle, open, settled }
+
 class SicBoState {
-  final int roundId;
-  final bool isOpen; // true = 下注中；false = 已開骰（演出/看結果中）
-  final double secondsLeft; // 下注中：距離截止還有幾秒
-  final List<int> dice; // 已開骰才有
+  final SicBoPhase phase;
+  final int? roundId;
+  final double secondsLeft; // open：距離截止還有幾秒
+  final List<int> dice; // settled 才有
   final int total;
   final bool triple;
   final double secondsSinceSettled;
@@ -319,6 +351,9 @@ class SicBoState {
   final double cash;
   final int betSeconds;
   final int maxBetPerRound;
+  final int idleTimeoutSeconds;
+  final int? mySeat;
+  final List<SicBoSeat> seats;
   final List<SicBoBetType> betTypes; // 依後端順序：大、小、單、雙、豹子
   final Map<String, double> myBets;
   final Map<String, double> myPayouts;
@@ -327,8 +362,8 @@ class SicBoState {
   final List<SicBoHistoryItem> history;
 
   SicBoState({
+    required this.phase,
     required this.roundId,
-    required this.isOpen,
     required this.secondsLeft,
     required this.dice,
     required this.total,
@@ -338,6 +373,9 @@ class SicBoState {
     required this.cash,
     required this.betSeconds,
     required this.maxBetPerRound,
+    required this.idleTimeoutSeconds,
+    required this.mySeat,
+    required this.seats,
     required this.betTypes,
     required this.myBets,
     required this.myPayouts,
@@ -346,12 +384,19 @@ class SicBoState {
     required this.history,
   });
 
+  bool get isIdle => phase == SicBoPhase.idle;
+  bool get isOpen => phase == SicBoPhase.open;
+  bool get isSettled => phase == SicBoPhase.settled;
   double get myTotalBet => myBets.values.fold(0.0, (a, b) => a + b);
   double get myTotalPayout => myPayouts.values.fold(0.0, (a, b) => a + b);
 
   factory SicBoState.fromJson(Map<String, dynamic> json) {
     final round = json['round'] as Map<String, dynamic>;
-    final isOpen = round['status'] == 'open';
+    final phase = switch (round['status']) {
+      'open' => SicBoPhase.open,
+      'settled' => SicBoPhase.settled,
+      _ => SicBoPhase.idle,
+    };
     final betTypes = <SicBoBetType>[];
     (json['bet_types'] as Map<String, dynamic>).forEach((k, v) {
       final m = v as Map<String, dynamic>;
@@ -376,18 +421,22 @@ class SicBoState {
       poolAmount[k] = (m['amount'] as num).toDouble();
       poolPlayers[k] = m['players'] as int;
     });
+    final settled = phase == SicBoPhase.settled;
     return SicBoState(
-      roundId: round['id'] as int,
-      isOpen: isOpen,
-      secondsLeft: isOpen ? (round['seconds_left'] as num).toDouble() : 0,
-      dice: isOpen ? const [] : (round['dice'] as List).map((e) => e as int).toList(),
-      total: isOpen ? 0 : round['total'] as int,
-      triple: isOpen ? false : round['triple'] as bool,
-      secondsSinceSettled: isOpen ? 0 : (round['seconds_since_settled'] as num).toDouble(),
-      revealSecondsLeft: isOpen ? 0 : (round['reveal_seconds_left'] as num).toDouble(),
+      phase: phase,
+      roundId: round['id'] as int?,
+      secondsLeft: phase == SicBoPhase.open ? (round['seconds_left'] as num).toDouble() : 0,
+      dice: settled ? (round['dice'] as List).map((e) => e as int).toList() : const [],
+      total: settled ? round['total'] as int : 0,
+      triple: settled ? round['triple'] as bool : false,
+      secondsSinceSettled: settled ? (round['seconds_since_settled'] as num).toDouble() : 0,
+      revealSecondsLeft: settled ? (round['reveal_seconds_left'] as num).toDouble() : 0,
       cash: (json['cash'] as num).toDouble(),
       betSeconds: json['bet_seconds'] as int,
       maxBetPerRound: json['max_bet_per_round'] as int,
+      idleTimeoutSeconds: json['idle_timeout_seconds'] as int,
+      mySeat: json['my_seat'] as int?,
+      seats: (json['seats'] as List).map((e) => SicBoSeat.fromJson(e as Map<String, dynamic>)).toList(),
       betTypes: betTypes,
       myBets: myBets,
       myPayouts: myPayouts,

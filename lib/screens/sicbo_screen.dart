@@ -9,8 +9,10 @@ import '../models.dart';
 
 final _money = NumberFormat('#,##0');
 
-// 網頁版骰寶：伺服器一局接一局自動開，這個畫面只負責「顯示」跟「送出下注」。
-// 骰子點數、輸贏、派彩全部由伺服器決定，前端的骰子翻滾只是演出動畫，沒辦法影響結果。
+// 網頁版骰寶（六人座位制）：桌上 6 個位置，先入座才能下注；桌子平時閒置，
+// 有人下注才開始 30 秒倒數、開骰、結算。每局有下注的人，輸贏會公告到 Discord。
+// 骰子點數、輸贏、派彩、座位歸屬全部由伺服器決定，這個畫面只負責「顯示」跟「送出動作」，
+// 骰子翻滾只是演出動畫，沒辦法影響結果。
 class SicBoScreen extends StatefulWidget {
   const SicBoScreen({super.key});
 
@@ -27,7 +29,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
   SicBoState? _state;
   DateTime _fetchedAt = DateTime.now();
   String? _error;
-  bool _betting = false;
+  bool _busy = false;
   int _chip = 10000;
 
   late final AnimationController _roll;
@@ -67,22 +69,26 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
       final s = await _api.fetchSicBoState();
       if (!mounted) return;
       _fetchedAt = DateTime.now();
-      if (s.isOpen) {
-        _roll.value = 0;
-        _displayCash = s.cash;
-        _animatedRoundId = null;
-      } else if (_animatedRoundId != s.roundId) {
-        _animatedRoundId = s.roundId;
-        if (s.secondsSinceSettled < 3) {
-          // 剛開骰：播翻滾動畫（期間現金維持舊值，演完才更新）
-          _roll.forward(from: 0);
-        } else {
-          // 玩家是在開骰很久之後才打開畫面，直接顯示結果，不演動畫
-          _roll.value = 1;
+      switch (s.phase) {
+        case SicBoPhase.idle:
+        case SicBoPhase.open:
+          _roll.value = 0;
           _displayCash = s.cash;
-        }
-      } else if (_roll.isCompleted) {
-        _displayCash = s.cash;
+          _animatedRoundId = null;
+        case SicBoPhase.settled:
+          if (_animatedRoundId != s.roundId) {
+            _animatedRoundId = s.roundId;
+            if (s.secondsSinceSettled < 3) {
+              // 剛開骰：播翻滾動畫（期間現金維持舊值，演完才更新）
+              _roll.forward(from: 0);
+            } else {
+              // 玩家是在開骰很久之後才進來，直接顯示結果，不演動畫
+              _roll.value = 1;
+              _displayCash = s.cash;
+            }
+          } else if (_roll.isCompleted) {
+            _displayCash = s.cash;
+          }
       }
       setState(() {
         _state = s;
@@ -101,14 +107,39 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     return math.max(0, s.secondsLeft - elapsed);
   }
 
+  bool get _animDone => _state != null && _state!.isSettled && _roll.isCompleted;
+
+  Future<void> _sit(int seat) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final r = await _api.sitSicBo(seat);
+      if (!r.ok) _snack(r.message);
+      await _load();
+    } catch (e) {
+      _snack(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _leave() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _api.leaveSicBo();
+      await _load();
+    } catch (e) {
+      _snack(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _bet(SicBoBetType type) async {
     final s = _state;
-    if (s == null || _betting) return;
-    if (!s.isOpen || _remaining <= 0) {
-      _snack('這局已經截止下注了，等下一局');
-      return;
-    }
-    setState(() => _betting = true);
+    if (s == null || _busy) return;
+    setState(() => _busy = true);
     try {
       final r = await _api.placeSicBoBet(type.key, _chip);
       _snack(r.message);
@@ -116,7 +147,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     } catch (e) {
       _snack(e.toString());
     } finally {
-      if (mounted) setState(() => _betting = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -183,7 +214,9 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
                       _cashRow(s),
                       const SizedBox(height: 12),
                       _table(s),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
+                      _seatHint(s),
+                      const SizedBox(height: 12),
                       _chipRow(),
                       const SizedBox(height: 12),
                       _betGrid(s),
@@ -196,7 +229,8 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
                       const SizedBox(height: 8),
                       Text(
                         '規則跟 Discord 版骰寶一樣：大（11~17）/ 小（4~10）/ 單 / 雙 1 賠 1，豹子 1 賠 30；'
-                        '開出豹子時大小單雙全部通殺。每局最多下注 ${_money.format(s.maxBetPerRound)} 元。',
+                        '開出豹子時大小單雙全部通殺。每局最多下注 ${_money.format(s.maxBetPerRound)} 元。'
+                        '有人下注才會開局，結果會公告到 Discord。',
                         style: const TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                     ],
@@ -212,55 +246,176 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text('現金 ${_money.format(_displayCash)} 元', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        Text('第 ${s.roundId} 局', style: const TextStyle(color: Colors.white54)),
+        if (s.roundId != null) Text('第 ${s.roundId} 局', style: const TextStyle(color: Colors.white54)),
       ],
     );
   }
 
+  // ===== 賭桌：六個座位圍著中間的骰子 =====
+
+  static const _seatAlignments = [
+    Alignment(-0.62, -1),
+    Alignment(0.62, -1),
+    Alignment(-1, 0),
+    Alignment(1, 0),
+    Alignment(-0.62, 1),
+    Alignment(0.62, 1),
+  ];
+
   Widget _table(SicBoState s) {
+    return LayoutBuilder(builder: (context, c) {
+      final w = c.maxWidth;
+      final h = math.max(360.0, w * 0.95);
+      final centerW = w - 2 * 84;
+      final dieSize = math.min(64.0, (centerW - 24) / 3);
+      return Container(
+        width: w,
+        height: h,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          gradient: const RadialGradient(
+            radius: 0.95,
+            colors: [Color(0xFF0E7A4B), Color(0xFF07402A)],
+          ),
+          border: Border.all(color: const Color(0xFF8B6B2E), width: 3),
+        ),
+        child: Stack(
+          children: [
+            Align(alignment: Alignment.center, child: _tableCenter(s, dieSize)),
+            for (var i = 0; i < _seatAlignments.length && i < s.seats.length; i++)
+              Align(alignment: _seatAlignments[i], child: _seatWidget(s, s.seats[i])),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _tableCenter(SicBoState s, double dieSize) {
     final remaining = _remaining;
-    final animDone = !s.isOpen && _roll.isCompleted;
     String status;
-    if (s.isOpen) {
+    if (s.isIdle) {
+      status = '等待下注';
+    } else if (s.isOpen) {
       status = remaining > 0 ? '下注中' : '開骰中…';
     } else {
-      status = animDone ? '本局結果' : '開骰！';
+      status = _animDone ? '本局結果' : '開骰！';
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(status, style: const TextStyle(color: Colors.white70, fontSize: 13, letterSpacing: 2)),
+        const SizedBox(height: 6),
+        if (s.isOpen) _countdown(s, remaining),
+        if (s.isOpen) const SizedBox(height: 6),
+        AnimatedBuilder(animation: _roll, builder: (context, _) => _diceRow(s, dieSize)),
+        const SizedBox(height: 8),
+        if (s.isIdle)
+          const Text('入座後，第一筆下注\n就會開始 30 秒倒數', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12)),
+        if (s.isSettled && _animDone) _resultBanner(s),
+        if (s.isSettled && _animDone)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              '${s.revealSecondsLeft.ceil().clamp(0, 99)} 秒後可開下一局',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _seatWidget(SicBoState s, SicBoSeat seat) {
+    const avatar = 48.0;
+    final mine = seat.isMe;
+    final border = mine ? const Color(0xFFF1C40F) : Colors.white30;
+
+    Widget circle;
+    String label;
+    if (seat.isEmpty) {
+      circle = Container(
+        width: avatar,
+        height: avatar,
+        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white38, width: 1.5)),
+        child: const Icon(Icons.add, color: Colors.white54),
+      );
+      label = '${seat.seat + 1} 號位';
+    } else {
+      final name = seat.name ?? '玩家';
+      circle = Container(
+        width: avatar,
+        height: avatar,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: mine ? const Color(0xFF8B6B2E) : const Color(0xFF2C3E50),
+          border: Border.all(color: border, width: mine ? 3 : 1.5),
+        ),
+        child: Text(
+          name.characters.first,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+        ),
+      );
+      label = mine ? '$name（我）' : name;
     }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0B5D3B), Color(0xFF07402A)],
-        ),
-        border: Border.all(color: const Color(0xFF8B6B2E), width: 3),
-      ),
-      child: Column(
-        children: [
-          Text(status, style: const TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 2)),
-          const SizedBox(height: 8),
-          if (s.isOpen) _countdown(s, remaining) else const SizedBox.shrink(),
-          const SizedBox(height: 8),
-          AnimatedBuilder(
-            animation: _roll,
-            builder: (context, _) => _diceRow(s),
-          ),
-          const SizedBox(height: 12),
-          if (!s.isOpen && animDone) _resultBanner(s),
-          if (!s.isOpen && !animDone) const SizedBox(height: 48),
-          if (!s.isOpen && animDone)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '下一局 ${s.revealSecondsLeft.ceil().clamp(0, 99)} 秒後開始',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+    // 座位下方的小標籤：下注中顯示押了多少；開骰演完後顯示這局輸贏
+    Widget? badge;
+    if (!seat.isEmpty && seat.bet > 0) {
+      if (s.isSettled && _animDone && seat.payout != null) {
+        final net = seat.payout! - seat.bet;
+        final color = net > 0 ? const Color(0xFF2ECC71) : (net == 0 ? Colors.white70 : Colors.redAccent);
+        badge = Text(
+          net > 0 ? '+${_money.format(net)}' : (net == 0 ? '平手' : '-${_money.format(-net)}'),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
+        );
+      } else {
+        badge = Text('押 ${_money.format(seat.bet)}', style: const TextStyle(fontSize: 11, color: Color(0xFFF1C40F)));
+      }
+    }
+
+    return SizedBox(
+      width: 84,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: seat.isEmpty && !_busy ? () => _sit(seat.seat) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              circle,
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: seat.isEmpty ? Colors.white38 : Colors.white),
               ),
-            ),
-        ],
+              SizedBox(height: 16, child: badge),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+
+  Widget _seatHint(SicBoState s) {
+    if (s.mySeat == null) {
+      return const Text('👆 點一個空位入座，才能下注', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFF1C40F)));
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          '你坐在 ${s.mySeat! + 1} 號位　',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        TextButton(onPressed: _busy ? null : _leave, child: const Text('離座')),
+        Text(
+          '（${s.idleTimeoutSeconds ~/ 60} 分鐘沒下注會自動離座）',
+          style: const TextStyle(color: Colors.white38, fontSize: 11),
+        ),
+      ],
     );
   }
 
@@ -268,43 +423,42 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     final ratio = (remaining / s.betSeconds).clamp(0.0, 1.0);
     final urgent = remaining <= 5;
     return SizedBox(
-      width: 72,
-      height: 72,
+      width: 52,
+      height: 52,
       child: Stack(
         alignment: Alignment.center,
         children: [
           SizedBox(
-            width: 72,
-            height: 72,
+            width: 52,
+            height: 52,
             child: CircularProgressIndicator(
               value: ratio,
-              strokeWidth: 6,
+              strokeWidth: 5,
               backgroundColor: Colors.white12,
               color: urgent ? Colors.redAccent : const Color(0xFFF1C40F),
             ),
           ),
           Text(
             remaining.ceil().toString(),
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: urgent ? Colors.redAccent : Colors.white),
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: urgent ? Colors.redAccent : Colors.white),
           ),
         ],
       ),
     );
   }
 
-  Widget _diceRow(SicBoState s) {
-    const size = 76.0;
+  Widget _diceRow(SicBoState s, double size) {
     final t = _roll.value;
-    final showFinal = !s.isOpen && s.dice.length == 3;
+    final showFinal = s.isSettled && s.dice.length == 3;
     final rolling = showFinal && t < 1;
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
       children: List.generate(3, (i) {
         int value;
         double angle = 0;
         double dy = 0;
         if (!showFinal) {
-          value = 0; // 下注中：還沒開骰，顯示「？」
+          value = 0; // 還沒開骰：顯示「？」
         } else if (rolling) {
           final eased = Curves.easeOut.transform(t);
           if (t < 0.8) {
@@ -313,18 +467,15 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
             value = s.dice[i];
           }
           angle = (1 - eased) * (i.isEven ? 1 : -1) * 4 * math.pi;
-          dy = -(math.sin(t * math.pi * 4)).abs() * 36 * (1 - t);
+          dy = -(math.sin(t * math.pi * 4)).abs() * 28 * (1 - t);
         } else {
           value = s.dice[i];
         }
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Transform.translate(
             offset: Offset(0, dy),
-            child: Transform.rotate(
-              angle: angle,
-              child: SicBoDie(value: value, size: size),
-            ),
+            child: Transform.rotate(angle: angle, child: SicBoDie(value: value, size: size)),
           ),
         );
       }),
@@ -344,25 +495,17 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
     return Column(
       children: [
         Text(
-          '總點數 ${s.total}　${tags.join(' · ')}',
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+          '${s.total}　${tags.join(' · ')}',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
         ),
-        if (bet > 0) ...[
-          const SizedBox(height: 6),
+        if (bet > 0)
           Text(
-            net > 0
-                ? '🎉 你贏了 +${_money.format(net)} 元'
-                : (net == 0 ? '平手，沒輸沒贏' : '你輸了 ${_money.format(net)} 元'),
+            net > 0 ? '🎉 你贏了 +${_money.format(net)}' : (net == 0 ? '平手' : '你輸了 ${_money.format(-net)}'),
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 13,
               fontWeight: FontWeight.bold,
               color: net > 0 ? const Color(0xFF2ECC71) : (net == 0 ? Colors.white70 : Colors.redAccent),
             ),
-          ),
-        ] else
-          const Padding(
-            padding: EdgeInsets.only(top: 6),
-            child: Text('這局你沒有下注', style: TextStyle(color: Colors.white54)),
           ),
       ],
     );
@@ -374,10 +517,9 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
       spacing: 8,
       runSpacing: 8,
       children: _chips.map((c) {
-        final selected = c == _chip;
         return ChoiceChip(
           label: Text(_money.format(c)),
-          selected: selected,
+          selected: c == _chip,
           onSelected: (_) => setState(() => _chip = c),
         );
       }).toList(),
@@ -385,8 +527,9 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
   }
 
   Widget _betGrid(SicBoState s) {
-    final canBet = s.isOpen && _remaining > 0 && !_betting;
-    final animDone = !s.isOpen && _roll.isCompleted;
+    final seated = s.mySeat != null;
+    // 閒置時下注 = 開新局；倒數中下注 = 加注；開骰演出中不能下
+    final canBet = seated && !_busy && (s.isIdle || (s.isOpen && _remaining > 0));
     return LayoutBuilder(builder: (context, c) {
       final cols = c.maxWidth >= 480 ? 3 : 2;
       final w = (c.maxWidth - 10 * (cols - 1)) / cols;
@@ -395,12 +538,12 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
         runSpacing: 10,
         children: s.betTypes.map((t) {
           final mine = s.myBets[t.key] ?? 0;
-          final win = animDone && _wins(t.key, s);
+          final win = _animDone && _wins(t.key, s);
           final color = _typeColor(t.key);
           return SizedBox(
             width: w,
             child: Material(
-              color: color.withValues(alpha: canBet || win ? 0.22 : 0.10),
+              color: color.withValues(alpha: canBet || win ? 0.22 : 0.08),
               borderRadius: BorderRadius.circular(14),
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
@@ -410,7 +553,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: win ? const Color(0xFFF1C40F) : color.withValues(alpha: 0.6),
+                      color: win ? const Color(0xFFF1C40F) : color.withValues(alpha: canBet ? 0.6 : 0.3),
                       width: win ? 3 : 1.5,
                     ),
                   ),
@@ -425,7 +568,9 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        mine > 0 ? '我押 ${_money.format(mine)}' : '點一下押 ${_money.format(_chip)}',
+                        mine > 0
+                            ? '我押 ${_money.format(mine)}'
+                            : (canBet ? '點一下押 ${_money.format(_chip)}' : (seated ? '—' : '請先入座')),
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: mine > 0 ? FontWeight.bold : FontWeight.normal,
@@ -446,7 +591,7 @@ class _SicBoScreenState extends State<SicBoScreen> with SingleTickerProviderStat
   Widget _history(SicBoState s) {
     if (s.history.isEmpty) return const SizedBox.shrink();
     // 還在演開骰動畫時，最新那局先藏起來，不要提早劇透
-    final hideLatest = !s.isOpen && !_roll.isCompleted;
+    final hideLatest = s.isSettled && !_roll.isCompleted;
     final items = hideLatest ? s.history.skip(1).toList() : s.history;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
