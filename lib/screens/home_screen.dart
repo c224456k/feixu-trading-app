@@ -11,6 +11,7 @@ import '../settings_store.dart';
 import '../update_checker.dart';
 import 'boss_screen.dart';
 import 'baccarat_screen.dart';
+import 'poker_screen.dart';
 import 'horse_screen.dart';
 import 'sicbo_screen.dart';
 import 'leaderboard_screen.dart';
@@ -197,6 +198,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.local_fire_department),
             tooltip: '打 Boss',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PokerScreen()),
+            ),
+            icon: const Icon(Icons.filter_vintage),
+            tooltip: '德州撲克',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(

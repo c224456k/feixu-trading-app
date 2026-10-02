@@ -175,6 +175,33 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<PokerState> fetchPokerState() => _get(
+        '/api/poker/state',
+        (j) => PokerState.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> sitPoker(int seat, int buyin) => _post(
+        '/api/poker/sit',
+        {'seat': seat, 'buyin': buyin},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> leavePoker() => _post(
+        '/api/poker/leave',
+        {},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<SicBoBetResult> pokerAction(String action, {int? amount}) => _post(
+        '/api/poker/action',
+        {'action': action, if (amount != null) 'amount': amount},
+        (j) => SicBoBetResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
   Future<HorseState> fetchHorseState() => _get(
         '/api/horse/state',
         (j) => HorseState.fromJson(j as Map<String, dynamic>),

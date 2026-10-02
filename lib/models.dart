@@ -801,3 +801,210 @@ class HorseState {
     );
   }
 }
+
+// ===== 網頁版德州撲克 =====
+
+// 後端的點數 A=14，這裡轉成跟百家樂共用的 PlayingCardFace 一樣的 A=1。
+PlayingCard _pokerCard(dynamic json) {
+  final l = json as List;
+  final rank = l[0] as int;
+  return PlayingCard(rank == 14 ? 1 : rank, l[1] as int);
+}
+
+class PokerSeat {
+  final int seat;
+  final String? userId;
+  final String? name;
+  final int stack;
+  final bool isMe;
+  final bool inHand;
+  final String? status; // active / folded / allin
+  final int betStreet;
+  final List<PlayingCard>? cards; // 只有自己、或攤牌時還沒棄牌的人看得到
+  final bool hasCards;
+  final bool isDealer;
+  final bool isToAct;
+  final int? net;
+  final String? handName;
+
+  PokerSeat({
+    required this.seat,
+    required this.userId,
+    required this.name,
+    required this.stack,
+    required this.isMe,
+    required this.inHand,
+    required this.status,
+    required this.betStreet,
+    required this.cards,
+    required this.hasCards,
+    required this.isDealer,
+    required this.isToAct,
+    required this.net,
+    required this.handName,
+  });
+
+  bool get occupied => userId != null;
+
+  factory PokerSeat.fromJson(Map<String, dynamic> j) => PokerSeat(
+        seat: j['seat'] as int,
+        userId: j['user_id'] as String?,
+        name: j['name'] as String?,
+        stack: (j['stack'] as num).toInt(),
+        isMe: j['is_me'] as bool,
+        inHand: j['in_hand'] as bool,
+        status: j['status'] as String?,
+        betStreet: (j['bet_street'] as num).toInt(),
+        cards: j['cards'] == null ? null : (j['cards'] as List).map(_pokerCard).toList(),
+        hasCards: j['has_cards'] as bool,
+        isDealer: j['is_dealer'] as bool,
+        isToAct: j['is_to_act'] as bool,
+        net: (j['net'] as num?)?.toInt(),
+        handName: j['hand_name'] as String?,
+      );
+}
+
+class PokerPotResult {
+  final int amount;
+  final List<String> winners;
+  PokerPotResult({required this.amount, required this.winners});
+}
+
+class PokerHand {
+  final int id;
+  final bool finished;
+  final int street; // 0 翻牌前 1 翻牌 2 轉牌 3 河牌
+  final List<PlayingCard> board;
+  final int pot;
+  final int currentBet;
+  final int? toActSeat;
+  final double? secondsLeft;
+  final bool showdown;
+  final List<PokerPotResult> pots;
+
+  PokerHand({
+    required this.id,
+    required this.finished,
+    required this.street,
+    required this.board,
+    required this.pot,
+    required this.currentBet,
+    required this.toActSeat,
+    required this.secondsLeft,
+    required this.showdown,
+    required this.pots,
+  });
+
+  factory PokerHand.fromJson(Map<String, dynamic> j) {
+    final result = j['result'] as Map<String, dynamic>?;
+    return PokerHand(
+      id: j['id'] as int,
+      finished: j['status'] == 'finished',
+      street: j['street'] as int,
+      board: (j['board'] as List).map(_pokerCard).toList(),
+      pot: (j['pot'] as num).toInt(),
+      currentBet: (j['current_bet'] as num).toInt(),
+      toActSeat: j['to_act_seat'] as int?,
+      secondsLeft: (j['seconds_left'] as num?)?.toDouble(),
+      showdown: result?['showdown'] == true,
+      pots: result == null
+          ? const []
+          : (result['pots'] as List)
+              .map((p) => PokerPotResult(
+                    amount: (p['amount'] as num).toInt(),
+                    winners: (p['winners'] as List).map((w) => (w as Map<String, dynamic>)['name'] as String).toList(),
+                  ))
+              .toList(),
+    );
+  }
+}
+
+class PokerActions {
+  final bool canAct;
+  final bool canCheck;
+  final int callAmount;
+  final bool canRaise;
+  final int minRaiseTo;
+  final int maxRaiseTo;
+
+  PokerActions({
+    required this.canAct,
+    required this.canCheck,
+    required this.callAmount,
+    required this.canRaise,
+    required this.minRaiseTo,
+    required this.maxRaiseTo,
+  });
+
+  factory PokerActions.fromJson(Map<String, dynamic> j) => PokerActions(
+        canAct: j['can_act'] as bool,
+        canCheck: (j['can_check'] as bool?) ?? false,
+        callAmount: ((j['call_amount'] as num?) ?? 0).toInt(),
+        canRaise: (j['can_raise'] as bool?) ?? false,
+        minRaiseTo: ((j['min_raise_to'] as num?) ?? 0).toInt(),
+        maxRaiseTo: ((j['max_raise_to'] as num?) ?? 0).toInt(),
+      );
+}
+
+class PokerHistoryItem {
+  final int id;
+  final int pot;
+  final String winner;
+  final int winnerNet;
+  final String? hand;
+
+  PokerHistoryItem({required this.id, required this.pot, required this.winner, required this.winnerNet, required this.hand});
+
+  factory PokerHistoryItem.fromJson(Map<String, dynamic> j) => PokerHistoryItem(
+        id: j['id'] as int,
+        pot: (j['pot'] as num).toInt(),
+        winner: j['winner'] as String,
+        winnerNet: (j['winner_net'] as num).toInt(),
+        hand: j['hand'] as String?,
+      );
+}
+
+class PokerState {
+  final double cash;
+  final int? mySeat;
+  final List<PokerSeat> seats;
+  final PokerHand? hand;
+  final PokerActions actions;
+  final List<PokerHistoryItem> history;
+  final int smallBlind;
+  final int bigBlind;
+  final int minBuyin;
+  final int maxBuyin;
+  final int actionSeconds;
+
+  PokerState({
+    required this.cash,
+    required this.mySeat,
+    required this.seats,
+    required this.hand,
+    required this.actions,
+    required this.history,
+    required this.smallBlind,
+    required this.bigBlind,
+    required this.minBuyin,
+    required this.maxBuyin,
+    required this.actionSeconds,
+  });
+
+  factory PokerState.fromJson(Map<String, dynamic> j) {
+    final t = j['table'] as Map<String, dynamic>;
+    return PokerState(
+      cash: (j['cash'] as num).toDouble(),
+      mySeat: j['my_seat'] as int?,
+      seats: (j['seats'] as List).map((e) => PokerSeat.fromJson(e as Map<String, dynamic>)).toList(),
+      hand: j['hand'] == null ? null : PokerHand.fromJson(j['hand'] as Map<String, dynamic>),
+      actions: PokerActions.fromJson(j['my_actions'] as Map<String, dynamic>),
+      history: (j['history'] as List).map((e) => PokerHistoryItem.fromJson(e as Map<String, dynamic>)).toList(),
+      smallBlind: (t['small_blind'] as num).toInt(),
+      bigBlind: (t['big_blind'] as num).toInt(),
+      minBuyin: (t['min_buyin'] as num).toInt(),
+      maxBuyin: (t['max_buyin'] as num).toInt(),
+      actionSeconds: (t['action_seconds'] as num).toInt(),
+    );
+  }
+}
