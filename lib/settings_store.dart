@@ -7,6 +7,8 @@ class SettingsStore {
   static const _keyApiKey = 'api_key';
   static const _keyToken = 'auth_token';
   static const _keyDisplayUserId = 'display_user_id';
+  // 上次登入用的帳號：登出也不清掉，登入畫面用它自動帶入（帳號不是機密）。密碼我們不存，交給瀏覽器/手機的密碼管理員。
+  static const _keyLastUserId = 'last_user_id';
 
   Future<String?> getServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
@@ -21,6 +23,11 @@ class SettingsStore {
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyToken);
+  }
+
+  Future<String?> getLastUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyLastUserId);
   }
 
   Future<String?> getDisplayUserId() async {
@@ -40,6 +47,7 @@ class SettingsStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyToken, token);
     await prefs.setString(_keyDisplayUserId, userId);
+    await prefs.setString(_keyLastUserId, userId);
   }
 
   Future<void> clearSession() async {
