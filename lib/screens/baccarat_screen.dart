@@ -21,8 +21,8 @@ class BaccaratScreen extends StatefulWidget {
 
 class _BaccaratScreenState extends State<BaccaratScreen> {
   static const _chips = [1000, 10000, 50000, 100000, 500000];
-  static const _firstCardDelay = 0.4; // 開牌後多久翻第一張（秒）
-  static const _cardInterval = 1.2; // 每張牌之間的間隔（秒）
+  static const _firstCardDelay = 0.8; // 開牌後多久翻第一張（秒）
+  static const _cardInterval = 2.2; // 每張牌之間的間隔（秒）：放慢，讓大家看清楚每一張
 
   final _api = ApiClient();
 
@@ -101,7 +101,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
   bool get _animDone {
     final s = _state;
     if (s == null || !s.isSettled) return false;
-    return _since >= _firstCardDelay + _cardInterval * _dealOrder(s).length + 0.5;
+    return _since >= _firstCardDelay + _cardInterval * _dealOrder(s).length + 0.8;
   }
 
   Future<void> _sit(int seat) async {
@@ -209,7 +209,8 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
                       _cashRow(s),
                       const SizedBox(height: 12),
                       _table(s),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
+                      _seats(s),
                       _seatHint(s),
                       const SizedBox(height: 12),
                       _chipRow(),
@@ -246,37 +247,30 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
     );
   }
 
-  static const _seatAlignments = [
-    Alignment(-0.62, -1),
-    Alignment(0.62, -1),
-    Alignment(-1, 0),
-    Alignment(1, 0),
-    Alignment(-0.62, 1),
-    Alignment(0.62, 1),
-  ];
-
+  // 桌面只放牌、倒數與結果；座位在桌子下面一排
   Widget _table(BaccaratState s) {
     return LayoutBuilder(builder: (context, c) {
       final w = c.maxWidth;
-      final h = math.max(420.0, w * 1.08);
-      final centerW = w - 2 * 84;
       return Container(
         width: w,
-        height: h,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           gradient: const RadialGradient(radius: 0.95, colors: [Color(0xFF0E7A4B), Color(0xFF07402A)]),
           border: Border.all(color: const Color(0xFF8B6B2E), width: 3),
         ),
-        child: Stack(
-          children: [
-            Align(alignment: Alignment.center, child: _tableCenter(s, centerW)),
-            for (var i = 0; i < _seatAlignments.length && i < s.seats.length; i++)
-              Align(alignment: _seatAlignments[i], child: _seatWidget(s, s.seats[i])),
-          ],
-        ),
+        child: _tableCenter(s, w - 24 - 6), // 扣掉桌子內距與金色邊框
       );
     });
+  }
+
+  Widget _seats(BaccaratState s) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 4,
+      runSpacing: 4,
+      children: s.seats.map((seat) => _seatWidget(s, seat)).toList(),
+    );
   }
 
   Widget _tableCenter(BaccaratState s, double width) {
@@ -310,8 +304,8 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(status, style: const TextStyle(color: Colors.white70, fontSize: 13, letterSpacing: 2)),
-          const SizedBox(height: 4),
+          Text(status, style: const TextStyle(color: Colors.white70, fontSize: 14, letterSpacing: 2)),
+          const SizedBox(height: 8),
           if (s.isOpen) _countdown(s, remaining),
           if (s.isIdle)
             const Padding(
@@ -325,10 +319,10 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
           if (s.isSettled) ...[
             _handRow('閒', const Color(0xFF7FB3E6), s.playerCards, true, shown, partial(s.playerCards, true), width,
                 highlight: _animDone && s.result == 'player'),
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
             _handRow('莊', const Color(0xFFE88A82), s.bankerCards, false, shown, partial(s.bankerCards, false), width,
                 highlight: _animDone && s.result == 'banker'),
-            const SizedBox(height: 6),
+            const SizedBox(height: 12),
             if (_animDone) _resultBanner(s),
             if (_animDone)
               Text(
@@ -345,29 +339,36 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
       int total, double width,
       {required bool highlight}) {
     final anyShown = List.generate(cards.length, (i) => shown(isPlayer, i)).any((e) => e);
-    final cardW = math.min(36.0, (width - 70) / 3 - 4);
+    // 每手牌固定預留 3 張牌的位置（第 3 張是補牌，沒補就是空位），這樣版面不會跳動，
+    // 而且發牌前也看不出「這手會不會補牌」，不會劇透。
+    const labelW = 44.0;
+    const gap = 8.0;
+    final cardW = math.min(80.0, (width - 16 - 6 - labelW - gap * 3) / 3); // 16 = 左右內距，6 = 高亮時的邊框
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: highlight ? const Color(0xFFF1C40F) : Colors.transparent, width: 2),
+        borderRadius: BorderRadius.circular(14),
+        color: highlight ? const Color(0x33F1C40F) : Colors.transparent,
+        border: Border.all(color: highlight ? const Color(0xFFF1C40F) : Colors.white12, width: highlight ? 3 : 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 26,
+            width: labelW,
             child: Column(
               children: [
-                Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
-                Text(anyShown ? '$total' : '', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 24)),
+                Text(anyShown ? '$total' : '', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
-          for (var i = 0; i < cards.length; i++)
+          for (var i = 0; i < 3; i++)
             Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: _CardSlot(card: cards[i], visible: shown(isPlayer, i), width: cardW),
+              padding: const EdgeInsets.only(left: gap),
+              child: (i < 2 || (i < cards.length && shown(isPlayer, i)))
+                  ? _CardSlot(card: cards[i], visible: shown(isPlayer, i), width: cardW)
+                  : SizedBox(width: cardW, height: cardW * 1.4),
             ),
         ],
       ),
@@ -622,8 +623,9 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
   }
 }
 
-// 一張牌的位置：還沒翻開時只佔位（顯示牌背），翻開時以淡入 + 放大的動畫出現。
-class _CardSlot extends StatelessWidget {
+// 一張牌的位置：還沒翻開時顯示牌背；翻開時做 3D 翻牌動畫（繞垂直軸轉 180 度，過半時換成正面）。
+// 玩家中途才進來、牌已經翻開的話，直接顯示正面，不會重演動畫。
+class _CardSlot extends StatefulWidget {
   final PlayingCard card;
   final bool visible;
   final double width;
@@ -631,20 +633,60 @@ class _CardSlot extends StatelessWidget {
   const _CardSlot({required this.card, required this.visible, required this.width});
 
   @override
+  State<_CardSlot> createState() => _CardSlotState();
+}
+
+class _CardSlotState extends State<_CardSlot> with SingleTickerProviderStateMixin {
+  late final AnimationController _flip;
+
+  @override
+  void initState() {
+    super.initState();
+    _flip = AnimationController(vsync: this, duration: const Duration(milliseconds: 700), value: widget.visible ? 1 : 0);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CardSlot old) {
+    super.didUpdateWidget(old);
+    if (widget.visible && !old.visible) _flip.forward(from: 0);
+    if (!widget.visible && old.visible) _flip.value = 0;
+  }
+
+  @override
+  void dispose() {
+    _flip.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final height = width * 1.4;
+    final w = widget.width;
     return SizedBox(
-      width: width,
-      height: height,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 350),
-        transitionBuilder: (child, anim) => ScaleTransition(
-          scale: Tween<double>(begin: 0.6, end: 1).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutBack)),
-          child: FadeTransition(opacity: anim, child: child),
-        ),
-        child: visible
-            ? PlayingCardFace(key: const ValueKey('face'), card: card, width: width)
-            : _CardBack(key: const ValueKey('back'), width: width),
+      width: w,
+      height: w * 1.4,
+      child: AnimatedBuilder(
+        animation: _flip,
+        builder: (context, _) {
+          final t = Curves.easeInOut.transform(_flip.value);
+          final angle = t * math.pi;
+          final showFace = angle > math.pi / 2;
+          // 翻到一半時稍微放大、浮起來，更有「翻牌」的感覺
+          final pop = 1 + 0.12 * math.sin(t * math.pi);
+          return Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()
+              ..setEntry(3, 2, 0.0014)
+              ..scaleByDouble(pop, pop, 1.0, 1.0)
+              ..rotateY(angle),
+            child: showFace
+                ? Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.rotationY(math.pi), // 正面要再翻回來，才不會左右顛倒
+                    child: PlayingCardFace(card: widget.card, width: w),
+                  )
+                : _CardBack(width: w),
+          );
+        },
       ),
     );
   }
@@ -653,7 +695,7 @@ class _CardSlot extends StatelessWidget {
 class _CardBack extends StatelessWidget {
   final double width;
 
-  const _CardBack({super.key, required this.width});
+  const _CardBack({required this.width});
 
   @override
   Widget build(BuildContext context) {
@@ -675,7 +717,7 @@ class _CardBack extends StatelessWidget {
   }
 }
 
-// 一張撲克牌的正面：白底、左上角點數、中央大花色，紅心/方塊紅色、黑桃/梅花黑色。
+// 一張撲克牌的正面：白底、左上與右下角（倒過來）各有點數與小花色，中央大花色；紅心/方塊紅色、黑桃/梅花黑色。
 class PlayingCardFace extends StatelessWidget {
   final PlayingCard card;
   final double width;
@@ -699,6 +741,16 @@ class PlayingCardFace extends StatelessWidget {
     }
   }
 
+  Widget _corner(Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(rankLabel(card.rank), style: TextStyle(fontSize: width * 0.3, fontWeight: FontWeight.bold, color: color, height: 1.0)),
+        Text(_suits[card.suit], style: TextStyle(fontSize: width * 0.26, color: color, height: 1.0)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final red = card.suit == 1 || card.suit == 2;
@@ -708,25 +760,15 @@ class PlayingCardFace extends StatelessWidget {
       height: width * 1.4,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(width * 0.12),
-        boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 2))],
+        borderRadius: BorderRadius.circular(width * 0.1),
+        border: Border.all(color: Colors.black12, width: 1),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 6, offset: Offset(0, 3))],
       ),
       child: Stack(
         children: [
-          Positioned(
-            left: width * 0.1,
-            top: width * 0.04,
-            child: Text(
-              rankLabel(card.rank),
-              style: TextStyle(fontSize: width * 0.42, fontWeight: FontWeight.bold, color: color, height: 1.0),
-            ),
-          ),
-          Center(
-            child: Padding(
-              padding: EdgeInsets.only(top: width * 0.22),
-              child: Text(_suits[card.suit], style: TextStyle(fontSize: width * 0.62, color: color, height: 1.0)),
-            ),
-          ),
+          Positioned(left: width * 0.08, top: width * 0.06, child: _corner(color)),
+          Positioned(right: width * 0.08, bottom: width * 0.06, child: Transform.rotate(angle: math.pi, child: _corner(color))),
+          Center(child: Text(_suits[card.suit], style: TextStyle(fontSize: width * 0.6, color: color, height: 1.0))),
         ],
       ),
     );
