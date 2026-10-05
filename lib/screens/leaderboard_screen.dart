@@ -19,6 +19,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   List<LeaderboardEntry>? _entries;
   String? _error;
   bool _loading = true;
+  int _season = 0; // 0 = 本季（即時），1 = 第一季（已鎖定）
   Timer? _refreshTimer;
 
   @override
@@ -37,7 +38,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
     try {
-      final entries = await _api.fetchLeaderboard();
+      final entries = await _api.fetchLeaderboard(season: _season);
       if (!mounted) return;
       setState(() {
         _entries = entries;
@@ -56,7 +57,26 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('🏆 資產排行榜')),
+      appBar: AppBar(
+        title: Text(_season == 0 ? '🏆 資產排行榜（第二季）' : '🏆 第 $_season 季最終排名'),
+        actions: [
+          PopupMenuButton<int>(
+            tooltip: '切換賽季',
+            icon: const Icon(Icons.history),
+            onSelected: (v) {
+              setState(() {
+                _season = v;
+                _entries = null;
+              });
+              _load();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 0, child: Text('本季（即時）')),
+              PopupMenuItem(value: 1, child: Text('第一季（已鎖定）')),
+            ],
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () => _load(),
         child: _loading && _entries == null
@@ -106,7 +126,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             leading: Text(_medal(rank), style: const TextStyle(fontSize: 20)),
-            title: Text(entry.userId),
+            title: Text(entry.displayName),
             trailing: Text(
               '${NumberFormat('#,##0').format(entry.totalAssets)} 元',
               style: const TextStyle(fontWeight: FontWeight.bold),

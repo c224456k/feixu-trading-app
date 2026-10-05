@@ -247,16 +247,131 @@ class BossStatus {
 
 class LeaderboardEntry {
   final String userId;
+  final String? name;
   final double totalAssets;
 
-  LeaderboardEntry({required this.userId, required this.totalAssets});
+  LeaderboardEntry({required this.userId, this.name, required this.totalAssets});
+
+  String get displayName => (name != null && name!.isNotEmpty) ? name! : userId;
 
   factory LeaderboardEntry.fromJson(Map<String, dynamic> json) {
     return LeaderboardEntry(
       userId: json['user_id'] as String,
+      name: json['name'] as String?,
       totalAssets: (json['total_assets'] as num).toDouble(),
     );
   }
+}
+
+class FxQuote {
+  final double mid;
+  final double bid;
+  final double ask;
+  final double ageSeconds;
+  final bool open;
+  final double marginPerLot;
+  final int leverage;
+  final DateTime quoteTime;
+
+  FxQuote({
+    required this.mid,
+    required this.bid,
+    required this.ask,
+    required this.ageSeconds,
+    required this.open,
+    required this.marginPerLot,
+    required this.leverage,
+    required this.quoteTime,
+  });
+
+  factory FxQuote.fromJson(Map<String, dynamic> j) => FxQuote(
+        mid: (j['mid'] as num).toDouble(),
+        bid: (j['bid'] as num).toDouble(),
+        ask: (j['ask'] as num).toDouble(),
+        ageSeconds: (j['age_seconds'] as num).toDouble(),
+        open: j['open'] as bool,
+        marginPerLot: (j['margin_per_lot'] as num).toDouble(),
+        leverage: (j['leverage'] as num).toInt(),
+        quoteTime: DateTime.parse(j['quote_time'] as String),
+      );
+}
+
+class FxPosition {
+  final String side; // long / short
+  final double lots;
+  final double entry;
+  final double mark;
+  final double margin;
+  final double unrealized;
+  final double swap;
+  final double equity;
+  final double marginLevel;
+  final double? liquidationPrice;
+
+  FxPosition({
+    required this.side,
+    required this.lots,
+    required this.entry,
+    required this.mark,
+    required this.margin,
+    required this.unrealized,
+    required this.swap,
+    required this.equity,
+    required this.marginLevel,
+    required this.liquidationPrice,
+  });
+
+  factory FxPosition.fromJson(Map<String, dynamic> j) => FxPosition(
+        side: j['side'] as String,
+        lots: (j['lots'] as num).toDouble(),
+        entry: (j['entry'] as num).toDouble(),
+        mark: (j['mark'] as num).toDouble(),
+        margin: (j['margin'] as num).toDouble(),
+        unrealized: (j['unrealized'] as num).toDouble(),
+        swap: (j['swap'] as num).toDouble(),
+        equity: (j['equity'] as num).toDouble(),
+        marginLevel: (j['margin_level'] as num).toDouble(),
+        liquidationPrice: (j['liquidation_price'] as num?)?.toDouble(),
+      );
+}
+
+class FxTradeRecord {
+  final String side;
+  final double lots;
+  final double price;
+  final double realized;
+  final String kind; // open / close / liquidation
+  final DateTime time;
+
+  FxTradeRecord({
+    required this.side,
+    required this.lots,
+    required this.price,
+    required this.realized,
+    required this.kind,
+    required this.time,
+  });
+
+  factory FxTradeRecord.fromJson(Map<String, dynamic> j) => FxTradeRecord(
+        side: j['side'] as String,
+        lots: (j['lots'] as num).toDouble(),
+        price: (j['price'] as num).toDouble(),
+        realized: (j['realized'] as num).toDouble(),
+        kind: j['kind'] as String,
+        time: DateTime.parse(j['time'] as String),
+      );
+}
+
+class FxAccount {
+  final FxPosition? position;
+  final List<FxTradeRecord> trades;
+
+  FxAccount({required this.position, required this.trades});
+
+  factory FxAccount.fromJson(Map<String, dynamic> j) => FxAccount(
+        position: j['position'] == null ? null : FxPosition.fromJson(j['position'] as Map<String, dynamic>),
+        trades: (j['trades'] as List).map((e) => FxTradeRecord.fromJson(e as Map<String, dynamic>)).toList(),
+      );
 }
 
 class BossAttackResult {

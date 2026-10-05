@@ -281,8 +281,38 @@ class ApiClient {
     await _settings.saveSession(token: json['token'] as String, userId: json['user_id'] as String);
   }
 
-  Future<List<LeaderboardEntry>> fetchLeaderboard() => _get(
-        '/api/leaderboard',
+  Future<FxQuote> fetchFxQuote() =>
+      _get('/api/fx/quote', (j) => FxQuote.fromJson(j as Map<String, dynamic>));
+
+  Future<List<ChartPoint>> fetchFxChart() => _get(
+        '/api/fx/chart',
+        (j) => ((j as Map<String, dynamic>)['points'] as List)
+            .map((e) => ChartPoint.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  Future<FxAccount> fetchFxAccount() => _get(
+        '/api/fx/account',
+        (j) => FxAccount.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<TradeResult> fxTrade(String side, int lots) => _post(
+        '/api/fx/trade',
+        {'side': side, 'lots': lots},
+        (j) => TradeResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<TradeResult> fxClose() => _post(
+        '/api/fx/close',
+        {},
+        (j) => TradeResult.fromJson(j as Map<String, dynamic>),
+        withAuth: true,
+      );
+
+  Future<List<LeaderboardEntry>> fetchLeaderboard({int season = 0}) => _get(
+        '/api/leaderboard?top_n=50&season=$season',
         (j) => (j as List).map((e) => LeaderboardEntry.fromJson(e as Map<String, dynamic>)).toList(),
       );
 
