@@ -284,8 +284,8 @@ class ApiClient {
   Future<FxQuote> fetchFxQuote() =>
       _get('/api/fx/quote', (j) => FxQuote.fromJson(j as Map<String, dynamic>));
 
-  Future<List<ChartPoint>> fetchFxChart() => _get(
-        '/api/fx/chart',
+  Future<List<ChartPoint>> fetchFxChart({int hours = 1}) => _get(
+        '/api/fx/chart?hours=$hours',
         (j) => ((j as Map<String, dynamic>)['points'] as List)
             .map((e) => ChartPoint.fromJson(e as Map<String, dynamic>))
             .toList(),

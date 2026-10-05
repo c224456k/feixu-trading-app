@@ -213,7 +213,7 @@ class _FxPanelState extends State<FxPanel> {
     final hi = pts.map((p) => p.price).reduce((a, b) => a > b ? a : b);
     final pad = (hi - lo) * 0.1 + 0.001;
     return SizedBox(
-      height: 200,
+      height: 340,
       child: Card(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(4, 16, 16, 8),
