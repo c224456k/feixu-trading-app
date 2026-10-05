@@ -388,7 +388,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final i = value.toInt();
                       if (i < 0 || i >= chart.points.length) return const SizedBox.shrink();
                       return Text(
-                        DateFormat('HH:mm').format(chart.points[i].time),
+                        DateFormat('HH:mm').format(chart.points[i].time.toLocal()),
                         style: const TextStyle(fontSize: 10),
                       );
                     },
