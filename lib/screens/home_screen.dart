@@ -273,7 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
               MaterialPageRoute(builder: (_) => const FxScreen()),
             ),
             icon: const Icon(Icons.currency_yen),
-            tooltip: '外匯 TWD/JPY',
+            tooltip: '久留美幣 69M',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(

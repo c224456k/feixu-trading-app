@@ -11,8 +11,8 @@ import '../models.dart';
 const _upColor = Color(0xFFFF5A5F);
 const _downColor = Color(0xFF2ECC71);
 
-/// 第二季：外匯保證金交易（TWD/JPY）。
-/// 買進 = 做多台幣（日圓貶值賺），賣出 = 做空台幣。1 手 = 1 萬台幣，槓桿 20 倍，權益低於保證金一半會被強平。
+/// 第二季：久留美幣（69M）兌日圓的保證金交易。價格是遊戲自己模擬的，不跟真實匯率連動。
+/// 買進 = 做多久留美幣，賣出 = 做空。1 手 = 1 萬久留美幣，槓桿 20 倍，權益低於保證金一半會被強平。
 class FxScreen extends StatefulWidget {
   const FxScreen({super.key});
 
@@ -109,7 +109,7 @@ class _FxScreenState extends State<FxScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('💴 外匯 TWD/JPY（第二季）')),
+      appBar: AppBar(title: const Text('💴 久留美幣 69M（第二季）')),
       body: _quote == null
           ? Center(
               child: _error != null
@@ -130,9 +130,9 @@ class _FxScreenState extends State<FxScreen> {
                 _buildTrades(),
                 const SizedBox(height: 8),
                 Text(
-                  '1 手 = 1 萬台幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
-                  '買進＝做多台幣、賣出＝做空台幣；權益低於保證金 50% 會被強制平倉，最多賠光保證金。'
-                  '行情由 USD/JPY ÷ USD/TWD 合成的真實報價，延遲約數秒；週末休市不能交易。',
+                  '久留美幣（69M）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
+                  '1 手 = 1 萬久留美幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
+                  '買進＝做多、賣出＝做空；權益低於保證金 50% 會被強制平倉，最多賠光保證金。',
                   style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
@@ -147,7 +147,8 @@ class _FxScreenState extends State<FxScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(q.mid.toStringAsFixed(4), style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold)),
+            const Text('1 久留美幣 =', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            Text('${q.mid.toStringAsFixed(4)} 日圓', style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Row(
               children: [
@@ -262,7 +263,7 @@ class _FxScreenState extends State<FxScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${p.side == 'long' ? '多單（做多台幣）' : '空單（做空台幣）'}　${p.lots.toStringAsFixed(0)} 手',
+                    '${p.side == 'long' ? '多單（做多久留美幣）' : '空單（做空久留美幣）'}　${p.lots.toStringAsFixed(0)} 手',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -306,7 +307,7 @@ class _FxScreenState extends State<FxScreen> {
               controller: _lotsController,
               keyboardType: TextInputType.number,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: '手數（1 手 = 1 萬台幣）'),
+              decoration: const InputDecoration(labelText: '手數（1 手 = 1 萬久留美幣）'),
             ),
             const SizedBox(height: 6),
             Wrap(
