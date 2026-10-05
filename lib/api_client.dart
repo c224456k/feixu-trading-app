@@ -252,6 +252,9 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<int> fetchBossCooldown() =>
+      _get('/api/boss/cooldown', (j) => (j as Map<String, dynamic>)['seconds'] as int, withAuth: true);
+
   Future<BossAttackResult> attackBoss() => _post(
         '/api/boss/attack',
         {},

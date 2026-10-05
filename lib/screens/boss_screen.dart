@@ -23,6 +23,14 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
   bool _attacking = false; // 動畫播放+API呼叫進行中，鎖住按鈕避免連點
   Timer? _refreshTimer;
   Timer? _clockTimer;
+  DateTime? _cooldownUntil; // 我的炸彈冷卻到什麼時候（本機時鐘）
+
+  int get _cooldownLeft {
+    final t = _cooldownUntil;
+    if (t == null) return 0;
+    final s = t.difference(DateTime.now()).inSeconds + 1;
+    return s > 0 ? s : 0;
+  }
 
   // 怪物呼吸/晃動動畫：一直循環播放，讓玩家感覺牠「活著」。
   late final AnimationController _idleController;
@@ -59,8 +67,13 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
     if (!silent) setState(() => _loading = true);
     try {
       final status = await _api.fetchBossStatus();
+      int cd = 0;
+      try {
+        cd = await _api.fetchBossCooldown();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
+        _cooldownUntil = cd > 0 ? DateTime.now().add(Duration(seconds: cd)) : null;
         _status = status;
         _error = null;
         _loading = false;
@@ -83,7 +96,12 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
     try {
       final result = await _api.attackBoss();
       if (!mounted) return;
-      setState(() => _status = result.status);
+      setState(() {
+        _status = result.status;
+        if (result.cooldownSeconds > 0) {
+          _cooldownUntil = DateTime.now().add(Duration(seconds: result.cooldownSeconds));
+        }
+      });
       if (result.defeated) {
         _showResultDialog('🎉 打倒了！', result.message);
       } else if (!result.ok) {
@@ -258,9 +276,13 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: _attacking ? null : _throwBomb,
+          onPressed: (_attacking || _cooldownLeft > 0) ? null : _throwBomb,
           icon: const Icon(Icons.local_fire_department),
-          label: Text(_attacking ? '投擲中…' : '投擲炸彈（${NumberFormat('#,##0').format(status.bombCost)} 元）'),
+          label: Text(_attacking
+              ? '投擲中…'
+              : _cooldownLeft > 0
+                  ? '冷卻中 ${_cooldownLeft ~/ 60}:${(_cooldownLeft % 60).toString().padLeft(2, '0')}'
+                  : '投擲炸彈（${NumberFormat('#,##0').format(status.bombCost)} 元）'),
           style: FilledButton.styleFrom(
             backgroundColor: Colors.redAccent,
             minimumSize: const Size.fromHeight(48),

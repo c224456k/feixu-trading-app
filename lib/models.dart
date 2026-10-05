@@ -388,12 +388,14 @@ class BossAttackResult {
   final String message;
   final bool defeated;
   final BossStatus status;
+  final int cooldownSeconds;
 
   BossAttackResult({
     required this.ok,
     required this.message,
     required this.defeated,
     required this.status,
+    this.cooldownSeconds = 0,
   });
 
   factory BossAttackResult.fromJson(Map<String, dynamic> json) {
@@ -402,6 +404,7 @@ class BossAttackResult {
       message: json['message'] as String,
       defeated: json['defeated'] as bool,
       status: BossStatus.fromJson(json['status'] as Map<String, dynamic>),
+      cooldownSeconds: (json['cooldown_seconds'] as num?)?.toInt() ?? 0,
     );
   }
 }
