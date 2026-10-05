@@ -90,8 +90,8 @@ class _HomeScreenState extends State<HomeScreen> {
     await _refreshAll();
     // 每 5 秒刷新一次，跟 Discord 版的「即時更新」按鈕同一個節奏
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshAll(silent: true));
-    // 五檔變動快，另外用 2 秒的計時器只更新委託簿（一支很輕的 API）
-    _bookTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshBook());
+    // 五檔變動快，另外用 1 秒的計時器只更新委託簿（一支很輕的 API）
+    _bookTimer = Timer.periodic(const Duration(seconds: 1), (_) => _refreshBook());
   }
 
   Future<void> _refreshAll({bool silent = false}) async {
