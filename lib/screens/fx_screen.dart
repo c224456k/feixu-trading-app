@@ -65,10 +65,14 @@ class _FxPanelState extends State<FxPanel> {
 
   Future<void> _refresh() async {
     try {
-      final quote = await _api.fetchFxQuote();
-      final account = await _api.fetchFxAccount();
-      // 走勢圖變動慢，每 10 次（約 30 秒）才重抓
-      final chart = (_tick % 10 == 0 || _chart.isEmpty) ? await _api.fetchFxChart() : _chart;
+      // 三支 API 同時送出（之前是一支等一支，經過 Cloudflare 隧道每支 0.4~0.9 秒，疊起來就很慢）
+      final needChart = _tick % 4 == 0 || _chart.isEmpty;
+      final quoteF = _api.fetchFxQuote();
+      final accountF = _api.fetchFxAccount();
+      final chartF = needChart ? _api.fetchFxChart() : null;
+      final quote = await quoteF;
+      final account = await accountF;
+      final chart = chartF != null ? await chartF : _chart;
       _tick++;
       if (!mounted) return;
       setState(() {
@@ -81,6 +85,14 @@ class _FxPanelState extends State<FxPanel> {
       if (!mounted) return;
       setState(() => _error = e.toString());
     }
+  }
+
+  /// 伺服器的走勢點是每分鐘一點，最後一點會落後現價；
+  /// 這裡在尾端補上「目前報價」，線圖尖端就會跟著每次刷新（約 3 秒）即時移動。
+  List<ChartPoint> get _points {
+    final q = _quote;
+    if (q == null || _chart.isEmpty) return _chart;
+    return [..._chart, ChartPoint(time: q.quoteTime, price: q.mid)];
   }
 
   int get _lots => int.tryParse(_lotsController.text) ?? 0;
@@ -193,11 +205,12 @@ class _FxPanelState extends State<FxPanel> {
   }
 
   Widget _buildChart() {
+    final pts = _points;
     final spots = <FlSpot>[
-      for (var i = 0; i < _chart.length; i++) FlSpot(i.toDouble(), _chart[i].price),
+      for (var i = 0; i < pts.length; i++) FlSpot(i.toDouble(), pts[i].price),
     ];
-    final lo = _chart.map((p) => p.price).reduce((a, b) => a < b ? a : b);
-    final hi = _chart.map((p) => p.price).reduce((a, b) => a > b ? a : b);
+    final lo = pts.map((p) => p.price).reduce((a, b) => a < b ? a : b);
+    final hi = pts.map((p) => p.price).reduce((a, b) => a > b ? a : b);
     final pad = (hi - lo) * 0.1 + 0.001;
     return SizedBox(
       height: 200,
@@ -225,11 +238,11 @@ class _FxPanelState extends State<FxPanel> {
                   sideTitles: SideTitles(
                     showTitles: true,
                     reservedSize: 22,
-                    interval: (_chart.length / 4).clamp(1, 9999),
+                    interval: (pts.length / 4).clamp(1, 9999),
                     getTitlesWidget: (v, meta) {
                       final i = v.toInt();
-                      if (i < 0 || i >= _chart.length) return const SizedBox.shrink();
-                      return Text(DateFormat('HH:mm').format(_chart[i].time.toLocal()),
+                      if (i < 0 || i >= pts.length) return const SizedBox.shrink();
+                      return Text(DateFormat('HH:mm').format(pts[i].time.toLocal()),
                           style: const TextStyle(fontSize: 10));
                     },
                   ),
@@ -238,9 +251,9 @@ class _FxPanelState extends State<FxPanel> {
               lineTouchData: LineTouchData(
                 touchTooltipData: LineTouchTooltipData(
                   getTooltipItems: (spots) => spots.map((s) {
-                    final i = s.x.toInt().clamp(0, _chart.length - 1);
+                    final i = s.x.toInt().clamp(0, pts.length - 1);
                     return LineTooltipItem(
-                      '${DateFormat('HH:mm').format(_chart[i].time.toLocal())}\n${s.y.toStringAsFixed(4)}',
+                      '${DateFormat('HH:mm').format(pts[i].time.toLocal())}\n${s.y.toStringAsFixed(4)}',
                       const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     );
                   }).toList(),
