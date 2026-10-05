@@ -124,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('久留美幣（69M）'),
+        title: const Text('久留美幣（96）'),
         actions: [
           IconButton(
             onPressed: () => Navigator.of(context).push(

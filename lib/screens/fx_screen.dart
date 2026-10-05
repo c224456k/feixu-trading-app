@@ -11,7 +11,7 @@ import '../models.dart';
 const _upColor = Color(0xFFFF5A5F);
 const _downColor = Color(0xFF2ECC71);
 
-/// 第二季：久留美幣（69M）兌日圓的保證金交易。價格是遊戲自己模擬的，不跟真實匯率連動。
+/// 第二季：久留美幣（96）兌日圓的保證金交易。價格是遊戲自己模擬的，不跟真實匯率連動。
 /// 買進 = 做多久留美幣，賣出 = 做空。1 手 = 1 萬久留美幣，槓桿 20 倍，權益低於保證金一半會被強平。
 class FxScreen extends StatelessWidget {
   const FxScreen({super.key});
@@ -19,7 +19,7 @@ class FxScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('💴 久留美幣 69M（第二季）')),
+      appBar: AppBar(title: const Text('💴 久留美幣 96（第二季）')),
       body: ListView(padding: const EdgeInsets.all(16), children: const [FxPanel()]),
     );
   }
@@ -152,7 +152,7 @@ class _FxPanelState extends State<FxPanel> {
         _buildTrades(),
         const SizedBox(height: 8),
         Text(
-          '久留美幣（69M）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
+          '久留美幣（96）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
           '1 手 = 1 萬久留美幣名目本金，槓桿可選 ${_quote!.minLeverage}~${_quote!.maxLeverage} 倍（預設 ${_quote!.leverage} 倍）。'
           '買進＝做多、賣出＝做空；權益低於保證金 50% 會被強制平倉，最多賠光保證金。',
           style: TextStyle(fontSize: 11, color: Colors.grey[600]),
