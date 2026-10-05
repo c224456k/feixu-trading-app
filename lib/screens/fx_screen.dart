@@ -132,7 +132,7 @@ class _FxScreenState extends State<FxScreen> {
                 Text(
                   '1 手 = 1 萬台幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
                   '買進＝做多台幣、賣出＝做空台幣；權益低於保證金 50% 會被強制平倉，最多賠光保證金。'
-                  '行情來自真實外匯報價，約有數分鐘延遲；週末休市不能交易。',
+                  '行情由 USD/JPY ÷ USD/TWD 合成的真實報價，延遲約數秒；週末休市不能交易。',
                   style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                 ),
               ],
@@ -159,7 +159,8 @@ class _FxScreenState extends State<FxScreen> {
             const SizedBox(height: 4),
             Text(
               q.open
-                  ? '報價時間 ${DateFormat('HH:mm:ss').format(q.quoteTime.toLocal())}（約 ${(q.ageSeconds / 60).floor()} 分鐘前）'
+                  ? '報價時間 ${DateFormat('HH:mm:ss').format(q.quoteTime.toLocal())}'
+                  '（${q.ageSeconds < 90 ? '${q.ageSeconds.round()} 秒前' : '約 ${(q.ageSeconds / 60).floor()} 分鐘前'}）'
                   : '⏸ 休市中，最後報價 ${DateFormat('MM/dd HH:mm').format(q.quoteTime.toLocal())}',
               style: TextStyle(fontSize: 12, color: q.open ? Colors.grey[500] : Colors.orange),
             ),
