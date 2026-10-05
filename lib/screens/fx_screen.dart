@@ -337,7 +337,7 @@ class _FxPanelState extends State<FxPanel> {
             Wrap(
               spacing: 8,
               children: [
-                for (final n in [1, 5, 10, 50, 100])
+                for (final n in [1, 5, 10, 50, 100, 500, 1000])
                   ActionChip(
                     label: Text('$n'),
                     onPressed: () => setState(() => _lotsController.text = '$n'),
