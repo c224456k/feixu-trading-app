@@ -13,14 +13,30 @@ const _downColor = Color(0xFF2ECC71);
 
 /// 第二季：久留美幣（69M）兌日圓的保證金交易。價格是遊戲自己模擬的，不跟真實匯率連動。
 /// 買進 = 做多久留美幣，賣出 = 做空。1 手 = 1 萬久留美幣，槓桿 20 倍，權益低於保證金一半會被強平。
-class FxScreen extends StatefulWidget {
+class FxScreen extends StatelessWidget {
   const FxScreen({super.key});
 
   @override
-  State<FxScreen> createState() => _FxScreenState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('💴 久留美幣 69M（第二季）')),
+      body: ListView(padding: const EdgeInsets.all(16), children: const [FxPanel()]),
+    );
+  }
 }
 
-class _FxScreenState extends State<FxScreen> {
+/// 久留美幣的交易面板（報價、走勢、持倉、下單、成交紀錄），首頁與獨立頁面共用。
+class FxPanel extends StatefulWidget {
+  // 下單 / 平倉成功後通知上層（首頁用來立刻刷新總資產）
+  final VoidCallback? onTraded;
+
+  const FxPanel({super.key, this.onTraded});
+
+  @override
+  State<FxPanel> createState() => _FxPanelState();
+}
+
+class _FxPanelState extends State<FxPanel> {
   final _api = ApiClient();
   final _lotsController = TextEditingController(text: '1');
 
@@ -83,6 +99,7 @@ class _FxScreenState extends State<FxScreen> {
       final r = await _api.fxTrade(side, _lots);
       _snack(r.message);
       await _refresh();
+      widget.onTraded?.call();
     } catch (e) {
       _snack('失敗：$e');
     } finally {
@@ -96,6 +113,7 @@ class _FxScreenState extends State<FxScreen> {
       final r = await _api.fxClose();
       _snack(r.message);
       await _refresh();
+      widget.onTraded?.call();
     } catch (e) {
       _snack('失敗：$e');
     } finally {
@@ -108,35 +126,34 @@ class _FxScreenState extends State<FxScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('💴 久留美幣 69M（第二季）')),
-      body: _quote == null
-          ? Center(
-              child: _error != null
-                  ? Padding(padding: const EdgeInsets.all(20), child: Text(_error!))
-                  : const CircularProgressIndicator(),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildQuoteCard(_quote!),
-                const SizedBox(height: 12),
-                if (_chart.length > 1) _buildChart(),
-                const SizedBox(height: 12),
-                _buildPositionCard(),
-                const SizedBox(height: 12),
-                _buildOrderCard(_quote!),
-                const SizedBox(height: 12),
-                _buildTrades(),
-                const SizedBox(height: 8),
-                Text(
-                  '久留美幣（69M）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
-                  '1 手 = 1 萬久留美幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
-                  '買進＝做多、賣出＝做空；權益低於保證金 50% 會被強制平倉，最多賠光保證金。',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                ),
-              ],
-            ),
+    if (_quote == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Center(
+          child: _error != null ? Text(_error!, textAlign: TextAlign.center) : const CircularProgressIndicator(),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildQuoteCard(_quote!),
+        const SizedBox(height: 12),
+        if (_chart.length > 1) _buildChart(),
+        const SizedBox(height: 12),
+        _buildPositionCard(),
+        const SizedBox(height: 12),
+        _buildOrderCard(_quote!),
+        const SizedBox(height: 12),
+        _buildTrades(),
+        const SizedBox(height: 8),
+        Text(
+          '久留美幣（69M）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
+          '1 手 = 1 萬久留美幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
+          '買進＝做多、賣出＝做空；權益低於保證金 50% 會被強制平倉，最多賠光保證金。',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+      ],
     );
   }
 
