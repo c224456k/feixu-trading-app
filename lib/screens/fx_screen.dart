@@ -39,6 +39,7 @@ class FxPanel extends StatefulWidget {
 class _FxPanelState extends State<FxPanel> {
   final _api = ApiClient();
   final _lotsController = TextEditingController(text: '1');
+  int _leverage = 20;
 
   FxQuote? _quote;
   FxAccount? _account;
@@ -96,7 +97,10 @@ class _FxPanelState extends State<FxPanel> {
     }
     setState(() => _busy = true);
     try {
-      final r = await _api.fxTrade(side, _lots);
+      // 已有同方向部位時加倉沿用原本槓桿（不送倍數）；沒部位或反向才用滑桿選的倍數
+      final pos = _account?.position;
+      final sameSide = pos != null && ((pos.side == 'long') == (side == 'buy'));
+      final r = await _api.fxTrade(side, _lots, leverage: sameSide ? null : _leverage);
       _snack(r.message);
       await _refresh();
       widget.onTraded?.call();
@@ -149,7 +153,7 @@ class _FxPanelState extends State<FxPanel> {
         const SizedBox(height: 8),
         Text(
           '久留美幣（69M）是遊戲自創的虛擬貨幣，價格為模擬走勢，不跟真實匯率連動，24 小時可交易。'
-          '1 手 = 1 萬久留美幣名目本金，槓桿 ${_quote!.leverage} 倍（每手保證金 ${_money(_quote!.marginPerLot)} 元）。'
+          '1 手 = 1 萬久留美幣名目本金，槓桿可選 ${_quote!.minLeverage}~${_quote!.maxLeverage} 倍（預設 ${_quote!.leverage} 倍）。'
           '買進＝做多、賣出＝做空；權益低於保證金 50% 會被強制平倉，最多賠光保證金。',
           style: TextStyle(fontSize: 11, color: Colors.grey[600]),
         ),
@@ -293,6 +297,7 @@ class _FxPanelState extends State<FxPanel> {
                   _row('浮動損益', '${_signed(p.unrealized)} 元',
                       color: p.unrealized >= 0 ? _upColor : _downColor),
                   _row('隔夜利息', '${_signed(p.swap)} 元'),
+                  _row('槓桿', '${p.leverage} 倍'),
                   _row('保證金', '${_money(p.margin)} 元'),
                   _row('權益', '${_money(p.equity)} 元'),
                   _row('保證金比率', '${p.marginLevel.toStringAsFixed(0)}%（低於 50% 強平）',
@@ -313,7 +318,9 @@ class _FxPanelState extends State<FxPanel> {
   }
 
   Widget _buildOrderCard(FxQuote q) {
-    final need = _lots * q.marginPerLot;
+    final pos = _account?.position;
+    final lev = pos?.leverage ?? _leverage;
+    final need = _lots * 10000 / lev;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -338,8 +345,35 @@ class _FxPanelState extends State<FxPanel> {
               ],
             ),
             const SizedBox(height: 6),
+            Row(
+              children: [
+                Text('槓桿 ${pos != null ? pos.leverage : _leverage} 倍',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Expanded(
+                  child: Slider(
+                    value: _leverage.toDouble(),
+                    min: q.minLeverage.toDouble(),
+                    max: q.maxLeverage.toDouble(),
+                    divisions: q.maxLeverage - q.minLeverage,
+                    label: '$_leverage 倍',
+                    onChanged: (v) => setState(() => _leverage = v.round()),
+                  ),
+                ),
+              ],
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final n in [20, 30, 50, 75, 100])
+                  ActionChip(label: Text('${n}x'), onPressed: () => setState(() => _leverage = n)),
+              ],
+            ),
+            const SizedBox(height: 6),
             Text(
-              '開新倉需保證金約 ${_money(need)} 元；與現有部位反向會先平倉',
+              pos != null
+                  ? '你已有 ${pos.leverage} 倍的部位：同方向加倉沿用 ${pos.leverage} 倍；反向會先平倉，剩下的量用上面選的 $_leverage 倍開新倉。'
+                      '開新倉需保證金約 ${_money(need)} 元'
+                  : '開新倉需保證金約 ${_money(need)} 元（槓桿越高，價格小幅反向就會被強平）',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
             const SizedBox(height: 10),

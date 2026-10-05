@@ -271,6 +271,8 @@ class FxQuote {
   final bool open;
   final double marginPerLot;
   final int leverage;
+  final int minLeverage;
+  final int maxLeverage;
   final DateTime quoteTime;
 
   FxQuote({
@@ -281,6 +283,8 @@ class FxQuote {
     required this.open,
     required this.marginPerLot,
     required this.leverage,
+    required this.minLeverage,
+    required this.maxLeverage,
     required this.quoteTime,
   });
 
@@ -292,6 +296,8 @@ class FxQuote {
         open: j['open'] as bool,
         marginPerLot: (j['margin_per_lot'] as num).toDouble(),
         leverage: (j['leverage'] as num).toInt(),
+        minLeverage: (j['min_leverage'] as num).toInt(),
+        maxLeverage: (j['max_leverage'] as num).toInt(),
         quoteTime: DateTime.parse(j['quote_time'] as String),
       );
 }
@@ -302,6 +308,7 @@ class FxPosition {
   final double entry;
   final double mark;
   final double margin;
+  final int leverage;
   final double unrealized;
   final double swap;
   final double equity;
@@ -314,6 +321,7 @@ class FxPosition {
     required this.entry,
     required this.mark,
     required this.margin,
+    required this.leverage,
     required this.unrealized,
     required this.swap,
     required this.equity,
@@ -327,6 +335,7 @@ class FxPosition {
         entry: (j['entry'] as num).toDouble(),
         mark: (j['mark'] as num).toDouble(),
         margin: (j['margin'] as num).toDouble(),
+        leverage: (j['leverage'] as num).toInt(),
         unrealized: (j['unrealized'] as num).toDouble(),
         swap: (j['swap'] as num).toDouble(),
         equity: (j['equity'] as num).toDouble(),

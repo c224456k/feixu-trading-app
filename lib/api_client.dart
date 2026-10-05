@@ -297,9 +297,9 @@ class ApiClient {
         withAuth: true,
       );
 
-  Future<TradeResult> fxTrade(String side, int lots) => _post(
+  Future<TradeResult> fxTrade(String side, int lots, {int? leverage}) => _post(
         '/api/fx/trade',
-        {'side': side, 'lots': lots},
+        {'side': side, 'lots': lots, if (leverage != null) 'leverage': leverage},
         (j) => TradeResult.fromJson(j as Map<String, dynamic>),
         withAuth: true,
       );
