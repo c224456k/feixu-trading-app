@@ -38,11 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   FeixuSnapshot? _snapshot;
   FeixuChart? _chart;
+  OrderBook? _book;
   Portfolio? _portfolio;
   String? _error;
   bool _loading = true;
 
   Timer? _timer;
+  Timer? _bookTimer;
 
   @override
   void initState() {
@@ -76,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _bookTimer?.cancel();
     super.dispose();
   }
 
@@ -83,6 +86,8 @@ class _HomeScreenState extends State<HomeScreen> {
     await _refreshAll();
     // 每 5 秒刷新一次，跟 Discord 版的「即時更新」按鈕同一個節奏
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshAll(silent: true));
+    // 五檔變動快，另外用 2 秒的計時器只更新委託簿（一支很輕的 API）
+    _bookTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshBook());
   }
 
   Future<void> _refreshAll({bool silent = false}) async {
@@ -90,11 +95,13 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final snapshot = await _api.fetchSnapshot();
       final chart = await _api.fetchChart();
+      final book = await _api.fetchBook();
       final portfolio = await _api.fetchPortfolio();
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
         _chart = chart;
+        _book = book;
         _portfolio = portfolio;
         _error = null;
         _loading = false;
@@ -103,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       if (e.isAuthError) {
         _timer?.cancel();
+        _bookTimer?.cancel();
         await _store.clearSession();
         widget.onLoggedOut();
         return;
@@ -120,8 +128,19 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _refreshBook() async {
+    try {
+      final book = await _api.fetchBook();
+      if (!mounted) return;
+      setState(() => _book = book);
+    } catch (_) {
+      // 委託簿只是顯示用，失敗就等下一次，不打斷畫面
+    }
+  }
+
   Future<void> _logout() async {
     _timer?.cancel();
+    _bookTimer?.cancel();
     await _store.clearSession();
     widget.onLoggedOut();
   }
@@ -141,25 +160,75 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
+    TradeQuote? quote;
+    String? quoteError;
+    int quotedFor = 0;
     final lots = await showDialog<int>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isBuy ? '買進費許(7333)' : '賣出費許(7333)'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: '張數${hint != null ? '（$hint）' : ''}',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, int.tryParse(controller.text)),
-            child: Text(isBuy ? '買進' : '賣出'),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          Future<void> updateQuote(String text) async {
+            final n = int.tryParse(text);
+            quotedFor = n ?? 0;
+            if (n == null || n <= 0) {
+              setDialogState(() {
+                quote = null;
+                quoteError = null;
+              });
+              return;
+            }
+            try {
+              final q = await _api.fetchQuote(isBuy, n);
+              if (quotedFor != n) return; // 已經改輸入了，丟掉過期的結果
+              setDialogState(() {
+                quote = q;
+                quoteError = null;
+              });
+            } catch (e) {
+              if (quotedFor != n) return;
+              setDialogState(() {
+                quote = null;
+                quoteError = '試算失敗';
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: Text(isBuy ? '買進費許(7333)' : '賣出費許(7333)'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  onChanged: updateQuote,
+                  decoration: InputDecoration(
+                    labelText: '張數${hint != null ? '（$hint）' : ''}',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (quote != null)
+                  Text(
+                    '預估成交均價 ${quote!.avgPrice.toStringAsFixed(2)}'
+                    '（滑價 ${quote!.slippagePct.toStringAsFixed(2)}%）',
+                  )
+                else if (quoteError != null)
+                  Text(quoteError!, style: const TextStyle(color: Colors.orange))
+                else
+                  Text('輸入張數可試算成交均價', style: TextStyle(color: Colors.grey[600])),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, int.tryParse(controller.text)),
+                child: Text(isBuy ? '買進' : '賣出'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -297,6 +366,8 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 12),
         if (_chart != null) _buildChart(_chart!, color),
         const SizedBox(height: 12),
+        if (_book != null) _buildOrderBook(_book!),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -319,6 +390,63 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 16),
         if (_portfolio != null) _buildPortfolio(_portfolio!),
       ],
+    );
+  }
+
+  Widget _buildOrderBook(OrderBook book) {
+    final maxLots = [...book.asks, ...book.bids].map((l) => l.lots).fold<int>(1, (a, b) => a > b ? a : b);
+    Widget row(String label, BookLevel l, Color c) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Stack(
+          alignment: Alignment.centerRight,
+          children: [
+            FractionallySizedBox(
+              widthFactor: l.lots / maxLots,
+              child: Container(height: 20, color: c.withValues(alpha: 0.18)),
+            ),
+            Row(
+              children: [
+                SizedBox(width: 44, child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey))),
+                Expanded(
+                  child: Text(l.price.toStringAsFixed(2),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: c)),
+                ),
+                Text('${l.lots} 張'),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('五檔報價', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            for (var i = book.asks.length - 1; i >= 0; i--) row('賣${i + 1}', book.asks[i], upColor),
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border.symmetric(horizontal: BorderSide(color: Colors.grey.withValues(alpha: 0.4))),
+              ),
+              child: Text('中價 ${book.mid.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13)),
+            ),
+            for (var i = 0; i < book.bids.length; i++) row('買${i + 1}', book.bids[i], downColor),
+            const SizedBox(height: 6),
+            Text(
+              '下單會依檔位逐檔成交，量大價格會被推動（約 10 分鐘慢慢回復）',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

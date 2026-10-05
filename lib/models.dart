@@ -1008,3 +1008,49 @@ class PokerState {
     );
   }
 }
+
+
+class BookLevel {
+  final double price;
+  final int lots;
+
+  BookLevel({required this.price, required this.lots});
+
+  factory BookLevel.fromJson(Map<String, dynamic> json) =>
+      BookLevel(price: (json['price'] as num).toDouble(), lots: (json['lots'] as num).toInt());
+}
+
+class OrderBook {
+  final double basePrice;
+  final double mid;
+  final List<BookLevel> asks; // 賣盤，由近到遠（賣一在前）
+  final List<BookLevel> bids; // 買盤，由近到遠（買一在前）
+
+  OrderBook({required this.basePrice, required this.mid, required this.asks, required this.bids});
+
+  factory OrderBook.fromJson(Map<String, dynamic> json) {
+    List<BookLevel> levels(String key) => (json[key] as List)
+        .map((e) => BookLevel.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return OrderBook(
+      basePrice: (json['base_price'] as num).toDouble(),
+      mid: (json['mid'] as num).toDouble(),
+      asks: levels('asks'),
+      bids: levels('bids'),
+    );
+  }
+}
+
+class TradeQuote {
+  final double avgPrice;
+  final double mid;
+  final double slippagePct;
+
+  TradeQuote({required this.avgPrice, required this.mid, required this.slippagePct});
+
+  factory TradeQuote.fromJson(Map<String, dynamic> json) => TradeQuote(
+        avgPrice: (json['avg_price'] as num).toDouble(),
+        mid: (json['mid'] as num).toDouble(),
+        slippagePct: (json['slippage_pct'] as num).toDouble(),
+      );
+}

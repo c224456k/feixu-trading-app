@@ -101,6 +101,14 @@ class ApiClient {
   Future<FeixuSnapshot> fetchSnapshot() =>
       _get('/api/feixu/snapshot', (j) => FeixuSnapshot.fromJson(j as Map<String, dynamic>));
 
+  Future<OrderBook> fetchBook() =>
+      _get('/api/feixu/book', (j) => OrderBook.fromJson(j as Map<String, dynamic>));
+
+  Future<TradeQuote> fetchQuote(bool isBuy, int lots) => _get(
+        '/api/feixu/quote?side=${isBuy ? 'buy' : 'sell'}&lots=$lots',
+        (j) => TradeQuote.fromJson(j as Map<String, dynamic>),
+      );
+
   Future<FeixuChart> fetchChart() =>
       _get('/api/feixu/chart', (j) => FeixuChart.fromJson(j as Map<String, dynamic>));
 
