@@ -400,6 +400,18 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               borderData: FlBorderData(show: false),
               extraLinesData: ExtraLinesData(verticalLines: eventLines),
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipItems: (touchedSpots) => touchedSpots.map((s) {
+                    final i = s.x.toInt().clamp(0, chart.points.length - 1);
+                    final time = DateFormat('HH:mm').format(chart.points[i].time.toLocal());
+                    return LineTooltipItem(
+                      '$time\n${s.y.toStringAsFixed(2)}',
+                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    );
+                  }).toList(),
+                ),
+              ),
               lineBarsData: [
                 LineChartBarData(
                   spots: spots,
