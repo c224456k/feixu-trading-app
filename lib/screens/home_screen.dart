@@ -9,6 +9,7 @@ import '../api_client.dart';
 import '../models.dart';
 import '../settings_store.dart';
 import '../update_checker.dart';
+import '../widgets/candle_chart.dart';
 import 'boss_screen.dart';
 import 'baccarat_screen.dart';
 import 'poker_screen.dart';
@@ -39,6 +40,9 @@ class _HomeScreenState extends State<HomeScreen> {
   FeixuSnapshot? _snapshot;
   FeixuChart? _chart;
   OrderBook? _book;
+  List<Candle>? _candles;
+  bool _candleMode = false;
+  int _candleInterval = 5;
   Portfolio? _portfolio;
   String? _error;
   bool _loading = true;
@@ -96,12 +100,14 @@ class _HomeScreenState extends State<HomeScreen> {
       final snapshot = await _api.fetchSnapshot();
       final chart = await _api.fetchChart();
       final book = await _api.fetchBook();
+      final candles = _candleMode ? await _api.fetchCandles(_candleInterval) : null;
       final portfolio = await _api.fetchPortfolio();
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
         _chart = chart;
         _book = book;
+        if (candles != null) _candles = candles;
         _portfolio = portfolio;
         _error = null;
         _loading = false;
@@ -364,7 +370,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (_chart != null) _buildChart(_chart!, color),
+        _buildChartToggle(),
+        if (_candleMode) _buildCandleCard() else if (_chart != null) _buildChart(_chart!, color),
         const SizedBox(height: 12),
         if (_book != null) _buildOrderBook(_book!),
         const SizedBox(height: 12),
@@ -445,6 +452,70 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChartToggle() {
+    const intervals = {1: '1分', 5: '5分', 15: '15分', 60: '1時', 1440: '日'};
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ChoiceChip(
+            label: const Text('走勢'),
+            selected: !_candleMode,
+            onSelected: (_) => setState(() => _candleMode = false),
+          ),
+          ChoiceChip(
+            label: const Text('K線'),
+            selected: _candleMode,
+            onSelected: (_) {
+              setState(() => _candleMode = true);
+              _loadCandles();
+            },
+          ),
+          if (_candleMode)
+            for (final e in intervals.entries)
+              ChoiceChip(
+                label: Text(e.value),
+                selected: _candleInterval == e.key,
+                onSelected: (_) {
+                  setState(() {
+                    _candleInterval = e.key;
+                    _candles = null;
+                  });
+                  _loadCandles();
+                },
+              ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadCandles() async {
+    try {
+      final interval = _candleInterval;
+      final candles = await _api.fetchCandles(interval);
+      if (!mounted || interval != _candleInterval) return;
+      setState(() => _candles = candles);
+    } catch (_) {
+      // 下一輪 5 秒刷新會再試
+    }
+  }
+
+  Widget _buildCandleCard() {
+    return SizedBox(
+      height: 300,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+          child: _candles == null
+              ? const Center(child: CircularProgressIndicator())
+              : CandleChart(candles: _candles!, daily: _candleInterval == 1440),
         ),
       ),
     );

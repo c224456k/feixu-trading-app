@@ -101,6 +101,13 @@ class ApiClient {
   Future<FeixuSnapshot> fetchSnapshot() =>
       _get('/api/feixu/snapshot', (j) => FeixuSnapshot.fromJson(j as Map<String, dynamic>));
 
+  Future<List<Candle>> fetchCandles(int interval, {int count = 60}) => _get(
+        '/api/feixu/candles?interval=$interval&count=$count',
+        (j) => (((j as Map<String, dynamic>)['candles']) as List)
+            .map((e) => Candle.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
   Future<OrderBook> fetchBook() =>
       _get('/api/feixu/book', (j) => OrderBook.fromJson(j as Map<String, dynamic>));
 

@@ -1054,3 +1054,22 @@ class TradeQuote {
         slippagePct: (json['slippage_pct'] as num).toDouble(),
       );
 }
+
+
+class Candle {
+  final DateTime time;
+  final double open;
+  final double high;
+  final double low;
+  final double close;
+
+  Candle({required this.time, required this.open, required this.high, required this.low, required this.close});
+
+  factory Candle.fromJson(Map<String, dynamic> json) => Candle(
+        time: DateTime.parse(json['time'] as String),
+        open: (json['open'] as num).toDouble(),
+        high: (json['high'] as num).toDouble(),
+        low: (json['low'] as num).toDouble(),
+        close: (json['close'] as num).toDouble(),
+      );
+}
