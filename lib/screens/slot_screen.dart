@@ -64,6 +64,10 @@ class _SlotScreenState extends State<SlotScreen>
   final List<_Coin> _coins = [];
   double _coinStart = -10;
   double _lever = 0; // 拉桿 0..1
+  double _pool = 0; // 全服累積彩池
+  int _poolMin = 5000;
+  List<Map<String, dynamic>> _recentWins = [];
+  Timer? _poolTimer;
 
   @override
   void initState() {
@@ -71,6 +75,7 @@ class _SlotScreenState extends State<SlotScreen>
     CasinoMusic.instance.enter();
     _ticker = createTicker(_onTick)..start();
     _load();
+    _poolTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refreshPool());
   }
 
   @override
@@ -78,6 +83,7 @@ class _SlotScreenState extends State<SlotScreen>
     CasinoMusic.instance.leave();
     _ticker.dispose();
     _spinSound?.cancel();
+    _poolTimer?.cancel();
     _frame.dispose();
     super.dispose();
   }
@@ -99,11 +105,28 @@ class _SlotScreenState extends State<SlotScreen>
         _symbols = [for (final s in info['symbols'] as List) s as String];
         _cash = (info['cash'] as num).toDouble();
         _shownCash = _cash;
+        _applyJackpot(info['jackpot'] as Map<String, dynamic>?);
         _error = null;
       });
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
+  }
+
+  void _applyJackpot(Map<String, dynamic>? j) {
+    if (j == null) return;
+    _pool = (j['pool'] as num).toDouble();
+    _poolMin = (j['min_bet'] as num).toInt();
+    _recentWins = [for (final e in (j['recent'] as List? ?? const [])) (e as Map).cast<String, dynamic>()];
+  }
+
+  Future<void> _refreshPool() async {
+    // 自己在轉的時候先不更新，避免彩池數字提前劇透這一把有沒有中
+    if (_spinning || !mounted) return;
+    try {
+      final j = await _api.fetchSlotJackpot();
+      if (mounted) setState(() => _applyJackpot(j));
+    } catch (_) {}
   }
 
   // ===== 每個畫面更新：推進轉輪狀態 =====
@@ -174,7 +197,13 @@ class _SlotScreenState extends State<SlotScreen>
     final bet = (res['bet'] as num).toDouble();
     setState(() => _shownCash = (res['cash'] as num).toDouble());
     _cash = _shownCash;
-    if (payout > 0) {
+    final jp = (res['jackpot_win'] as num?)?.toDouble() ?? 0;
+    if (res['jackpot_pool'] != null) setState(() => _pool = (res['jackpot_pool'] as num).toDouble());
+    if (jp > 0) {
+      CasinoMusic.instance.playSfx('jackpot');
+      _startCoins(240);
+      _showJackpotDialog(jp);
+    } else if (payout > 0) {
       final big = res['big'] == true || payout >= bet * 10;
       CasinoMusic.instance.playSfx(big ? 'jackpot' : 'win');
       if (payout >= bet * 5) _startCoins(big ? 90 : 40);
@@ -189,6 +218,84 @@ class _SlotScreenState extends State<SlotScreen>
         });
       }
     }
+  }
+
+  void _showJackpotDialog(double amount) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: const LinearGradient(colors: [Color(0xFF8E1B2B), Color(0xFF3A0911)], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+            border: Border.all(color: const Color(0xFFFFD54F), width: 4),
+            boxShadow: const [BoxShadow(color: Color(0xAAFFC107), blurRadius: 40, spreadRadius: 4)],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('🏆', style: TextStyle(fontSize: 64)),
+              ShaderMask(
+                shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFFF8D0), Color(0xFFFFC107)]).createShader(r),
+                child: const Text('JACKPOT!', style: TextStyle(fontSize: 38, fontWeight: FontWeight.w900, letterSpacing: 4, color: Colors.white)),
+              ),
+              const SizedBox(height: 8),
+              const Text('你抱走了累積彩池', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 6),
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: amount),
+                duration: const Duration(milliseconds: 2200),
+                curve: Curves.easeOutCubic,
+                builder: (context, v, _) => Text('+${_money.format(v)}', style: const TextStyle(color: Color(0xFFFFE066), fontSize: 34, fontWeight: FontWeight.w900)),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('太棒了！')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _jackpotBanner() {
+    final recent = _recentWins.isEmpty ? null : _recentWins.first;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(colors: [Color(0xFF2B0A10), Color(0xFF5A1020), Color(0xFF2B0A10)]),
+        border: Border.all(color: const Color(0xFFE0B341), width: 2.5),
+        boxShadow: const [BoxShadow(color: Color(0x66FFC107), blurRadius: 16), BoxShadow(color: Colors.black87, blurRadius: 8, offset: Offset(0, 4))],
+      ),
+      child: Column(
+        children: [
+          const Text('🏆  累 積 彩 池  🏆', style: TextStyle(color: Color(0xFFFFE9A0), fontSize: 13, letterSpacing: 3, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: _pool),
+            duration: const Duration(milliseconds: 1500),
+            curve: Curves.easeOutCubic,
+            builder: (context, v, _) => ShaderMask(
+              shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFFF8D0), Color(0xFFFFC107), Color(0xFFFF8F00)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
+              child: Text(_money.format(v), style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Colors.white, fontFamily: 'monospace', letterSpacing: 1)),
+            ),
+          ),
+          Text(
+            '押 ${_money.format(_poolMin)} 以上才參與・每注 1.5% 進彩池・押越多中獎機率越高',
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+            textAlign: TextAlign.center,
+          ),
+          if (recent != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text('上一位得主：${recent['name']} 抱走 ${_money.format((recent['amount'] as num).toDouble())}', style: const TextStyle(color: Color(0xFFFFD54F), fontSize: 11)),
+            ),
+        ],
+      ),
+    );
   }
 
   void _startCoins(int n) {
@@ -315,6 +422,7 @@ class _SlotScreenState extends State<SlotScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      _jackpotBanner(),
                       _machine(),
                       const SizedBox(height: 14),
                       _controls(),
@@ -323,7 +431,7 @@ class _SlotScreenState extends State<SlotScreen>
                       const SizedBox(height: 8),
                       Text(
                         '3 轉輪 × 5 條線（上、中、下、兩條斜線），總下注平分到 5 條線。三個一樣依賠率派彩，'
-                        '左邊起連續兩顆櫻桃也有小賠。理論回報率約 94.5%。結果由伺服器抽出，贏超過 20 倍會公告到 Discord。',
+                        '左邊起連續兩顆櫻桃也有小賠。基本遊戲回報率約 94.5%，加上彩池約 96%。結果由伺服器抽出，贏超過 20 倍或中彩池會公告到 Discord。',
                         style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 12,
@@ -919,6 +1027,11 @@ class _SlotScreenState extends State<SlotScreen>
             ),
           ),
         ),
+        if (_bet < _poolMin)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('這個金額不參與累積彩池', style: TextStyle(color: Colors.white38, fontSize: 11)),
+          ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,

@@ -255,6 +255,9 @@ class ApiClient {
   Future<Map<String, dynamic>> fetchSlotInfo() =>
       _get('/api/slot/info', (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> fetchSlotJackpot() =>
+      _get('/api/slot/jackpot', (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> slotSpin(int bet) =>
       _post('/api/slot/spin', {'bet': bet}, (j) => j as Map<String, dynamic>, withAuth: true);
 
