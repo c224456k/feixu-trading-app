@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_bet.dart';
 import '../widgets/dice3d.dart';
 
 final _money = NumberFormat('#,##0');
@@ -22,7 +23,6 @@ class SicBoScreen extends StatefulWidget {
 }
 
 class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin {
-  static const _chips = [1000, 10000, 50000, 100000, 500000];
   static const _rollDuration = Duration(milliseconds: 2200);
 
   final _api = ApiClient();
@@ -250,7 +250,12 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('現金 ${_money.format(_displayCash)} 元', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TweenAnimationBuilder<double>(
+          tween: Tween(end: _displayCash),
+          duration: const Duration(milliseconds: 1200),
+          curve: Curves.easeOutCubic,
+          builder: (context, v, _) => Text('💰 現金 ${_money.format(v)} 元', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
         if (s.roundId != null) Text('第 ${s.roundId} 局', style: const TextStyle(color: Colors.white54)),
       ],
     );
@@ -496,81 +501,48 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
     );
   }
 
-  Widget _chipRow() {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 8,
-      runSpacing: 8,
-      children: _chips.map((c) {
-        return ChoiceChip(
-          label: Text(_money.format(c)),
-          selected: c == _chip,
-          onSelected: (_) => setState(() => _chip = c),
-        );
-      }).toList(),
-    );
-  }
+  Widget _chipRow() => ChipSelector(selected: _chip, onSelect: (c) => setState(() => _chip = c));
 
   Widget _betGrid(SicBoState s) {
     final seated = s.mySeat != null;
     // 閒置時下注 = 開新局；倒數中下注 = 加注；開骰演出中不能下
     final canBet = seated && !_busy && (s.isIdle || (s.isOpen && _remaining > 0));
-    return LayoutBuilder(builder: (context, c) {
-      final cols = c.maxWidth >= 480 ? 3 : 2;
-      final w = (c.maxWidth - 10 * (cols - 1)) / cols;
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: s.betTypes.map((t) {
-          final mine = s.myBets[t.key] ?? 0;
-          final win = _animDone && _wins(t.key, s);
-          final color = _typeColor(t.key);
-          return SizedBox(
-            width: w,
-            child: Material(
-              color: color.withValues(alpha: canBet || win ? 0.22 : 0.08),
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: canBet ? () => _bet(t) : null,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: win ? const Color(0xFFF1C40F) : color.withValues(alpha: canBet ? 0.6 : 0.3),
-                      width: win ? 3 : 1.5,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(t.shortName, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-                      Text('1 賠 ${t.payout}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                      const SizedBox(height: 6),
-                      Text(
-                        '全場 ${_money.format(s.poolAmount[t.key] ?? 0)}（${s.poolPlayers[t.key] ?? 0} 人）',
-                        style: const TextStyle(fontSize: 11, color: Colors.white54),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        mine > 0
-                            ? '我押 ${_money.format(mine)}'
-                            : (canBet ? '點一下押 ${_money.format(_chip)}' : (seated ? '—' : '請先入座')),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: mine > 0 ? FontWeight.bold : FontWeight.normal,
-                          color: mine > 0 ? Colors.white : Colors.white38,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
+    Widget zone(String key, double height) {
+      SicBoBetType? t;
+      for (final b in s.betTypes) {
+        if (b.key == key) t = b;
+      }
+      if (t == null) return const SizedBox.shrink();
+      final bt = t;
+      return BetZone(
+        title: bt.shortName,
+        sub: '1 賠 ${bt.payout}',
+        color: _typeColor(key),
+        height: height,
+        bet: s.myBets[key] ?? 0,
+        payout: s.myPayouts[key] ?? 0,
+        settled: s.isSettled && _animDone,
+        win: _animDone && _wins(key, s),
+        canBet: canBet,
+        seated: seated,
+        chip: _chip,
+        players: s.poolPlayers[key] ?? 0,
+        roundKey: '${s.roundId}-$key',
+        onTap: () => _bet(bt),
       );
-    });
+    }
+
+    return FeltBox(
+      child: Column(
+        children: [
+          Row(children: [Expanded(child: zone('small', 130)), const SizedBox(width: 8), Expanded(child: zone('big', 130))]),
+          const SizedBox(height: 8),
+          Row(children: [Expanded(child: zone('odd', 110)), const SizedBox(width: 8), Expanded(child: zone('even', 110))]),
+          const SizedBox(height: 8),
+          zone('triple', 100),
+        ],
+      ),
+    );
   }
 
   Widget _history(SicBoState s) {

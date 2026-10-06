@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_bet.dart';
 
 final _money = NumberFormat('#,##0');
 
@@ -25,7 +26,6 @@ class HorseScreen extends StatefulWidget {
 }
 
 class _HorseScreenState extends State<HorseScreen> {
-  static const _chips = [1000, 10000, 50000, 100000, 500000];
 
   final _api = ApiClient();
 
@@ -200,7 +200,12 @@ class _HorseScreenState extends State<HorseScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('現金 ${_money.format(_displayCash)} 元', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        TweenAnimationBuilder<double>(
+          tween: Tween(end: _displayCash),
+          duration: const Duration(milliseconds: 1200),
+          curve: Curves.easeOutCubic,
+          builder: (context, v, _) => Text('💰 現金 ${_money.format(v)} 元', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        ),
         if (s.roundId != null) Text('第 ${s.roundId} 場', style: const TextStyle(color: Colors.white54, fontSize: 12)),
       ],
     );
@@ -484,27 +489,7 @@ class _HorseScreenState extends State<HorseScreen> {
     );
   }
 
-  Widget _chipRow() {
-    String label(int c) => c >= 10000 ? '${c ~/ 10000}萬' : '${c ~/ 1000}千';
-    return Row(
-      children: [
-        for (final c in _chips)
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: ChoiceChip(
-                label: SizedBox(width: double.infinity, child: Text(label(c), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13))),
-                selected: c == _chip,
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                labelPadding: EdgeInsets.zero,
-                onSelected: (_) => setState(() => _chip = c),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
+  Widget _chipRow() => ChipSelector(selected: _chip, size: 46, onSelect: (c) => setState(() => _chip = c));
 
   // 一匹馬一行：左邊馬號與名字，然後「冠軍」按鈕在左、「亞軍」按鈕在右
   Widget _horseRow(HorseState s, Horse h, {required bool canBet, required bool winHighlight, required bool secondHighlight}) {
@@ -541,39 +526,72 @@ class _HorseScreenState extends State<HorseScreen> {
   Widget _betButton(String label, double odds, String betKey, HorseState s, bool canBet, Color color, bool highlight) {
     final mine = s.myBets[betKey] ?? 0;
     final pool = s.poolAmount[betKey] ?? 0;
+    final payout = s.myPayouts[betKey] ?? 0;
+    final settled = s.isSettled && _animDone;
+    final pulse = highlight ? (0.5 + 0.5 * math.sin(DateTime.now().millisecondsSinceEpoch / 180.0)) : 0.0;
+    final shown = settled && payout > 0.005 ? payout : mine;
+    final net = payout - mine;
+    final lost = settled && mine > 0 && payout <= 0.005;
     return SizedBox(
-      width: 88,
-      child: Material(
-        color: color.withValues(alpha: canBet || highlight ? 0.2 : 0.07),
-        borderRadius: BorderRadius.circular(9),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(9),
-          onTap: canBet ? () => _bet(betKey) : null,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(
-                color: highlight ? const Color(0xFFF1C40F) : color.withValues(alpha: canBet ? 0.7 : 0.3),
-                width: highlight ? 2.5 : 1,
+      width: 104,
+      child: GestureDetector(
+        onTap: canBet ? () => _bet(betKey) : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: canBet || highlight ? 0.22 : 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: highlight ? Color.lerp(const Color(0xFFB8860B), const Color(0xFFFFE066), pulse)! : color.withValues(alpha: canBet ? 0.8 : 0.3),
+              width: highlight ? 3 : 1.5,
+            ),
+            boxShadow: highlight ? [BoxShadow(color: const Color(0xFFF1C40F).withValues(alpha: 0.3 + 0.3 * pulse), blurRadius: 10)] : null,
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 26,
+                child: shown > 0
+                    ? Opacity(
+                        opacity: lost ? 0.35 : 1,
+                        child: TweenAnimationBuilder<double>(
+                          key: ValueKey('${s.roundId}-$betKey-${shown.round()}'),
+                          tween: Tween(begin: 0, end: 1),
+                          duration: const Duration(milliseconds: 380),
+                          curve: Curves.bounceOut,
+                          builder: (context, v, child) => Transform.translate(offset: Offset(0, -18 * (1 - v)), child: Opacity(opacity: v.clamp(0.0, 1.0), child: child)),
+                          child: ChipPile(amount: shown, size: 22),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text.rich(
-                  TextSpan(children: [
-                    TextSpan(text: '$label ', style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.bold)),
-                    TextSpan(text: odds.toStringAsFixed(2), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                  ]),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text.rich(
+                      TextSpan(children: [
+                        TextSpan(text: '$label ', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold)),
+                        TextSpan(text: odds.toStringAsFixed(2), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                      ]),
+                    ),
+                    Text(
+                      settled && mine > 0
+                          ? (net > 0.005 ? '+${_compact(net)}' : (net > -0.005 ? '退回' : '-${_compact(-net)}'))
+                          : (mine > 0 ? '我押 ${_compact(mine)}' : (pool > 0 ? '全場 ${_compact(pool)}' : (canBet ? '押 ${_compact(_chip.toDouble())}' : '—'))),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: settled && mine > 0 ? FontWeight.bold : FontWeight.normal,
+                        color: settled && mine > 0
+                            ? (net > 0.005 ? const Color(0xFFFFE066) : (net > -0.005 ? Colors.white70 : Colors.redAccent))
+                            : (mine > 0 ? const Color(0xFFF1C40F) : Colors.white38),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                Text(
-                  mine > 0 ? '我押 ${_compact(mine)}' : (pool > 0 ? '全場 ${_compact(pool)}' : '—'),
-                  style: TextStyle(fontSize: 10, color: mine > 0 ? const Color(0xFFF1C40F) : Colors.white38),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
