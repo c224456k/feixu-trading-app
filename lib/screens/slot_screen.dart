@@ -518,10 +518,49 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       alignment: Alignment.center,
       child: Transform.scale(
         scale: win ? 1 + 0.08 * pulse : 1,
-        child: Text(_symbols[sym], style: TextStyle(fontSize: h * 0.52, height: 1.0)),
+        child: _symbolWidget(sym, h * 0.52),
       ),
     );
   }
+
+  // 星星和 7 用自己畫的（系統 emoji 的黃星、灰底 7 放在米色底上對比太低，看不清楚）
+  Widget _symbolWidget(int sym, double size) {
+    if (sym == 4) return SizedBox(width: size * 1.1, height: size * 1.1, child: CustomPaint(painter: _StarPainter()));
+    if (sym == 5) {
+      Widget seven(Paint? stroke, Color? color) => Text(
+            '7',
+            style: TextStyle(
+              fontSize: size * 1.12,
+              height: 1.0,
+              fontWeight: FontWeight.w900,
+              fontStyle: FontStyle.italic,
+              color: stroke == null ? color : null,
+              foreground: stroke,
+            ),
+          );
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          seven(Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = size * 0.2
+            ..strokeJoin = StrokeJoin.round
+            ..color = const Color(0xFF3B0A0A), null),
+          seven(Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = size * 0.1
+            ..strokeJoin = StrokeJoin.round
+            ..color = const Color(0xFFFFD54F), null),
+          ShaderMask(
+            shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFF5252), Color(0xFFB71C1C)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
+            child: seven(null, Colors.white),
+          ),
+        ],
+      );
+    }
+    return Text(_symbols[sym], style: TextStyle(fontSize: size, height: 1.0));
+  }
+
 
   // 底下三個 LED 顯示：現金、下注、本次贏得
   Widget _ledRow() {
@@ -653,7 +692,7 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(children: [
-                    Text('${_symbols[s]}${_symbols[s]}${_symbols[s]}', style: const TextStyle(fontSize: 22)),
+                    Row(children: [for (var i = 0; i < 3; i++) Padding(padding: const EdgeInsets.only(right: 4), child: _symbolWidget(s, 24))]),
                     const Spacer(),
                     Text('× ${tp[s]}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFFFFD54F))),
                   ]),
@@ -662,7 +701,7 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
-                  Text('${_symbols[0]}${_symbols[0]}（最左邊起）', style: const TextStyle(fontSize: 15)),
+                  Row(children: [_symbolWidget(0, 24), _symbolWidget(0, 24), const SizedBox(width: 6), const Text('（最左邊起）')]),
                   const Spacer(),
                   Text('× ${cp[2]}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFFFFD54F))),
                 ]),
@@ -759,4 +798,39 @@ class _CoinPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CoinPainter old) => true;
+}
+
+// 五角星：金黃漸層 + 深橘色粗描邊 + 高光，放在淺色底上也看得清楚
+class _StarPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final R = size.width / 2;
+    final r = R * 0.48;
+    final path = Path();
+    for (var i = 0; i < 10; i++) {
+      final ang = -math.pi / 2 + i * math.pi / 5;
+      final rad = i.isEven ? R : r;
+      final p = Offset(c.dx + rad * math.cos(ang), c.dy + rad * math.sin(ang));
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    path.close();
+    canvas.drawPath(path, Paint()
+      ..color = const Color(0xFF7A3E00)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = R * 0.26
+      ..strokeJoin = StrokeJoin.round);
+    canvas.drawPath(path, Paint()
+      ..shader = const LinearGradient(colors: [Color(0xFFFFF176), Color(0xFFFF9800)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(Offset.zero & size));
+    canvas.drawPath(path, Paint()
+      ..color = const Color(0xFFE65100)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = R * 0.06
+      ..strokeJoin = StrokeJoin.round);
+    canvas.drawCircle(Offset(c.dx - R * 0.18, c.dy - R * 0.22), R * 0.1, Paint()..color = Colors.white70);
+  }
+
+  @override
+  bool shouldRepaint(covariant _StarPainter old) => false;
 }
