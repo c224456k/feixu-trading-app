@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_music.dart';
 import 'baccarat_screen.dart' show PlayingCardFace, CasinoChip;
 
 final _money = NumberFormat('#,##0');
@@ -51,6 +52,7 @@ class _PokerScreenState extends State<PokerScreen> {
   @override
   void initState() {
     super.initState();
+    CasinoMusic.instance.enter();
     _load();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _load());
     _tickTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
@@ -60,6 +62,7 @@ class _PokerScreenState extends State<PokerScreen> {
 
   @override
   void dispose() {
+    CasinoMusic.instance.leave();
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     super.dispose();
@@ -147,6 +150,7 @@ class _PokerScreenState extends State<PokerScreen> {
       appBar: AppBar(
         title: const Text('德州撲克'),
         actions: [
+          const MusicButton(),
           if (s?.mySeat != null)
             TextButton.icon(
               onPressed: _busy ? null : () => _leave(s!),

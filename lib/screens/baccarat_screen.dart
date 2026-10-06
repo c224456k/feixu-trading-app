@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_music.dart';
 
 final _money = NumberFormat('#,##0');
 
@@ -40,6 +41,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
   @override
   void initState() {
     super.initState();
+    CasinoMusic.instance.enter();
     _load();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _load());
     _tickTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
@@ -49,6 +51,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
 
   @override
   void dispose() {
+    CasinoMusic.instance.leave();
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     super.dispose();
@@ -188,7 +191,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
   Widget build(BuildContext context) {
     final s = _state;
     return Scaffold(
-      appBar: AppBar(title: const Text('百家樂')),
+      appBar: AppBar(title: const Text('百家樂'), actions: const [MusicButton()]),
       body: s == null
           ? Center(
               child: _error != null

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_music.dart';
 import '../widgets/casino_bet.dart';
 
 final _money = NumberFormat('#,##0');
@@ -42,6 +43,7 @@ class _HorseScreenState extends State<HorseScreen> {
   @override
   void initState() {
     super.initState();
+    CasinoMusic.instance.enter();
     _load();
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _load());
     // 跑道動畫要順，用 50ms 重畫一次（資料每秒才抓一次，中間靠本機計時推算馬的位置）
@@ -52,6 +54,7 @@ class _HorseScreenState extends State<HorseScreen> {
 
   @override
   void dispose() {
+    CasinoMusic.instance.leave();
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     super.dispose();
@@ -144,7 +147,7 @@ class _HorseScreenState extends State<HorseScreen> {
   Widget build(BuildContext context) {
     final s = _state;
     return Scaffold(
-      appBar: AppBar(title: const Text('賭馬'), toolbarHeight: 48),
+      appBar: AppBar(title: const Text('賭馬'), toolbarHeight: 48, actions: const [MusicButton()]),
       body: s == null
           ? Center(
               child: _error != null

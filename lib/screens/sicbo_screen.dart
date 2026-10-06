@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/casino_music.dart';
 import '../widgets/casino_bet.dart';
 import '../widgets/dice3d.dart';
 
@@ -44,6 +45,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    CasinoMusic.instance.enter();
     _roll = AnimationController(vsync: this, duration: _rollDuration)
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed && mounted && _state != null) {
@@ -61,6 +63,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
 
   @override
   void dispose() {
+    CasinoMusic.instance.leave();
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     _roll.dispose();
@@ -197,7 +200,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     final s = _state;
     return Scaffold(
-      appBar: AppBar(title: const Text('骰寶')),
+      appBar: AppBar(title: const Text('骰寶'), actions: const [MusicButton()]),
       body: s == null
           ? Center(
               child: _error != null
