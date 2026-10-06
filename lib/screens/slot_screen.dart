@@ -34,7 +34,7 @@ class _Reel {
 
 class _SlotScreenState extends State<SlotScreen>
     with SingleTickerProviderStateMixin {
-  static const _freeSpeed = 70.0; // 空轉速度（格/秒）
+  static const _freeSpeed = 130.0; // 空轉速度（格/秒）
   static const _cols = 5;
   static const _rows = 4;
   int get _len => _strips.isEmpty ? 60 : _strips[0].length;
@@ -47,6 +47,11 @@ class _SlotScreenState extends State<SlotScreen>
   final _frame = ValueNotifier<int>(0);
   double _now = 0;
   double _lastIdleFrame = 0;
+  bool _stopSoundPlayed = false;
+  bool _inBonus = false; // 第二階段播放中
+  Map<String, dynamic>? _bonusBanner; // {idx, total, mult, running}
+  Set<int> _bonusCellSet = {};
+  double _bonusRunning = 0;
 
   final List<_Reel> _reels = [_Reel(0), _Reel(7), _Reel(15), _Reel(23), _Reel(31)];
   List<List<int>> _strips = [];
@@ -149,7 +154,7 @@ class _SlotScreenState extends State<SlotScreen>
             r.from = r.pos;
             r.dist = need;
             r.t0 = _now;
-            r.dur = 1.15;
+            r.dur = 0.8;
             r.mode = _Mode.stopping;
           }
         case _Mode.stopping:
@@ -160,7 +165,10 @@ class _SlotScreenState extends State<SlotScreen>
             r.pos = (r.from + r.dist).roundToDouble();
             r.mode = _Mode.bounce;
             r.bounceT0 = _now;
-            CasinoMusic.instance.playSfx('reelstop');
+            if (!_stopSoundPlayed) {
+              _stopSoundPlayed = true;
+              CasinoMusic.instance.playSfx('reelstop');
+            }
             if (_reels.every(
               (e) => e.mode == _Mode.bounce || e.mode == _Mode.idle,
             )) {
@@ -184,13 +192,27 @@ class _SlotScreenState extends State<SlotScreen>
   }
 
   void _checkAllStopped() {
-    if (!_spinning) return;
+    if (!_spinning || _inBonus) return;
     if (_reels.any((r) => r.mode != _Mode.idle)) return;
-    _spinning = false;
     final res = _result;
-    if (res == null) return;
+    if (res == null) {
+      _spinning = false;
+      return;
+    }
     _resultShown = true;
     _resultAt = _now;
+    if (res['bonus'] != null) {
+      // 第二階段：先停在觸發畫面讓玩家看到 🎁，再依序播放 10 次免費旋轉，演完才結算
+      _inBonus = true;
+      _bonusCellSet = {
+        for (final cell in (res['bonus_cells'] as List? ?? const []))
+          (cell[0] as num).toInt() * _cols + (cell[1] as num).toInt(),
+      };
+      setState(() {});
+      _runBonus(res);
+      return;
+    }
+    _spinning = false;
     final payout = (res['payout'] as num).toDouble();
     final bet = (res['bet'] as num).toDouble();
     setState(() => _shownCash = (res['cash'] as num).toDouble());
@@ -212,6 +234,110 @@ class _SlotScreenState extends State<SlotScreen>
         setState(() => _auto = false);
       } else {
         Future.delayed(Duration(milliseconds: payout > 0 ? 2200 : 900), () {
+          if (mounted && _auto && !_spinning) _spin();
+        });
+      }
+    }
+  }
+
+  // 等所有轉輪停下
+  Future<void> _waitReelsIdle() async {
+    while (mounted && _reels.any((r) => r.mode != _Mode.idle)) {
+      await Future.delayed(const Duration(milliseconds: 40));
+    }
+  }
+
+  Future<void> _runBonus(Map<String, dynamic> res) async {
+    final bonus = (res['bonus'] as Map).cast<String, dynamic>();
+    final spins = [for (final x in bonus['spins'] as List) (x as Map).cast<String, dynamic>()];
+    final bet = (res['bet'] as num).toDouble();
+    CasinoMusic.instance.playSfx('jackpot');
+    _startCoins(60);
+    // 1) 觸發畫面 + 開場
+    setState(() => _bonusBanner = {'intro': true, 'total': spins.length});
+    await Future.delayed(const Duration(milliseconds: 2300));
+    if (!mounted) return;
+    _bonusRunning = 0;
+    // 先把一般旋轉本身的獎金算進「贏得」
+    final baseWin = (res['payout'] as num).toDouble() - (bonus['total'] as num).toDouble() - ((res['jackpot_win'] as num?)?.toDouble() ?? 0);
+    _bonusRunning = baseWin;
+    // 2) 逐次免費旋轉
+    for (var i = 0; i < spins.length; i++) {
+      if (!mounted) return;
+      final sp = spins[i];
+      final mult = (sp['mult'] as num).toInt();
+      setState(() {
+        _bonusBanner = {'idx': i + 1, 'total': spins.length, 'mult': mult, 'running': _bonusRunning};
+        _resultShown = false;
+        _bonusCellSet = {};
+        _wins = [];
+        _diamond = null;
+      });
+      final stops = [for (final x in sp['stops'] as List) (x as num).toInt()];
+      for (final r in _reels) {
+        r.mode = _Mode.free;
+        r.stopAt = 0;
+      }
+      CasinoMusic.instance.playSfx('reelspin');
+      await Future.delayed(const Duration(milliseconds: 350));
+      _stopSoundPlayed = false;
+      for (var c = 0; c < _cols; c++) {
+        _reels[c].dist = stops[c].toDouble();
+        _reels[c].stopAt = _now + 0.02;
+      }
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _waitReelsIdle();
+      if (!mounted) return;
+      final raw = (sp['payout'] as num).toDouble();
+      final amount = (sp['amount'] as num).toDouble();
+      _bonusRunning += amount;
+      setState(() {
+        // 顯示時把每一組中獎金額乘上這次的倍率，跟實際入帳的數字一致
+        _wins = [
+          for (final w in sp['wins'] as List)
+            {...(w as Map).cast<String, dynamic>(), 'amount': ((w['amount'] as num) * mult).toInt()},
+        ];
+        final d = (sp['diamond'] as Map).cast<String, dynamic>();
+        _diamond = {...d, 'amount': ((d['amount'] as num) * mult).toInt()};
+        _resultShown = true;
+        _resultAt = _now;
+        _bonusBanner = {'idx': i + 1, 'total': spins.length, 'mult': mult, 'running': _bonusRunning};
+      });
+      if (raw > 0) {
+        CasinoMusic.instance.playSfx(amount >= bet * 10 ? 'jackpot' : 'win');
+        if (amount >= bet * 5) _startCoins(50);
+      }
+      await Future.delayed(Duration(milliseconds: raw > 0 ? 1500 : 700));
+    }
+    // 3) 結算
+    if (!mounted) return;
+    final total = (bonus['total'] as num).toDouble();
+    CasinoMusic.instance.playSfx('jackpot');
+    _startCoins(160);
+    setState(() => _bonusBanner = {'done': true, 'total': total});
+    await Future.delayed(const Duration(milliseconds: 3200));
+    if (!mounted) return;
+    setState(() {
+      _bonusBanner = null;
+      _inBonus = false;
+      _spinning = false;
+      _shownCash = (res['cash'] as num).toDouble();
+      _cash = _shownCash;
+      _result = res;
+      _resultShown = true;
+    });
+    final jp = (res['jackpot_win'] as num?)?.toDouble() ?? 0;
+    if (res['jackpot_pool'] != null) setState(() => _pool = (res['jackpot_pool'] as num).toDouble());
+    if (jp > 0) {
+      CasinoMusic.instance.playSfx('jackpot');
+      _startCoins(240);
+      _showJackpotDialog(jp);
+    }
+    if (_auto) {
+      if (jp > 0 || res['big'] == true) {
+        setState(() => _auto = false);
+      } else {
+        Future.delayed(const Duration(milliseconds: 900), () {
           if (mounted && _auto && !_spinning) _spin();
         });
       }
@@ -347,19 +473,20 @@ class _SlotScreenState extends State<SlotScreen>
       _abort(res['message']?.toString() ?? '失敗');
       return;
     }
-    // 至少空轉 0.8 秒才開始依序停輪，看起來才有「轉」的感覺
+    // 至少空轉 0.45 秒，三個轉輪同時停下
     final waited = DateTime.now().difference(started).inMilliseconds / 1000.0;
-    final extra = math.max(0.0, 0.8 - waited);
+    final extra = math.max(0.0, 0.45 - waited);
     final stops = [for (final s in res['stops'] as List) (s as num).toInt()];
     _result = res;
     _wins = [
       for (final w in res['wins'] as List) (w as Map).cast<String, dynamic>(),
     ];
     _diamond = (res['diamond'] as Map?)?.cast<String, dynamic>();
+    _stopSoundPlayed = false;
     for (var i = 0; i < _cols; i++) {
       final r = _reels[i];
       r.dist = stops[i].toDouble(); // 暫存停輪位置，tick 裡換算成要轉的距離
-      r.stopAt = _now + extra + 0.15 + i * 0.42;
+      r.stopAt = _now + extra + 0.05;
     }
   }
 
@@ -431,7 +558,7 @@ class _SlotScreenState extends State<SlotScreen>
                       const SizedBox(height: 8),
                       Text(
                         '5 轉輪 × 4 列、1024 路（不用連線）：從最左邊起連續 3 個以上轉輪有同一種符號就中獎，百搭可代替。'
-                        '鑽石只要出現在畫面上就一定有獎。基本遊戲回報率約 95%，加上彩池約 96.5%。'
+                        '鑽石只要出現在畫面上就一定有獎；🎁 出現在 3 個以上轉輪就進入第二階段免費旋轉（倍率最高 ×6）。整體回報率約 95%（含彩池與第二階段）。'
                         '結果由伺服器抽出，贏超過 20 倍或中彩池會公告到 Discord。',
                         style: const TextStyle(
                           color: Colors.white54,
@@ -554,6 +681,7 @@ class _SlotScreenState extends State<SlotScreen>
                   ),
                 ),
                 const SizedBox(height: 10),
+                _bonusBannerWidget(),
                 _reelWindow(),
                 _winCaption(),
                 const SizedBox(height: 12),
@@ -655,6 +783,41 @@ class _SlotScreenState extends State<SlotScreen>
     );
   }
 
+  // 第二階段橫幅：開場 / 第 n 次免費旋轉（倍率、累計）/ 結算
+  Widget _bonusBannerWidget() {
+    final b = _bonusBanner;
+    if (b == null) return const SizedBox.shrink();
+    String title;
+    String sub;
+    if (b['intro'] == true) {
+      title = '🎁 第二階段 · 免費旋轉！';
+      sub = '${b['total']} 次免費旋轉，獎金倍率 ×2 → ×6';
+    } else if (b['done'] == true) {
+      title = '第二階段結束';
+      sub = '共贏得 +${_money.format((b['total'] as num).toDouble())}';
+    } else {
+      title = '免費旋轉 ${b['idx']}/${b['total']}　×${b['mult']}';
+      sub = '累計 +${_money.format((b['running'] as num).toDouble())}';
+    }
+    final pulse = 0.5 + 0.5 * math.sin(_now * 8);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: const LinearGradient(colors: [Color(0xFF4A148C), Color(0xFF880E4F)]),
+        border: Border.all(color: Color.lerp(const Color(0xFFFFD54F), const Color(0xFFFFFFFF), pulse)!, width: 2.5),
+        boxShadow: [BoxShadow(color: const Color(0xFFE040FB).withValues(alpha: 0.5 + 0.3 * pulse), blurRadius: 18)],
+      ),
+      child: Column(
+        children: [
+          Text(title, style: const TextStyle(color: Color(0xFFFFF59D), fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1)),
+          Text(sub, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   Widget _reelWindow() {
     return LayoutBuilder(
       builder: (context, c) {
@@ -703,6 +866,7 @@ class _SlotScreenState extends State<SlotScreen>
               builder: (context, _) {
                 final cells = <int>{};
                 final dCells = <int>{};
+                final bCells = _inBonus && _bonusBanner?['idx'] == null ? _bonusCellSet : const <int>{};
                 if (_resultShown) {
                   for (final wn in _wins) {
                     for (final cell in wn['cells'] as List) {
@@ -726,7 +890,7 @@ class _SlotScreenState extends State<SlotScreen>
                         children: [
                           for (var col = 0; col < _cols; col++) ...[
                             if (col > 0) const SizedBox(width: gap),
-                            _reelColumn(col, tileW, tileH, cells, dCells, pulse),
+                            _reelColumn(col, tileW, tileH, cells, dCells, bCells, pulse),
                           ],
                         ],
                       ),
@@ -829,6 +993,7 @@ class _SlotScreenState extends State<SlotScreen>
     double tileH,
     Set<int> winCells,
     Set<int> dCells,
+    Set<int> bCells,
     double pulse,
   ) {
     final r = _reels[col];
@@ -851,6 +1016,7 @@ class _SlotScreenState extends State<SlotScreen>
       final settledHere = r.mode == _Mode.idle && (pos - k - row).abs() < 0.05;
       final isWin = settledHere && winCells.contains(row * _cols + col);
       final isDiamond = settledHere && dCells.contains(row * _cols + col);
+      final isBonus = settledHere && bCells.contains(row * _cols + col);
       // 轉輪是圓柱：離中心越遠的格子越往後傾斜、越暗，看起來像真的滾筒
       final u = ((y + tileH / 2) - tileH * _rows / 2) / (tileH * _rows / 2);
       tiles.add(
@@ -867,7 +1033,7 @@ class _SlotScreenState extends State<SlotScreen>
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _tile(sym, tileW, tileH, isWin, pulse, diamond: isDiamond),
+                _tile(sym, tileW, tileH, isWin, pulse, diamond: isDiamond, bonus: isBonus),
                 IgnorePointer(
                   child: Container(
                     margin: const EdgeInsets.all(2),
@@ -902,9 +1068,9 @@ class _SlotScreenState extends State<SlotScreen>
     return reel;
   }
 
-  Widget _tile(int sym, double w, double h, bool win, double pulse, {bool diamond = false}) {
-    final glow = diamond ? const Color(0xFF4DD0E1) : const Color(0xFFFFE066);
-    final lit = win || diamond;
+  Widget _tile(int sym, double w, double h, bool win, double pulse, {bool diamond = false, bool bonus = false}) {
+    final glow = bonus ? const Color(0xFFE040FB) : (diamond ? const Color(0xFF4DD0E1) : const Color(0xFFFFE066));
+    final lit = win || diamond || bonus;
     return Container(
       margin: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -912,7 +1078,9 @@ class _SlotScreenState extends State<SlotScreen>
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: diamond
+          colors: bonus
+              ? const [Color(0xFFF3E5F5), Color(0xFFCE93D8)]
+              : diamond
               ? const [Color(0xFFE0F7FA), Color(0xFF80DEEA)]
               : win
               ? const [Color(0xFFFFFBE6), Color(0xFFFFD866)]
@@ -921,7 +1089,7 @@ class _SlotScreenState extends State<SlotScreen>
         ),
         border: Border.all(
           color: lit
-              ? Color.lerp(diamond ? const Color(0xFF00838F) : const Color(0xFFB8860B), glow, pulse)!
+              ? Color.lerp(bonus ? const Color(0xFF6A1B9A) : (diamond ? const Color(0xFF00838F) : const Color(0xFFB8860B)), glow, pulse)!
               : const Color(0xFF7A745F),
           width: lit ? 3.5 : 1.2,
         ),
@@ -996,6 +1164,13 @@ class _SlotScreenState extends State<SlotScreen>
         child: CustomPaint(painter: _GemPainter()),
       );
     }
+    if (sym == 8) {
+      return SizedBox(
+        width: size * 1.35,
+        height: size * 1.35,
+        child: CustomPaint(painter: _BonusPainter()),
+      );
+    }
     if (sym == 7) {
       return SizedBox(
         width: size * 1.35,
@@ -1009,7 +1184,8 @@ class _SlotScreenState extends State<SlotScreen>
   // 底下三個 LED 顯示：現金、下注、本次贏得
   Widget _ledRow() {
     final res = _resultShown ? _result : null;
-    final payout = res == null ? 0.0 : (res['payout'] as num).toDouble();
+    var payout = res == null ? 0.0 : (res['payout'] as num).toDouble();
+    if (_inBonus && _bonusBanner?['idx'] != null) payout = _bonusRunning;
     return Row(
       children: [
         Expanded(child: _led('現金', _shownCash, const Color(0xFF7CFFB0))),
@@ -1300,6 +1476,14 @@ class _SlotScreenState extends State<SlotScreen>
                     ),
                 ],
               ),
+              const Divider(height: 24),
+              Row(children: [_symbolWidget(8, 24), const SizedBox(width: 8), const Text('第二階段 · 超高報酬', style: TextStyle(fontWeight: FontWeight.bold))]),
+              const SizedBox(height: 4),
+              Text(
+                '畫面上有 ${_info!['bonus_min_reels']} 個轉輪出現 🎁，就進入第二階段：用同樣的下注額免費轉 ${(_info!['bonus_mults'] as List).length} 次，'
+                '每次的連線獎金與鑽石保底都乘上倍率（${(_info!['bonus_mults'] as List).map((e) => '×$e').join('、')}）。整段由伺服器一次算好、一次入帳。',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
               const SizedBox(height: 12),
               Row(children: [_symbolWidget(7, 24), const SizedBox(width: 8), const Expanded(child: Text('百搭只會出現在第 2、3、4 輪，可代替除了鑽石以外的所有符號。', style: TextStyle(color: Colors.white70, fontSize: 12)))]),
             ],
@@ -1547,4 +1731,55 @@ class _WildPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _WildPainter old) => false;
+}
+
+// 第二階段符號：紫金色禮盒 + 光芒
+class _BonusPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final c = size.center(Offset.zero);
+    // 光芒
+    final ray = Paint()..color = const Color(0x55FFD54F);
+    for (var i = 0; i < 8; i++) {
+      final a = i * math.pi / 4;
+      final path = Path()
+        ..moveTo(c.dx, c.dy)
+        ..lineTo(c.dx + math.cos(a - 0.12) * w * 0.52, c.dy + math.sin(a - 0.12) * h * 0.52)
+        ..lineTo(c.dx + math.cos(a + 0.12) * w * 0.52, c.dy + math.sin(a + 0.12) * h * 0.52)
+        ..close();
+      canvas.drawPath(path, ray);
+    }
+    final box = RRect.fromRectAndRadius(Rect.fromLTWH(w * 0.2, h * 0.38, w * 0.6, h * 0.46), Radius.circular(w * 0.06));
+    canvas.drawRRect(box.shift(Offset(w * 0.03, h * 0.04)), Paint()..color = Colors.black45);
+    canvas.drawRRect(box, Paint()
+      ..shader = const LinearGradient(colors: [Color(0xFFE040FB), Color(0xFF6A1B9A)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(box.outerRect));
+    final lid = RRect.fromRectAndRadius(Rect.fromLTWH(w * 0.16, h * 0.28, w * 0.68, h * 0.16), Radius.circular(w * 0.05));
+    canvas.drawRRect(lid, Paint()
+      ..shader = const LinearGradient(colors: [Color(0xFFF48FB1), Color(0xFFAD1457)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(lid.outerRect));
+    final gold = Paint()..color = const Color(0xFFFFD54F);
+    canvas.drawRect(Rect.fromLTWH(w * 0.46, h * 0.28, w * 0.08, h * 0.56), gold);
+    // 蝴蝶結
+    final bow = Path()
+      ..moveTo(c.dx, h * 0.28)
+      ..quadraticBezierTo(w * 0.28, h * 0.06, w * 0.32, h * 0.26)
+      ..quadraticBezierTo(w * 0.4, h * 0.3, c.dx, h * 0.28)
+      ..moveTo(c.dx, h * 0.28)
+      ..quadraticBezierTo(w * 0.72, h * 0.06, w * 0.68, h * 0.26)
+      ..quadraticBezierTo(w * 0.6, h * 0.3, c.dx, h * 0.28);
+    canvas.drawPath(bow, gold);
+    canvas.drawPath(bow, Paint()
+      ..color = const Color(0xFF8D6E00)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.02);
+    canvas.drawRRect(box, Paint()
+      ..color = const Color(0xFF2A0845)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.03);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BonusPainter old) => false;
 }
