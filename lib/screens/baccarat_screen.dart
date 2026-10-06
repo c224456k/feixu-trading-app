@@ -241,7 +241,12 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('現金 ${_money.format(_displayCash)} 元', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        TweenAnimationBuilder<double>(
+          tween: Tween(end: _displayCash),
+          duration: const Duration(milliseconds: 1200),
+          curve: Curves.easeOutCubic,
+          builder: (context, v, _) => Text('💰 現金 ${_money.format(v)} 元', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
         if (s.roundId != null) Text('第 ${s.roundId} 局', style: const TextStyle(color: Colors.white54)),
       ],
     );
@@ -517,73 +522,172 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
   Widget _chipRow() {
     return Wrap(
       alignment: WrapAlignment.center,
-      spacing: 8,
-      runSpacing: 8,
+      spacing: 6,
+      runSpacing: 6,
       children: _chips.map((c) {
-        return ChoiceChip(label: Text(_money.format(c)), selected: c == _chip, onSelected: (_) => setState(() => _chip = c));
+        final selected = c == _chip;
+        return GestureDetector(
+          onTap: () => setState(() => _chip = c),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            transform: Matrix4.translationValues(0, selected ? -6 : 0, 0),
+            child: _CasinoChip(value: c, size: 52, glow: selected),
+          ),
+        );
       }).toList(),
     );
+  }
+
+  // 把金額拆成籌碼面額（由大到小），最多畫 6 顆疊起來
+  List<int> _chipStack(double amount) {
+    final out = <int>[];
+    var left = amount.round();
+    for (final v in _chips.reversed) {
+      while (left >= v && out.length < 6) {
+        out.add(v);
+        left -= v;
+      }
+    }
+    if (out.isEmpty && amount > 0) out.add(_chips.first);
+    return out.reversed.toList(); // 大的在下面
   }
 
   Widget _betGrid(BaccaratState s) {
     final seated = s.mySeat != null;
     final canBet = seated && !_busy && (s.isIdle || (s.isOpen && _remaining > 0));
-    return LayoutBuilder(builder: (context, c) {
-      final cols = c.maxWidth >= 480 ? 3 : 2;
-      final w = (c.maxWidth - 10 * (cols - 1)) / cols;
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: s.betTypes.map((t) {
-          final mine = s.myBets[t.key] ?? 0;
-          final win = _animDone && _wins(t.key, s);
-          final color = _typeColor(t.key);
-          return SizedBox(
-            width: w,
-            child: Material(
-              color: color.withValues(alpha: canBet || win ? 0.22 : 0.08),
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: canBet ? () => _bet(t) : null,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: win ? const Color(0xFFF1C40F) : color.withValues(alpha: canBet ? 0.6 : 0.3),
-                      width: win ? 3 : 1.5,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(t.shortName, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-                      Text(t.payout, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-                      const SizedBox(height: 6),
-                      Text(
-                        '全場 ${_money.format(s.poolAmount[t.key] ?? 0)}（${s.poolPlayers[t.key] ?? 0} 人）',
-                        style: const TextStyle(fontSize: 11, color: Colors.white54),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        mine > 0
-                            ? '我押 ${_money.format(mine)}'
-                            : (canBet ? '點一下押 ${_money.format(_chip)}' : (seated ? '—' : '請先入座')),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: mine > 0 ? FontWeight.bold : FontWeight.normal,
-                          color: mine > 0 ? Colors.white : Colors.white38,
-                        ),
-                      ),
-                    ],
+    BaccaratBetType? t(String k) {
+      for (final b in s.betTypes) {
+        if (b.key == k) return b;
+      }
+      return null;
+    }
+
+    Widget zone(String key, double height) {
+      final bt = t(key);
+      if (bt == null) return const SizedBox.shrink();
+      return Expanded(child: _betZone(s, bt, height, canBet, seated));
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const RadialGradient(radius: 1.1, colors: [Color(0xFF0E7A4B), Color(0xFF06351F)]),
+        border: Border.all(color: const Color(0xFF8B6B2E), width: 3),
+      ),
+      child: Column(
+        children: [
+          Row(children: [zone('player_pair', 92), const SizedBox(width: 8), zone('tie', 92), const SizedBox(width: 8), zone('banker_pair', 92)]),
+          const SizedBox(height: 8),
+          Row(children: [zone('player', 150), const SizedBox(width: 8), zone('banker', 150)]),
+        ],
+      ),
+    );
+  }
+
+  Widget _betZone(BaccaratState s, BaccaratBetType t, double height, bool canBet, bool seated) {
+    final color = _typeColor(t.key);
+    final bet = s.myBets[t.key] ?? 0;
+    final settled = s.isSettled && _animDone;
+    final win = settled && _wins(t.key, s);
+    final payout = s.myPayouts[t.key] ?? 0;
+    final lost = settled && bet > 0 && payout <= 0.005;
+    final pulse = win ? (0.5 + 0.5 * math.sin(DateTime.now().millisecondsSinceEpoch / 180.0)) : 0.0;
+    // 結算後贏的區域，籌碼堆換成「派彩金額」那一疊，看起來像莊家把籌碼推過來
+    final shownAmount = settled && payout > 0.005 ? payout : bet;
+    final net = payout - bet;
+    final bigZone = height > 120;
+
+    return GestureDetector(
+      onTap: canBet ? () => _bet(t) : null,
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: color.withValues(alpha: canBet ? 0.20 : 0.10),
+          border: Border.all(
+            color: win ? Color.lerp(const Color(0xFFB8860B), const Color(0xFFFFE066), pulse)! : color.withValues(alpha: canBet ? 0.85 : 0.35),
+            width: win ? 4 : 2,
+          ),
+          boxShadow: win ? [BoxShadow(color: const Color(0xFFF1C40F).withValues(alpha: 0.35 + 0.3 * pulse), blurRadius: 18, spreadRadius: 2)] : null,
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              top: 8,
+              left: 0,
+              right: 0,
+              child: Column(
+                children: [
+                  Text(t.shortName, style: TextStyle(fontSize: bigZone ? 30 : 20, fontWeight: FontWeight.bold, color: color, letterSpacing: 2)),
+                  Text(t.payout, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                ],
+              ),
+            ),
+            if (shownAmount > 0)
+              Positioned(
+                bottom: bigZone ? 28 : 22,
+                child: Opacity(
+                  opacity: lost ? 0.35 : 1,
+                  child: TweenAnimationBuilder<double>(
+                    key: ValueKey('${s.roundId}-${t.key}-${shownAmount.round()}-${win ? 1 : 0}'),
+                    tween: Tween(begin: 0, end: 1),
+                    duration: Duration(milliseconds: win ? 650 : 320),
+                    curve: win ? Curves.elasticOut : Curves.bounceOut,
+                    builder: (context, v, child) => Transform.translate(offset: Offset(0, -34 * (1 - v)), child: Opacity(opacity: v.clamp(0.0, 1.0), child: child)),
+                    child: _chipPile(shownAmount, bigZone ? 38.0 : 30.0),
                   ),
                 ),
               ),
+            Positioned(
+              bottom: 5,
+              left: 4,
+              right: 4,
+              child: Text(
+                settled && bet > 0
+                    ? (net > 0.005 ? '+${_money.format(net)}' : (net > -0.005 ? '退回' : '-${_money.format(-net)}'))
+                    : (bet > 0 ? '我押 ${_money.format(bet)}' : (canBet ? '押 ${_money.format(_chip)}' : (seated ? '' : '請先入座'))),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: settled && bet > 0 ? 14 : 11,
+                  fontWeight: FontWeight.bold,
+                  color: settled && bet > 0
+                      ? (net > 0.005 ? const Color(0xFFFFE066) : (net > -0.005 ? Colors.white70 : Colors.redAccent))
+                      : (bet > 0 ? Colors.white : Colors.white54),
+                ),
+              ),
             ),
-          );
-        }).toList(),
-      );
-    });
+            Positioned(
+              top: 4,
+              right: 8,
+              child: Text(
+                '${s.poolPlayers[t.key] ?? 0}人',
+                style: const TextStyle(fontSize: 10, color: Colors.white38),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chipPile(double amount, double size) {
+    final stack = _chipStack(amount);
+    const step = 5.0;
+    return SizedBox(
+      width: size,
+      height: size * 0.5 + step * stack.length + 6,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          for (var i = 0; i < stack.length; i++)
+            Positioned(bottom: i * step, child: _CasinoChip(value: stack[i], size: size, flat: true)),
+        ],
+      ),
+    );
   }
 
   Widget _history(BaccaratState s) {
@@ -773,4 +877,81 @@ class PlayingCardFace extends StatelessWidget {
       ),
     );
   }
+}
+
+
+// 賭場籌碼：圓形、外圈白色缺口條紋、內圈細線、中間寫面額。flat = 疊在一起時用（不加大陰影）。
+class _CasinoChip extends StatelessWidget {
+  final int value;
+  final double size;
+  final bool glow;
+  final bool flat;
+
+  const _CasinoChip({required this.value, required this.size, this.glow = false, this.flat = false});
+
+  static Color colorFor(int v) {
+    if (v >= 500000) return const Color(0xFF7B1FA2);
+    if (v >= 100000) return const Color(0xFF212121);
+    if (v >= 50000) return const Color(0xFF2E7D32);
+    if (v >= 10000) return const Color(0xFFC62828);
+    return const Color(0xFF546E7A);
+  }
+
+  static String label(int v) => v >= 1000 ? '${v ~/ 1000}K' : '$v';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: glow ? const Color(0xFFF1C40F).withValues(alpha: 0.8) : Colors.black54,
+            blurRadius: glow ? 12 : (flat ? 2 : 5),
+            offset: glow ? Offset.zero : const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: CustomPaint(
+        painter: _ChipPainter(colorFor(value)),
+        child: Center(
+          child: Text(label(value), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.26)),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChipPainter extends CustomPainter {
+  final Color color;
+  _ChipPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    canvas.drawCircle(c, r, Paint()..color = color);
+    // 外圈 8 段白色條紋
+    final stripe = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.22;
+    final rect = Rect.fromCircle(center: c, radius: r * 0.89);
+    for (var i = 0; i < 8; i++) {
+      canvas.drawArc(rect, i * math.pi / 4 - 0.2, 0.4, false, stripe);
+    }
+    canvas.drawCircle(c, r * 0.68, Paint()
+      ..color = Colors.white70
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2);
+    canvas.drawCircle(c, r - 0.5, Paint()
+      ..color = Colors.black26
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ChipPainter old) => old.color != color;
 }
