@@ -12,7 +12,7 @@ import '../widgets/casino_music.dart';
 
 final _money = NumberFormat('#,##0');
 
-// 網頁版老虎機：3 轉輪 × 3 列、5 條線。單人玩、不用入座。
+// 網頁版老虎機：5 轉輪 × 4 列、1024 路（ways）、百搭、鑽石出現必中獎。單人玩、不用入座。
 // 每次旋轉的結果（停輪位置、中獎線、派彩）全由伺服器抽出並入帳，這個畫面只負責「演出」：
 // 按下旋轉就先讓轉輪空轉，等伺服器回傳結果後，三個轉輪依序減速、停在伺服器指定的位置。
 class SlotScreen extends StatefulWidget {
@@ -35,7 +35,9 @@ class _Reel {
 class _SlotScreenState extends State<SlotScreen>
     with SingleTickerProviderStateMixin {
   static const _freeSpeed = 70.0; // 空轉速度（格/秒）
-  static const _len = 32;
+  static const _cols = 5;
+  static const _rows = 4;
+  int get _len => _strips.isEmpty ? 60 : _strips[0].length;
 
   final _api = ApiClient();
   Map<String, dynamic>? _info;
@@ -46,9 +48,9 @@ class _SlotScreenState extends State<SlotScreen>
   double _now = 0;
   double _lastIdleFrame = 0;
 
-  final List<_Reel> _reels = [_Reel(0), _Reel(7), _Reel(15)];
+  final List<_Reel> _reels = [_Reel(0), _Reel(7), _Reel(15), _Reel(23), _Reel(31)];
   List<List<int>> _strips = [];
-  List<List<int>> _lines = [];
+  Map<String, dynamic>? _diamond;
   List<String> _symbols = [];
 
   int _bet = 10000;
@@ -98,10 +100,6 @@ class _SlotScreenState extends State<SlotScreen>
           for (final s in info['strips'] as List)
             [for (final v in s as List) (v as num).toInt()],
         ];
-        _lines = [
-          for (final l in info['lines'] as List)
-            [for (final v in l as List) (v as num).toInt()],
-        ];
         _symbols = [for (final s in info['symbols'] as List) s as String];
         _cash = (info['cash'] as num).toDouble();
         _shownCash = _cash;
@@ -135,7 +133,7 @@ class _SlotScreenState extends State<SlotScreen>
     _now = d.inMicroseconds / 1e6;
     final dt = math.min(0.05, _now - prev);
     var changed = false;
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < _cols; i++) {
       final r = _reels[i];
       switch (r.mode) {
         case _Mode.idle:
@@ -318,6 +316,7 @@ class _SlotScreenState extends State<SlotScreen>
       _resultShown = false;
       _result = null;
       _wins = [];
+      _diamond = null;
     });
     // 按下就先空轉 + 拉桿動畫
     for (final r in _reels) {
@@ -356,10 +355,11 @@ class _SlotScreenState extends State<SlotScreen>
     _wins = [
       for (final w in res['wins'] as List) (w as Map).cast<String, dynamic>(),
     ];
-    for (var i = 0; i < 3; i++) {
+    _diamond = (res['diamond'] as Map?)?.cast<String, dynamic>();
+    for (var i = 0; i < _cols; i++) {
       final r = _reels[i];
       r.dist = stops[i].toDouble(); // 暫存停輪位置，tick 裡換算成要轉的距離
-      r.stopAt = _now + extra + 0.15 + i * 0.5;
+      r.stopAt = _now + extra + 0.15 + i * 0.42;
     }
   }
 
@@ -430,8 +430,9 @@ class _SlotScreenState extends State<SlotScreen>
                       _history(),
                       const SizedBox(height: 8),
                       Text(
-                        '3 轉輪 × 5 條線（上、中、下、兩條斜線），總下注平分到 5 條線。三個一樣依賠率派彩，'
-                        '左邊起連續兩顆櫻桃也有小賠。基本遊戲回報率約 94.5%，加上彩池約 96%。結果由伺服器抽出，贏超過 20 倍或中彩池會公告到 Discord。',
+                        '5 轉輪 × 4 列、1024 路（不用連線）：從最左邊起連續 3 個以上轉輪有同一種符號就中獎，百搭可代替。'
+                        '鑽石只要出現在畫面上就一定有獎。基本遊戲回報率約 95%，加上彩池約 96.5%。'
+                        '結果由伺服器抽出，贏超過 20 倍或中彩池會公告到 Discord。',
                         style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 12,
@@ -554,6 +555,7 @@ class _SlotScreenState extends State<SlotScreen>
                 ),
                 const SizedBox(height: 10),
                 _reelWindow(),
+                _winCaption(),
                 const SizedBox(height: 12),
                 _ledRow(),
               ],
@@ -657,10 +659,10 @@ class _SlotScreenState extends State<SlotScreen>
     return LayoutBuilder(
       builder: (context, c) {
         final w = c.maxWidth;
-        const gap = 6.0;
-        final tileW = (w - 16 - gap * 2) / 3;
-        final tileH = tileW * 0.92;
-        final h = tileH * 3;
+        const gap = 4.0;
+        final tileW = (w - 16 - gap * (_cols - 1)) / _cols;
+        final tileH = tileW * 0.96;
+        final h = tileH * _rows;
         return Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
@@ -700,16 +702,19 @@ class _SlotScreenState extends State<SlotScreen>
               animation: _frame,
               builder: (context, _) {
                 final cells = <int>{};
+                final dCells = <int>{};
                 if (_resultShown) {
                   for (final wn in _wins) {
-                    final line = _lines[(wn['line'] as num).toInt()];
-                    for (
-                      var col = 0;
-                      col < (wn['count'] as num).toInt();
-                      col++
-                    ) {
-                      cells.add(line[col] * 3 + col);
+                    for (final cell in wn['cells'] as List) {
+                      cells.add(
+                        (cell[0] as num).toInt() * _cols + (cell[1] as num).toInt(),
+                      );
                     }
+                  }
+                  for (final cell in (_diamond?['cells'] as List? ?? const [])) {
+                    dCells.add(
+                      (cell[0] as num).toInt() * _cols + (cell[1] as num).toInt(),
+                    );
                   }
                 }
                 final pulse = 0.5 + 0.5 * math.sin(_now * 9);
@@ -719,9 +724,9 @@ class _SlotScreenState extends State<SlotScreen>
                     children: [
                       Row(
                         children: [
-                          for (var col = 0; col < 3; col++) ...[
+                          for (var col = 0; col < _cols; col++) ...[
                             if (col > 0) const SizedBox(width: gap),
-                            _reelColumn(col, tileW, tileH, cells, pulse),
+                            _reelColumn(col, tileW, tileH, cells, dCells, pulse),
                           ],
                         ],
                       ),
@@ -746,21 +751,6 @@ class _SlotScreenState extends State<SlotScreen>
                           ),
                         ),
                       ),
-                      if (_resultShown && _wins.isNotEmpty)
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: CustomPaint(
-                              painter: _LinePainter(
-                                _wins,
-                                _lines,
-                                tileW,
-                                tileH,
-                                gap,
-                                _now - _resultAt,
-                              ),
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 );
@@ -772,11 +762,73 @@ class _SlotScreenState extends State<SlotScreen>
     );
   }
 
+  // 轉輪下方的中獎說明：每 1.2 秒輪播一組中獎（符號 × 連續幾輪、幾路、金額），鑽石保底獨立顯示
+  Widget _winCaption() {
+    return AnimatedBuilder(
+      animation: _frame,
+      builder: (context, _) {
+        final items = <Widget>[];
+        if (_resultShown) {
+          final entries = <(Widget, String)>[
+            for (final w in _wins)
+              (
+                _symbolWidget((w['symbol'] as num).toInt(), 20),
+                '連 ${w['count']} 輪 · ${w['ways']} 路　+${_money.format((w['amount'] as num).toInt())}',
+              ),
+          ];
+          final d = _diamond;
+          if (d != null && (d['count'] as num) > 0) {
+            entries.insert(0, (
+              _symbolWidget(6, 20),
+              '鑽石 ×${d['count']} 必中獎！　+${_money.format((d['amount'] as num).toInt())}',
+            ));
+          }
+          if (entries.isNotEmpty) {
+            final e = entries[((_now - _resultAt) / 1.2).floor() % entries.length];
+            items.add(e.$1);
+            items.add(const SizedBox(width: 8));
+            items.add(
+              Flexible(
+                child: Text(
+                  e.$2,
+                  style: const TextStyle(
+                    color: Color(0xFFFFE066),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          }
+        }
+        return Container(
+          height: 36,
+          margin: const EdgeInsets.only(top: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            color: Colors.black.withValues(alpha: 0.55),
+            border: Border.all(color: const Color(0x66E0B341)),
+          ),
+          child: items.isEmpty
+              ? Text(
+                  _spinning ? '轉動中…' : '5 × 4 · 1024 路 · 💎 出現必中獎',
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                )
+              : Row(mainAxisSize: MainAxisSize.min, children: items),
+        );
+      },
+    );
+  }
+
   Widget _reelColumn(
     int col,
     double tileW,
     double tileH,
     Set<int> winCells,
+    Set<int> dCells,
     double pulse,
   ) {
     final r = _reels[col];
@@ -791,17 +843,16 @@ class _SlotScreenState extends State<SlotScreen>
     final strip = _strips[col];
     final base = pos.floor();
     final tiles = <Widget>[];
-    for (var k = base - 3; k <= base + 2; k++) {
+    for (var k = base - 4; k <= base + 2; k++) {
       final y = (pos - k) * tileH;
-      if (y < -tileH || y > tileH * 3) continue;
+      if (y < -tileH || y > tileH * _rows) continue;
       final sym = strip[((k % _len) + _len) % _len];
-      final row = ((pos - k).round()).clamp(0, 2);
-      final isWin =
-          r.mode == _Mode.idle &&
-          winCells.contains(row * 3 + col) &&
-          (pos - k - row).abs() < 0.05;
+      final row = ((pos - k).round()).clamp(0, _rows - 1);
+      final settledHere = r.mode == _Mode.idle && (pos - k - row).abs() < 0.05;
+      final isWin = settledHere && winCells.contains(row * _cols + col);
+      final isDiamond = settledHere && dCells.contains(row * _cols + col);
       // 轉輪是圓柱：離中心越遠的格子越往後傾斜、越暗，看起來像真的滾筒
-      final u = ((y + tileH / 2) - tileH * 1.5) / (tileH * 1.5);
+      final u = ((y + tileH / 2) - tileH * _rows / 2) / (tileH * _rows / 2);
       tiles.add(
         Positioned(
           top: y,
@@ -816,7 +867,7 @@ class _SlotScreenState extends State<SlotScreen>
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _tile(sym, tileW, tileH, isWin, pulse),
+                _tile(sym, tileW, tileH, isWin, pulse, diamond: isDiamond),
                 IgnorePointer(
                   child: Container(
                     margin: const EdgeInsets.all(2),
@@ -838,7 +889,7 @@ class _SlotScreenState extends State<SlotScreen>
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
         width: tileW,
-        height: tileH * 3,
+        height: tileH * _rows,
         child: Stack(clipBehavior: Clip.hardEdge, children: tiles),
       ),
     );
@@ -851,8 +902,9 @@ class _SlotScreenState extends State<SlotScreen>
     return reel;
   }
 
-  Widget _tile(int sym, double w, double h, bool win, double pulse) {
-    const glow = Color(0xFFFFE066);
+  Widget _tile(int sym, double w, double h, bool win, double pulse, {bool diamond = false}) {
+    final glow = diamond ? const Color(0xFF4DD0E1) : const Color(0xFFFFE066);
+    final lit = win || diamond;
     return Container(
       margin: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -860,16 +912,18 @@ class _SlotScreenState extends State<SlotScreen>
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: win
+          colors: diamond
+              ? const [Color(0xFFE0F7FA), Color(0xFF80DEEA)]
+              : win
               ? const [Color(0xFFFFFBE6), Color(0xFFFFD866)]
               : const [Color(0xFFFFFFFF), Color(0xFFE8E1CC), Color(0xFFC9C1A8)],
-          stops: win ? null : const [0, 0.55, 1],
+          stops: lit ? null : const [0, 0.55, 1],
         ),
         border: Border.all(
-          color: win
-              ? Color.lerp(const Color(0xFFB8860B), glow, pulse)!
+          color: lit
+              ? Color.lerp(diamond ? const Color(0xFF00838F) : const Color(0xFFB8860B), glow, pulse)!
               : const Color(0xFF7A745F),
-          width: win ? 3.5 : 1.2,
+          width: lit ? 3.5 : 1.2,
         ),
         boxShadow: [
           const BoxShadow(
@@ -877,7 +931,7 @@ class _SlotScreenState extends State<SlotScreen>
             blurRadius: 3,
             offset: Offset(0, 2),
           ),
-          if (win)
+          if (lit)
             BoxShadow(
               color: glow.withValues(alpha: 0.4 + 0.4 * pulse),
               blurRadius: 14,
@@ -911,7 +965,7 @@ class _SlotScreenState extends State<SlotScreen>
             ),
           ),
           Transform.scale(
-            scale: win ? 1 + 0.08 * pulse : 1,
+            scale: lit ? 1 + 0.08 * pulse : 1,
             child: _symbolWidget(sym, h * 0.52),
           ),
         ],
@@ -933,6 +987,20 @@ class _SlotScreenState extends State<SlotScreen>
         width: size * 1.3,
         height: size * 1.3,
         child: CustomPaint(painter: _SevenPainter()),
+      );
+    }
+    if (sym == 6) {
+      return SizedBox(
+        width: size * 1.3,
+        height: size * 1.3,
+        child: CustomPaint(painter: _GemPainter()),
+      );
+    }
+    if (sym == 7) {
+      return SizedBox(
+        width: size * 1.35,
+        height: size * 1.35,
+        child: CustomPaint(painter: _WildPainter()),
       );
     }
     return Text(_symbols[sym], style: TextStyle(fontSize: size, height: 1.0));
@@ -1163,161 +1231,83 @@ class _SlotScreenState extends State<SlotScreen>
   }
 
   void _showPaytable() {
-    final tp = (_info!['triple_pay'] as Map).map(
-      (k, v) => MapEntry(int.parse(k as String), (v as num).toInt()),
+    final pay = (_info!['pay'] as Map).map(
+      (k, v) => MapEntry(
+        int.parse(k as String),
+        (v as Map).map((n, m) => MapEntry(int.parse(n as String), (m as num).toDouble())),
+      ),
     );
-    final order = tp.keys.toList()..sort((a, b) => tp[b]!.compareTo(tp[a]!));
-    final cp = (_info!['cherry_left_pay'] as Map).map(
-      (k, v) => MapEntry(int.parse(k as String), (v as num).toInt()),
+    final dpay = (_info!['diamond_pay'] as Map).map(
+      (k, v) => MapEntry(int.parse(k as String), (v as num).toDouble()),
     );
+    final order = pay.keys.toList()..sort((a, b) => pay[b]![5]!.compareTo(pay[a]![5]!));
+    String pct(double v) => '${(v * 100).toStringAsFixed(v * 100 >= 10 ? 0 : (v * 100 >= 1 ? 1 : 2))}%';
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '賠率表（每條線的下注額 × 倍數）',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+              const Text('賠率表', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 4),
-              Text(
-                '總下注會平分給 5 條線，所以每條線 = 總下注 ÷ 5。',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              const Text(
+                '1024 路：從最左邊轉輪起，連續 3 / 4 / 5 個轉輪出現同一種符號（百搭可代替）就中獎。'
+                '賠付 = 下表「每一路」的比例 × 總下注 × 路數（各轉輪出現該符號的個數相乘）。',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
               ),
               const SizedBox(height: 10),
-              for (final s in order)
+              const Row(
+                children: [
+                  SizedBox(width: 56),
+                  Expanded(child: Text('連3', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
+                  Expanded(child: Text('連4', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
+                  Expanded(child: Text('連5', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
+                ],
+              ),
+              for (final sy in order)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(
                     children: [
-                      Row(
-                        children: [
-                          for (var i = 0; i < 3; i++)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 4),
-                              child: _symbolWidget(s, 24),
-                            ),
-                        ],
-                      ),
-                      const Spacer(),
-                      Text(
-                        '× ${tp[s]}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: Color(0xFFFFD54F),
+                      SizedBox(width: 56, child: Align(alignment: Alignment.centerLeft, child: _symbolWidget(sy, 24))),
+                      for (final n in [3, 4, 5])
+                        Expanded(
+                          child: Text(
+                            pct(pay[sy]![n]!),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFFD54F)),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  children: [
-                    Row(
-                      children: [
-                        _symbolWidget(0, 24),
-                        _symbolWidget(0, 24),
-                        const SizedBox(width: 6),
-                        const Text('（最左邊起）'),
-                      ],
+              const Divider(height: 24),
+              Row(children: [_symbolWidget(6, 24), const SizedBox(width: 8), const Text('鑽石 · 出現就一定有獎', style: TextStyle(fontWeight: FontWeight.bold))]),
+              const SizedBox(height: 4),
+              const Text('畫面上出現幾顆鑽石（不用連線、位置不拘）就保證賠總下注的幾倍，再加上其他連線獎金：', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                children: [
+                  for (final e in dpay.entries)
+                    Chip(
+                      label: Text('${e.key} 顆 × ${e.value == e.value.roundToDouble() ? e.value.toInt() : e.value}'),
+                      visualDensity: VisualDensity.compact,
                     ),
-                    const Spacer(),
-                    Text(
-                      '× ${cp[2]}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Color(0xFFFFD54F),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
+              const SizedBox(height: 12),
+              Row(children: [_symbolWidget(7, 24), const SizedBox(width: 8), const Expanded(child: Text('百搭只會出現在第 2、3、4 輪，可代替除了鑽石以外的所有符號。', style: TextStyle(color: Colors.white70, fontSize: 12)))]),
             ],
           ),
         ),
       ),
     );
   }
-}
-
-// 中獎線：把中獎的那幾條線依序畫出來（每條亮 0.9 秒輪播），線上有流動的亮點
-class _LinePainter extends CustomPainter {
-  final List<Map<String, dynamic>> wins;
-  final List<List<int>> lines;
-  final double tileW, tileH, gap, t;
-  _LinePainter(this.wins, this.lines, this.tileW, this.tileH, this.gap, this.t);
-
-  static const colors = [
-    Color(0xFFFF5252),
-    Color(0xFF40C4FF),
-    Color(0xFFB2FF59),
-    Color(0xFFFFAB40),
-    Color(0xFFE040FB),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (wins.isEmpty) return;
-    final idx = (t / 0.9).floor() % wins.length;
-    final w = wins[idx];
-    final li = (w['line'] as num).toInt();
-    final line = lines[li];
-    final pts = [
-      for (var c = 0; c < 3; c++)
-        Offset(c * (tileW + gap) + tileW / 2, line[c] * tileH + tileH / 2),
-    ];
-    final color = colors[li % colors.length];
-    final path = Path()..moveTo(pts[0].dx - tileW * 0.35, pts[0].dy);
-    for (final p in pts) {
-      path.lineTo(p.dx, p.dy);
-    }
-    path.lineTo(pts[2].dx + tileW * 0.35, pts[2].dy);
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color.withValues(alpha: 0.35)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 12
-        ..strokeJoin = StrokeJoin.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.5
-        ..strokeJoin = StrokeJoin.round,
-    );
-    final amount = (w['amount'] as num).toInt();
-    final tp = TextPainter(
-      text: TextSpan(
-        text: '+${_money.format(amount)}',
-        style: TextStyle(
-          color: color,
-          fontSize: 20,
-          fontWeight: FontWeight.w900,
-          shadows: const [Shadow(color: Colors.black, blurRadius: 6)],
-        ),
-      ),
-      textDirection: ui.TextDirection.ltr,
-    )..layout();
-    tp.paint(
-      canvas,
-      Offset(size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _LinePainter old) => true;
 }
 
 class _Coin {
@@ -1475,4 +1465,86 @@ class _SevenPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SevenPainter old) => false;
+}
+
+// 鑽石：青藍色多面寶石（上下頂面 + 腰線 + 高光）
+class _GemPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    Offset p(double x, double y) => Offset(x * w, y * h);
+    final top = [p(0.22, 0.12), p(0.78, 0.12), p(0.95, 0.36), p(0.05, 0.36)];
+    final bottom = [p(0.05, 0.36), p(0.95, 0.36), p(0.5, 0.95)];
+    Path poly(List<Offset> pts) {
+      final path = Path()..moveTo(pts[0].dx, pts[0].dy);
+      for (final o in pts.skip(1)) {
+        path.lineTo(o.dx, o.dy);
+      }
+      return path..close();
+    }
+
+    final outline = Path()
+      ..addPath(poly(top), Offset.zero)
+      ..addPath(poly(bottom), Offset.zero);
+    canvas.drawPath(outline.shift(Offset(w * 0.03, h * 0.04)), Paint()..color = Colors.black45);
+    canvas.drawPath(poly(top), Paint()
+      ..shader = const LinearGradient(colors: [Color(0xFFB2EBF2), Color(0xFF26C6DA)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(Offset.zero & size));
+    canvas.drawPath(poly(bottom), Paint()
+      ..shader = const LinearGradient(colors: [Color(0xFF00ACC1), Color(0xFF006064)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+          .createShader(Offset.zero & size));
+    final facet = Paint()
+      ..color = Colors.white.withValues(alpha: 0.65)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.025;
+    for (final seg in [
+      [p(0.36, 0.12), p(0.28, 0.36)],
+      [p(0.64, 0.12), p(0.72, 0.36)],
+      [p(0.28, 0.36), p(0.5, 0.95)],
+      [p(0.72, 0.36), p(0.5, 0.95)],
+    ]) {
+      canvas.drawLine(seg[0], seg[1], facet);
+    }
+    canvas.drawPath(outline, Paint()
+      ..color = const Color(0xFF004D55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.05
+      ..strokeJoin = StrokeJoin.round);
+    canvas.drawCircle(p(0.3, 0.22), w * 0.045, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GemPainter old) => false;
+}
+
+// 百搭：紫金色圓章 + WILD 字樣
+class _WildPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2 * 0.92;
+    canvas.drawCircle(c.translate(r * 0.06, r * 0.08), r, Paint()..color = Colors.black45);
+    canvas.drawCircle(c, r, Paint()
+      ..shader = const RadialGradient(colors: [Color(0xFFE040FB), Color(0xFF6A1B9A), Color(0xFF2A0845)], center: Alignment(-0.3, -0.4))
+          .createShader(Rect.fromCircle(center: c, radius: r)));
+    canvas.drawCircle(c, r, Paint()
+      ..color = const Color(0xFFFFD54F)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.12);
+    canvas.drawCircle(c, r * 0.78, Paint()
+      ..color = const Color(0x88FFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.03);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'WILD',
+        style: TextStyle(color: const Color(0xFFFFF59D), fontSize: r * 0.62, fontWeight: FontWeight.w900, letterSpacing: r * 0.02, shadows: const [Shadow(color: Colors.black, blurRadius: 3, offset: Offset(0, 1))]),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _WildPainter old) => false;
 }
