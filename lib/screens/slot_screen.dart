@@ -525,12 +525,12 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
 
   // 星星和 7 用自己畫的（系統 emoji 的黃星、灰底 7 放在米色底上對比太低，看不清楚）
   Widget _symbolWidget(int sym, double size) {
-    if (sym == 4) return SizedBox(width: size * 1.1, height: size * 1.1, child: CustomPaint(painter: _StarPainter()));
+    if (sym == 4) return SizedBox(width: size * 1.3, height: size * 1.3, child: CustomPaint(painter: _StarPainter()));
     if (sym == 5) {
       Widget seven(Paint? stroke, Color? color) => Text(
             '7',
             style: TextStyle(
-              fontSize: size * 1.12,
+              fontSize: size * 1.4,
               height: 1.0,
               fontWeight: FontWeight.w900,
               fontStyle: FontStyle.italic,
@@ -543,16 +543,16 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
         children: [
           seven(Paint()
             ..style = PaintingStyle.stroke
-            ..strokeWidth = size * 0.2
+            ..strokeWidth = size * 0.26
             ..strokeJoin = StrokeJoin.round
-            ..color = const Color(0xFF3B0A0A), null),
+            ..color = const Color(0xFF1A0505), null),
           seven(Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = size * 0.1
             ..strokeJoin = StrokeJoin.round
             ..color = const Color(0xFFFFD54F), null),
           ShaderMask(
-            shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFF5252), Color(0xFFB71C1C)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
+            shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFF1744), Color(0xFFD50000)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
             child: seven(null, Colors.white),
           ),
         ],
@@ -816,17 +816,17 @@ class _StarPainter extends CustomPainter {
     }
     path.close();
     canvas.drawPath(path, Paint()
-      ..color = const Color(0xFF7A3E00)
+      ..color = const Color(0xFF1A0505)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = R * 0.26
+      ..strokeWidth = R * 0.3
       ..strokeJoin = StrokeJoin.round);
     canvas.drawPath(path, Paint()
-      ..shader = const LinearGradient(colors: [Color(0xFFFFF176), Color(0xFFFF9800)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
+      ..shader = const LinearGradient(colors: [Color(0xFFFF1744), Color(0xFFD50000)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
           .createShader(Offset.zero & size));
     canvas.drawPath(path, Paint()
-      ..color = const Color(0xFFE65100)
+      ..color = const Color(0xFFFFD54F)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = R * 0.06
+      ..strokeWidth = R * 0.07
       ..strokeJoin = StrokeJoin.round);
     canvas.drawCircle(Offset(c.dx - R * 0.18, c.dy - R * 0.22), R * 0.1, Paint()..color = Colors.white70);
   }
