@@ -73,6 +73,9 @@ flutter:
     - assets/audio/win.mp3
     - assets/audio/card.mp3
     - assets/audio/dice.mp3
+    - assets/audio/reelstop.mp3
+    - assets/audio/reelspin.mp3
+    - assets/audio/jackpot.mp3
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg

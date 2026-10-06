@@ -13,6 +13,7 @@ import 'baccarat_screen.dart';
 import 'poker_screen.dart';
 import 'horse_screen.dart';
 import 'sicbo_screen.dart';
+import 'slot_screen.dart';
 import 'leaderboard_screen.dart';
 import 'fx_screen.dart';
 
@@ -160,6 +161,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.casino),
             tooltip: '骰寶',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SlotScreen()),
+            ),
+            icon: const Icon(Icons.stars),
+            tooltip: '老虎機',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
