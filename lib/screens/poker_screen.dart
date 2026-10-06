@@ -607,72 +607,96 @@ class _PokerScreenState extends State<PokerScreen> {
     );
   }
 
+  // 圓形籌碼按鈕：上面是動作文字，下面小字補充金額
+  Widget _chipButton(String label, Color color, VoidCallback? onTap, {double size = 58, String? caption, bool glow = false}) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.4,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CasinoChip(value: 0, size: size, color: color, text: label, glow: glow && enabled),
+            SizedBox(
+              height: 16,
+              child: Text(caption ?? '', style: const TextStyle(fontSize: 11, color: Colors.white70), maxLines: 1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _actionPanel(PokerState s) {
     final a = s.actions;
     final pot = s.hand?.pot ?? 0;
     final canSlide = a.canRaise && a.maxRaiseTo > a.minRaiseTo;
     final raiseInt = _raiseTo.round();
-    final raiseLabel = s.hand != null && s.hand!.currentBet == 0 ? '下注' : '加注到';
+    final raiseLabel = s.hand != null && s.hand!.currentBet == 0 ? '下注' : '加注';
+    final allIn = raiseInt >= a.maxRaiseTo;
     void setRaise(num v) => setState(() => _raiseTo = v.clamp(a.minRaiseTo, a.maxRaiseTo).toDouble());
+    final enabled = !_busy;
+    final bet = s.hand?.currentBet ?? 0;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: const Color(0x22FFD54F), border: Border.all(color: const Color(0xFFFFD54F))),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: const LinearGradient(colors: [Color(0xFF14202B), Color(0xFF0B141B)], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+        border: Border.all(color: const Color(0xFFC9A24B), width: 1.5),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _busy ? null : () => _run(() => _api.pokerAction('fold'), toast: false),
-                child: const Text('棄牌'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _chipButton('棄牌', const Color(0xFFC62828), enabled ? () => _run(() => _api.pokerAction('fold'), toast: false) : null),
+              _chipButton(
+                a.canCheck ? '過牌' : '跟注',
+                const Color(0xFF2E7D32),
+                enabled ? () => _run(() => _api.pokerAction(a.canCheck ? 'check' : 'call'), toast: false) : null,
+                size: 72,
+                caption: a.canCheck ? '' : _money.format(a.callAmount),
+                glow: true,
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: FilledButton(
-                onPressed: _busy ? null : () => _run(() => _api.pokerAction(a.canCheck ? 'check' : 'call'), toast: false),
-                child: Text(a.canCheck ? '過牌' : '跟注 ${_money.format(a.callAmount)}'),
-              ),
-            ),
-          ]),
-          if (a.canRaise) ...[
-            const SizedBox(height: 10),
-            if (canSlide) ...[
-              Slider(
-                value: _raiseTo.clamp(a.minRaiseTo.toDouble(), a.maxRaiseTo.toDouble()),
-                min: a.minRaiseTo.toDouble(),
-                max: a.maxRaiseTo.toDouble(),
-                onChanged: _busy ? null : (v) => setState(() => _raiseTo = v),
-              ),
-              Wrap(spacing: 6, runSpacing: 4, alignment: WrapAlignment.center, children: [
-                ActionChip(label: const Text('最小'), onPressed: () => setRaise(a.minRaiseTo)),
-                ActionChip(label: const Text('半池'), onPressed: () => setRaise((s.hand?.currentBet ?? 0) + pot / 2)),
-                ActionChip(label: const Text('一池'), onPressed: () => setRaise((s.hand?.currentBet ?? 0) + pot)),
-                ActionChip(label: const Text('最大'), onPressed: () => setRaise(a.maxRaiseTo)),
-              ]),
-              const SizedBox(height: 6),
-            ],
-            Row(children: [
-              Expanded(
-                child: FilledButton.tonal(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(
-                            () => raiseInt >= a.maxRaiseTo ? _api.pokerAction('allin') : _api.pokerAction('raise', amount: raiseInt),
-                            toast: false,
-                          ),
-                  child: Text(raiseInt >= a.maxRaiseTo ? '全下 ${_money.format(a.maxRaiseTo)}' : '$raiseLabel ${_money.format(raiseInt)}'),
+              if (a.canRaise)
+                _chipButton(
+                  allIn ? '全下' : raiseLabel,
+                  const Color(0xFFF9A825),
+                  enabled
+                      ? () => _run(() => allIn ? _api.pokerAction('allin') : _api.pokerAction('raise', amount: raiseInt), toast: false)
+                      : null,
+                  size: 72,
+                  caption: _money.format(allIn ? a.maxRaiseTo : raiseInt),
+                  glow: true,
                 ),
-              ),
-            ]),
-          ] else if (!a.canCheck && a.callAmount > 0 && a.callAmount >= a.maxRaiseTo) ...[
+            ],
+          ),
+          if (a.canRaise && canSlide) ...[
+            const SizedBox(height: 8),
+            Slider(
+              value: _raiseTo.clamp(a.minRaiseTo.toDouble(), a.maxRaiseTo.toDouble()),
+              min: a.minRaiseTo.toDouble(),
+              max: a.maxRaiseTo.toDouble(),
+              onChanged: enabled ? (v) => setState(() => _raiseTo = v) : null,
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _chipButton('最小', const Color(0xFF546E7A), () => setRaise(a.minRaiseTo), size: 46),
+                _chipButton('半池', const Color(0xFF00838F), () => setRaise(bet + pot / 2), size: 46),
+                _chipButton('一池', const Color(0xFF7B1FA2), () => setRaise(bet + pot), size: 46),
+                _chipButton('最大', const Color(0xFF212121), () => setRaise(a.maxRaiseTo), size: 46),
+              ],
+            ),
+          ] else if (!a.canRaise && !a.canCheck && a.callAmount > 0 && a.callAmount >= a.maxRaiseTo) ...[
             const SizedBox(height: 4),
             const Text('籌碼不夠完整跟注，跟注即全下', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: Colors.white54)),
           ],
           if (_remaining != null)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: 4),
               child: Text('剩 ${_remaining!.ceil()} 秒，逾時會自動${a.canCheck ? "過牌" : "棄牌"}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.white70)),
             ),
         ],
@@ -733,6 +757,24 @@ class _BuyinDialogState extends State<_BuyinDialog> {
         children: [
           Text(_money.format(buy), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           Text('= ${(buy / widget.bigBlind).round()} 個大盲', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 4, alignment: WrapAlignment.center, children: [
+            for (final bb in <int>{widget.min ~/ widget.bigBlind, 60, 100, 150, widget.max ~/ widget.bigBlind})
+              if (bb * widget.bigBlind >= widget.min && bb * widget.bigBlind <= widget.max)
+                GestureDetector(
+                  onTap: () => setState(() => _v = (bb * widget.bigBlind).toDouble()),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    CasinoChip(
+                      value: 0,
+                      size: 50,
+                      color: bb >= 150 ? const Color(0xFF7B1FA2) : (bb >= 100 ? const Color(0xFF212121) : (bb >= 60 ? const Color(0xFF2E7D32) : const Color(0xFFC62828))),
+                      text: '${bb}BB',
+                      glow: buy == bb * widget.bigBlind,
+                    ),
+                    Text(_short(bb * widget.bigBlind), style: const TextStyle(fontSize: 11, color: Colors.white60)),
+                  ]),
+                ),
+          ]),
           Slider(
             value: _v,
             min: widget.min.toDouble(),
