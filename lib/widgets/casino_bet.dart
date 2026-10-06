@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../screens/baccarat_screen.dart' show CasinoChip;
+import 'casino_music.dart';
 
 final _money = NumberFormat('#,##0');
 
@@ -27,7 +28,10 @@ class ChipSelector extends StatelessWidget {
       children: chips.map((c) {
         final on = c == selected;
         return GestureDetector(
-          onTap: () => onSelect(c),
+          onTap: () {
+            CasinoMusic.instance.playSfx('chip');
+            onSelect(c);
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             transform: Matrix4.translationValues(0, on ? -6 : 0, 0),

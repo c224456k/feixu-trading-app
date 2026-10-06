@@ -10,8 +10,11 @@ class CasinoMusic {
   static final CasinoMusic instance = CasinoMusic._();
 
   static const _prefKey = 'casino_music_on';
+  static const _sfxKey = 'casino_sfx_on';
 
   final ValueNotifier<bool> on = ValueNotifier(false);
+  final ValueNotifier<bool> sfx = ValueNotifier(true); // 音效預設開（玩家按下去時瀏覽器就允許出聲）
+  final Set<String> _played = {};
   AudioPlayer? _player;
   int _screens = 0;
   bool _loaded = false;
@@ -22,6 +25,7 @@ class CasinoMusic {
     try {
       final p = await SharedPreferences.getInstance();
       on.value = p.getBool(_prefKey) ?? false;
+      sfx.value = p.getBool(_sfxKey) ?? true;
     } catch (_) {}
   }
 
@@ -55,6 +59,35 @@ class CasinoMusic {
     }
   }
 
+  Future<void> toggleSfx() async {
+    sfx.value = !sfx.value;
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_sfxKey, sfx.value);
+    } catch (_) {}
+    if (sfx.value) playSfx('chip');
+  }
+
+  // 播一次短音效（chip / chipdrop / win / card / dice）；每個音效用自己的播放器，播完就釋放，可以重疊。
+  Future<void> playSfx(String name) async {
+    await _loadPref();
+    if (!sfx.value) return;
+    try {
+      final p = AudioPlayer();
+      await p.setReleaseMode(ReleaseMode.release);
+      await p.setVolume(0.8);
+      p.onPlayerComplete.first.then((_) => p.dispose());
+      await p.play(AssetSource('audio/$name.mp3'));
+    } catch (_) {}
+  }
+
+  // 同一個事件（例如某一局的贏錢）只播一次；key 要包含局號
+  void playSfxOnce(String key, String name) {
+    if (!_played.add(key)) return;
+    if (_played.length > 200) _played.remove(_played.first);
+    playSfx(name);
+  }
+
   Future<void> _play() async {
     try {
       var p = _player;
@@ -73,18 +106,26 @@ class CasinoMusic {
   }
 }
 
-// 放在 AppBar 右邊的喇叭開關
+// 放在 AppBar 右邊的聲音選單：背景音樂、音效各自開關
 class MusicButton extends StatelessWidget {
   const MusicButton({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final m = CasinoMusic.instance;
     return ValueListenableBuilder<bool>(
-      valueListenable: CasinoMusic.instance.on,
-      builder: (context, isOn, _) => IconButton(
-        onPressed: CasinoMusic.instance.toggle,
-        icon: Icon(isOn ? Icons.volume_up : Icons.volume_off),
-        tooltip: isOn ? '關閉背景音樂' : '開啟背景音樂',
+      valueListenable: m.on,
+      builder: (context, musicOn, _) => ValueListenableBuilder<bool>(
+        valueListenable: m.sfx,
+        builder: (context, sfxOn, _) => PopupMenuButton<String>(
+          tooltip: '聲音設定',
+          icon: Icon(musicOn || sfxOn ? Icons.volume_up : Icons.volume_off),
+          onSelected: (v) => v == 'music' ? m.toggle() : m.toggleSfx(),
+          itemBuilder: (_) => [
+            CheckedPopupMenuItem(value: 'music', checked: musicOn, child: const Text('背景音樂')),
+            CheckedPopupMenuItem(value: 'sfx', checked: sfxOn, child: const Text('籌碼音效')),
+          ],
+        ),
       ),
     );
   }

@@ -102,11 +102,12 @@ class _PokerScreenState extends State<PokerScreen> {
       ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
   }
 
-  Future<void> _run(Future<SicBoBetResult> Function() call, {bool toast = true}) async {
+  Future<void> _run(Future<SicBoBetResult> Function() call, {bool toast = true, String? sfx}) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       final r = await call();
+      if (r.ok && sfx != null) CasinoMusic.instance.playSfx(sfx);
       if (toast || !r.ok) _snack(r.message);
       await _load();
     } catch (e) {
@@ -122,7 +123,7 @@ class _PokerScreenState extends State<PokerScreen> {
       builder: (_) => _BuyinDialog(min: s.minBuyin, max: s.maxBuyin, cash: s.cash, bigBlind: s.bigBlind),
     );
     if (buyin == null) return;
-    await _run(() => _api.sitPoker(seat, buyin));
+    await _run(() => _api.sitPoker(seat, buyin), sfx: 'chipdrop');
   }
 
   Future<void> _leave(PokerState s) async {
@@ -406,6 +407,7 @@ class _PokerScreenState extends State<PokerScreen> {
         }
         final net = seat.net;
         if (h != null && h.finished && net != null && net > 0) {
+          if (seat.isMe) CasinoMusic.instance.playSfxOnce('pk-${h.id}', 'win');
           children.add(TweenAnimationBuilder<double>(
             key: ValueKey('win-${h.id}-${seat.seat}'),
             tween: Tween(begin: 0, end: 1),
@@ -655,11 +657,11 @@ class _PokerScreenState extends State<PokerScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _chipButton('棄牌', const Color(0xFFC62828), enabled ? () => _run(() => _api.pokerAction('fold'), toast: false) : null),
+              _chipButton('棄牌', const Color(0xFFC62828), enabled ? () => _run(() => _api.pokerAction('fold'), toast: false, sfx: 'card') : null),
               _chipButton(
                 a.canCheck ? '過牌' : '跟注',
                 const Color(0xFF2E7D32),
-                enabled ? () => _run(() => _api.pokerAction(a.canCheck ? 'check' : 'call'), toast: false) : null,
+                enabled ? () => _run(() => _api.pokerAction(a.canCheck ? 'check' : 'call'), toast: false, sfx: a.canCheck ? 'chip' : 'chipdrop') : null,
                 size: 72,
                 caption: a.canCheck ? '' : _money.format(a.callAmount),
                 glow: true,
@@ -669,7 +671,7 @@ class _PokerScreenState extends State<PokerScreen> {
                   allIn ? '全下' : raiseLabel,
                   const Color(0xFFF9A825),
                   enabled
-                      ? () => _run(() => allIn ? _api.pokerAction('allin') : _api.pokerAction('raise', amount: raiseInt), toast: false)
+                      ? () => _run(() => allIn ? _api.pokerAction('allin') : _api.pokerAction('raise', amount: raiseInt), toast: false, sfx: 'chipdrop')
                       : null,
                   size: 72,
                   caption: _money.format(allIn ? a.maxRaiseTo : raiseInt),

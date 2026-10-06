@@ -127,6 +127,7 @@ class _HorseScreenState extends State<HorseScreen> {
     setState(() => _busy = true);
     try {
       final r = await _api.placeHorseBet(betType, _chip);
+      if (r.ok) CasinoMusic.instance.playSfx('chipdrop');
       _snack(r.message);
       await _load();
     } catch (e) {
@@ -279,6 +280,7 @@ class _HorseScreenState extends State<HorseScreen> {
       const medals = ['🥇', '🥈', '🥉'];
       final bet = s.myTotalBet;
       final net = s.myTotalPayout - bet;
+      if (bet > 0 && net > 0.005) CasinoMusic.instance.playSfxOnce('horse-${s.roundId}', 'win');
       final names = [for (var i = 0; i < 3; i++) '${medals[i]}${order[i]} ${s.horse(order[i]).name}'].join('  ');
       return Column(
         mainAxisSize: MainAxisSize.min,

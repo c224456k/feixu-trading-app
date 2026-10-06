@@ -87,6 +87,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
             _animatedRoundId = s.roundId;
             if (s.secondsSinceSettled < 3) {
               // 剛開骰：播翻滾動畫（期間現金維持舊值，演完才更新）
+              CasinoMusic.instance.playSfx('dice');
               _roll.forward(from: 0);
             } else {
               // 玩家是在開骰很久之後才進來，直接顯示結果，不演動畫
@@ -149,6 +150,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
     setState(() => _busy = true);
     try {
       final r = await _api.placeSicBoBet(type.key, _chip);
+      if (r.ok) CasinoMusic.instance.playSfx('chipdrop');
       _snack(r.message);
       await _load();
     } catch (e) {
@@ -485,6 +487,7 @@ class _SicBoScreenState extends State<SicBoScreen> with TickerProviderStateMixin
     }
     final bet = s.myTotalBet;
     final net = s.myTotalPayout - bet;
+    if (bet > 0 && net > 0) CasinoMusic.instance.playSfxOnce('sic-${s.roundId}', 'win');
     return Column(
       children: [
         Text(

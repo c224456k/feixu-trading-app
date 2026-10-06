@@ -139,6 +139,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
     setState(() => _busy = true);
     try {
       final r = await _api.placeBaccaratBet(type.key, _chip);
+      if (r.ok) CasinoMusic.instance.playSfx('chipdrop');
       _snack(r.message);
       await _load();
     } catch (e) {
@@ -392,6 +393,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
     final extra = [if (s.playerPair) '閒對', if (s.bankerPair) '莊對'];
     final bet = s.myTotalBet;
     final net = s.myTotalPayout - bet;
+    if (bet > 0 && net > 0.005) CasinoMusic.instance.playSfxOnce('bac-${s.roundId}', 'win');
     return Column(
       children: [
         Text(
@@ -530,7 +532,10 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
       children: _chips.map((c) {
         final selected = c == _chip;
         return GestureDetector(
-          onTap: () => setState(() => _chip = c),
+          onTap: () {
+            CasinoMusic.instance.playSfx('chip');
+            setState(() => _chip = c);
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             transform: Matrix4.translationValues(0, selected ? -6 : 0, 0),
@@ -755,7 +760,10 @@ class _CardSlotState extends State<_CardSlot> with SingleTickerProviderStateMixi
   @override
   void didUpdateWidget(covariant _CardSlot old) {
     super.didUpdateWidget(old);
-    if (widget.visible && !old.visible) _flip.forward(from: 0);
+    if (widget.visible && !old.visible) {
+      CasinoMusic.instance.playSfx('card');
+      _flip.forward(from: 0);
+    }
     if (!widget.visible && old.visible) _flip.value = 0;
   }
 
