@@ -660,7 +660,7 @@ class _SlotScreenState extends State<SlotScreen>
       builder: (context, c) {
         final w = c.maxWidth;
         const gap = 4.0;
-        final tileW = (w - 16 - gap * (_cols - 1)) / _cols;
+        final tileW = (w - 28 - gap * (_cols - 1)) / _cols; // 28 = 銀框 6×2 + 內框 8×2
         final tileH = tileW * 0.96;
         final h = tileH * _rows;
         return Container(
