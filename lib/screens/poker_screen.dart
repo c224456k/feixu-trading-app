@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
-import 'baccarat_screen.dart' show PlayingCardFace;
+import 'baccarat_screen.dart' show PlayingCardFace, CasinoChip;
 
 final _money = NumberFormat('#,##0');
 
@@ -176,8 +176,6 @@ class _PokerScreenState extends State<PokerScreen> {
                       const SizedBox(height: 10),
                       _table(s),
                       const SizedBox(height: 10),
-                      _seats(s),
-                      const SizedBox(height: 10),
                       if (s.actions.canAct) _actionPanel(s) else _hint(s),
                       const SizedBox(height: 14),
                       _history(s),
@@ -208,56 +206,232 @@ class _PokerScreenState extends State<PokerScreen> {
 
   static const _streetNames = ['翻牌前', '翻牌', '轉牌', '河牌'];
 
-  Widget _table(PokerState s) {
-    final h = s.hand;
-    final board = h?.board ?? const <PlayingCard>[];
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(60),
-        gradient: const RadialGradient(colors: [Color(0xFF1E7A4A), Color(0xFF0F4A2C)], radius: 1.0),
-        border: Border.all(color: const Color(0xFF5B3A1A), width: 6),
-      ),
-      child: Column(
+  // 籌碼面額（對應盲注 5 萬 / 10 萬）與顏色
+  static const _denoms = <(int, Color)>[
+    (50000000, Color(0xFFF9A825)),
+    (10000000, Color(0xFFE65100)),
+    (5000000, Color(0xFF00838F)),
+    (1000000, Color(0xFF7B1FA2)),
+    (500000, Color(0xFF212121)),
+    (100000, Color(0xFF2E7D32)),
+    (50000, Color(0xFFC62828)),
+    (0, Color(0xFF546E7A)),
+  ];
+
+  // 把金額拆成籌碼（大面額在下），最多疊 7 顆
+  Widget _pile(num amount, double size) {
+    if (amount <= 0) return const SizedBox.shrink();
+    final chips = <(int, Color)>[];
+    var left = amount.round();
+    for (final d in _denoms) {
+      if (d.$1 == 0) continue;
+      while (left >= d.$1 && chips.length < 7) {
+        chips.add(d);
+        left -= d.$1;
+      }
+    }
+    if (chips.isEmpty) chips.add(_denoms.last);
+    const step = 4.0;
+    return SizedBox(
+      width: size,
+      height: size * 0.5 + step * chips.length + 4,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
         children: [
-          Text(
-            h == null
-                ? '等待玩家入座（至少 2 人才會開局）'
-                : (h.finished ? '第 ${h.id} 手結束' : '第 ${h.id} 手・${_streetNames[h.street]}'),
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '底池 ${h == null ? 0 : _money.format(h.pot)}',
-            style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, fontSize: 18),
-          ),
-          const SizedBox(height: 10),
-          LayoutBuilder(builder: (ctx, c) {
-            final w = math.min(54.0, (c.maxWidth - 4 * 6) / 5);
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var i = 0; i < 5; i++)
-                  Padding(
-                    padding: EdgeInsets.only(left: i == 0 ? 0 : 6),
-                    child: i < board.length ? PlayingCardFace(card: board[i], width: w) : _emptySlot(w),
-                  ),
-              ],
-            );
-          }),
-          if (h != null && h.finished) ...[
-            const SizedBox(height: 10),
-            for (final p in h.pots)
-              Text(
-                '${h.pots.length > 1 ? "${_money.format(p.amount)}：" : ""}${p.winners.join("、")} 贏得 ${_money.format(p.amount)}',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
-            if (!h.showdown) const Text('其他人都棄牌，不用亮牌', style: TextStyle(color: Colors.white54, fontSize: 11)),
-          ],
+          for (var i = 0; i < chips.length; i++)
+            Positioned(
+              bottom: i * step,
+              child: CasinoChip(value: chips[i].$1, size: size, flat: true, color: chips[i].$2, text: chips[i].$1 == 0 ? '' : _short(chips[i].$1)),
+            ),
         ],
       ),
     );
+  }
+
+  // 六個座位在橢圓桌邊的位置（中心點佔桌面比例），由「自己」在最下面開始順時針排
+  static const _slots = <Offset>[
+    Offset(0.5, 0.87),
+    Offset(0.14, 0.68),
+    Offset(0.14, 0.30),
+    Offset(0.5, 0.13),
+    Offset(0.86, 0.30),
+    Offset(0.86, 0.68),
+  ];
+
+  Widget _table(PokerState s) {
+    final h = s.hand;
+    final board = h?.board ?? const <PlayingCard>[];
+    return LayoutBuilder(builder: (ctx, c) {
+      final w = c.maxWidth;
+      final height = w > 500 ? w * 0.85 : w * 1.22;
+      final base = s.mySeat ?? 0;
+      final center = Offset(w / 2, height / 2);
+      final seatW = math.min(104.0, w * 0.27);
+      const seatH = 112.0;
+      final cardW = math.min(52.0, (w * 0.7 - 24) / 5);
+
+      Offset seatPos(int seat) {
+        final slot = _slots[(seat - base + 6) % 6];
+        return Offset(slot.dx * w, slot.dy * height);
+      }
+
+      final children = <Widget>[
+        // 桌子：木頭邊 + 金線 + 綠絨
+        Positioned.fill(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.all(Radius.elliptical(w / 2, height / 2)),
+              gradient: const LinearGradient(colors: [Color(0xFF6D4C2B), Color(0xFF3E2814)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 14, offset: Offset(0, 6))],
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.all(Radius.elliptical(w / 2, height / 2)),
+              gradient: const RadialGradient(colors: [Color(0xFF1E8A55), Color(0xFF0B3D25)], radius: 0.85),
+              border: Border.all(color: const Color(0xFFC9A24B), width: 2),
+            ),
+          ),
+        ),
+        // 中央資訊：局數、底池籌碼、公牌
+        Positioned(
+          left: 0,
+          right: 0,
+          top: height * 0.5 - cardW * 0.7 - 74,
+          child: Column(
+            children: [
+              Text(
+                h == null ? '等待玩家入座（2 人以上開局）' : (h.finished ? '第 ${h.id} 手結束' : '第 ${h.id} 手・${_streetNames[h.street]}'),
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
+              ),
+              const SizedBox(height: 2),
+              if (h != null && h.pot > 0)
+                TweenAnimationBuilder<double>(
+                  key: ValueKey('pot-${h.id}-${h.pot}'),
+                  tween: Tween(begin: 0.85, end: 1),
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.elasticOut,
+                  builder: (context, v, child) => Transform.scale(scale: v, child: child),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      _pile(h.pot, 26),
+                      const SizedBox(width: 8),
+                      Text('底池 ${_money.format(h.pot)}', style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
+                )
+              else
+                const Text('底池 0', style: TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          top: height * 0.5 - cardW * 0.7 + 4,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < 5; i++)
+                Padding(
+                  padding: EdgeInsets.only(left: i == 0 ? 0 : 5),
+                  child: i < board.length
+                      ? TweenAnimationBuilder<double>(
+                          key: ValueKey('b-${h?.id}-$i'),
+                          tween: Tween(begin: 0, end: 1),
+                          duration: const Duration(milliseconds: 450),
+                          curve: Curves.easeOut,
+                          builder: (context, v, child) => Opacity(opacity: v, child: Transform.translate(offset: Offset(0, -16 * (1 - v)), child: child)),
+                          child: PlayingCardFace(card: board[i], width: cardW),
+                        )
+                      : _emptySlot(cardW),
+                ),
+            ],
+          ),
+        ),
+        if (h != null && h.finished) ...[
+          Positioned(
+            left: 12,
+            right: 12,
+            top: height * 0.5 + cardW * 0.7 + 12,
+            child: Column(
+              children: [
+                for (final p in h.pots)
+                  Text(
+                    '${p.winners.join("、")} 贏得 ${_money.format(p.amount)}',
+                    style: const TextStyle(color: Color(0xFFFFE066), fontWeight: FontWeight.bold, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                if (!h.showdown) const Text('其他人都棄牌', style: TextStyle(color: Colors.white54, fontSize: 10)),
+              ],
+            ),
+          ),
+        ],
+      ];
+
+      // 每個座位的下注籌碼（往桌中央推）、贏家的籌碼（從底池滑回座位）
+      for (final seat in s.seats) {
+        if (!seat.occupied) continue;
+        final sp = seatPos(seat.seat);
+        final betPos = Offset.lerp(sp, center, 0.42)!;
+        if (seat.betStreet > 0 && h != null && !h.finished) {
+          children.add(Positioned(
+            left: betPos.dx - 40,
+            top: betPos.dy - 24,
+            width: 80,
+            child: TweenAnimationBuilder<double>(
+              key: ValueKey('bet-${h.id}-${seat.seat}-${seat.betStreet}'),
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.easeOutBack,
+              builder: (context, v, child) {
+                final from = sp - betPos;
+                return Transform.translate(offset: Offset(from.dx * (1 - v) * 0.6, from.dy * (1 - v) * 0.6), child: Opacity(opacity: v.clamp(0.0, 1.0), child: child));
+              },
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                _pile(seat.betStreet, 22),
+                Text(_short(seat.betStreet), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+              ]),
+            ),
+          ));
+        }
+        final net = seat.net;
+        if (h != null && h.finished && net != null && net > 0) {
+          children.add(TweenAnimationBuilder<double>(
+            key: ValueKey('win-${h.id}-${seat.seat}'),
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 1100),
+            curve: Curves.easeInOutCubic,
+            builder: (context, v, child) {
+              final pos = Offset.lerp(center, betPos, v)!;
+              return Positioned(left: pos.dx - 40, top: pos.dy - 24, width: 80, child: child!);
+            },
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _pile(net, 24),
+              Text('+${_short(net)}', style: const TextStyle(color: Color(0xFFFFE066), fontSize: 13, fontWeight: FontWeight.bold)),
+            ]),
+          ));
+        }
+      }
+
+      for (final seat in s.seats) {
+        final sp = seatPos(seat.seat);
+        children.add(Positioned(
+          left: sp.dx - seatW / 2,
+          top: sp.dy - seatH / 2,
+          width: seatW,
+          height: seatH,
+          child: _seatSpot(s, seat, seatW),
+        ));
+      }
+
+      return SizedBox(width: w, height: height, child: Stack(clipBehavior: Clip.none, children: children));
+    });
   }
 
   Widget _emptySlot(double w) => Container(
@@ -270,100 +444,129 @@ class _PokerScreenState extends State<PokerScreen> {
         ),
       );
 
-  Widget _seats(PokerState s) {
-    return LayoutBuilder(builder: (ctx, c) {
-      final cols = c.maxWidth >= 480 ? 3 : 2;
-      final w = (c.maxWidth - (cols - 1) * 8) / cols;
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [for (final seat in s.seats) SizedBox(width: w, child: _seatTile(s, seat))],
-      );
-    });
-  }
-
-  Widget _seatTile(PokerState s, PokerSeat seat) {
+  Widget _seatSpot(PokerState s, PokerSeat seat, double seatW) {
     if (!seat.occupied) {
       final canSit = s.mySeat == null;
-      return InkWell(
+      return GestureDetector(
         onTap: canSit && !_busy ? () => _sit(s, seat.seat) : null,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          height: 118,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white24),
+        child: Center(
+          child: Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black26,
+              border: Border.all(color: canSit ? const Color(0xFFFFD54F) : Colors.white24, width: 1.5),
+            ),
+            child: Text(canSit ? '${seat.seat + 1}\n入座' : '${seat.seat + 1}\n空位',
+                textAlign: TextAlign.center, style: TextStyle(color: canSit ? const Color(0xFFFFD54F) : Colors.white38, fontSize: 12, height: 1.2)),
           ),
-          child: Text(canSit ? '${seat.seat + 1} 號位\n點我入座' : '${seat.seat + 1} 號位\n空位',
-              textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 13)),
         ),
       );
     }
     final h = s.hand;
-    final active = seat.isToAct && h != null && !h.finished;
+    final live = h != null && !h.finished;
+    final active = seat.isToAct && live;
     final folded = seat.status == 'folded';
+    final win = h != null && h.finished && (seat.net ?? 0) > 0;
     final remaining = _remaining;
-    final cardW = 34.0;
+    final pulse = (active || win) ? (0.5 + 0.5 * math.sin(DateTime.now().millisecondsSinceEpoch / 200.0)) : 0.0;
+    final cw = seat.isMe ? 38.0 : 28.0;
+
     Widget cards;
     if (seat.cards != null) {
       cards = Row(mainAxisSize: MainAxisSize.min, children: [
-        for (final c in seat.cards!) Padding(padding: const EdgeInsets.only(right: 3), child: PlayingCardFace(card: c, width: cardW)),
+        for (final c in seat.cards!) Padding(padding: const EdgeInsets.symmetric(horizontal: 1.5), child: PlayingCardFace(card: c, width: cw)),
       ]);
     } else if (seat.hasCards && h != null) {
       cards = Row(mainAxisSize: MainAxisSize.min, children: [
-        for (var i = 0; i < 2; i++) Padding(padding: const EdgeInsets.only(right: 3), child: _cardBack(cardW)),
+        for (var i = 0; i < 2; i++) Padding(padding: const EdgeInsets.symmetric(horizontal: 1.5), child: _cardBack(cw)),
       ]);
     } else {
-      cards = SizedBox(height: cardW * 1.4);
+      cards = SizedBox(height: cw * 1.4);
     }
+
     String? tag;
     if (seat.status == 'allin') tag = '全下';
     if (folded) tag = '棄牌';
-    final net = seat.net;
+    final ringColor = win
+        ? Color.lerp(const Color(0xFFB8860B), const Color(0xFFFFE066), pulse)!
+        : active
+            ? Color.lerp(const Color(0xFFFFB300), const Color(0xFFFFF176), pulse)!
+            : (seat.isMe ? Colors.lightBlueAccent : Colors.white30);
+
     return Opacity(
-      opacity: folded ? 0.55 : 1,
-      child: Container(
-        height: 118,
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: seat.isMe ? const Color(0x331E88E5) : Colors.white10,
-          border: Border.all(color: active ? const Color(0xFFFFD54F) : (seat.isMe ? Colors.lightBlueAccent : Colors.white24), width: active ? 2.5 : 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              if (seat.isDealer)
-                Container(
-                  margin: const EdgeInsets.only(right: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-                  child: const Text('D', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold)),
+      opacity: folded ? 0.5 : 1,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(height: cw * 1.4, child: Align(alignment: Alignment.bottomCenter, child: cards)),
+              const SizedBox(height: 3),
+              Container(
+                width: seatW,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: const Color(0xDD14202B),
+                  border: Border.all(color: ringColor, width: (active || win) ? 2.5 : 1.5),
+                  boxShadow: (active || win) ? [BoxShadow(color: ringColor.withValues(alpha: 0.6), blurRadius: 10)] : null,
                 ),
-              Expanded(child: Text(seat.name ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-              if (tag != null) Text(tag, style: TextStyle(fontSize: 11, color: tag == '全下' ? Colors.orangeAccent : Colors.white54)),
-            ]),
-            Text('籌碼 ${_short(seat.stack)}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
-            const SizedBox(height: 4),
-            Expanded(
-              child: Row(children: [
-                cards,
-                const Spacer(),
-                Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  if (seat.betStreet > 0 && h != null && !h.finished)
-                    Text('下注 ${_short(seat.betStreet)}', style: const TextStyle(fontSize: 12, color: Color(0xFFFFD54F))),
-                  if (net != null && net != 0)
-                    Text(net > 0 ? '+${_short(net)}' : _short(net),
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: net > 0 ? Colors.greenAccent : Colors.redAccent)),
-                  if (seat.handName != null) Text(seat.handName!, style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                  if (active && remaining != null) Text('${remaining.ceil()} 秒', style: TextStyle(fontSize: 12, color: remaining < 8 ? Colors.redAccent : Colors.white70)),
-                ]),
-              ]),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      seat.isMe ? '${seat.name ?? ''}（我）' : (seat.name ?? ''),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const CasinoChip(value: 0, size: 12, flat: true, color: Color(0xFFC62828), text: ''),
+                      const SizedBox(width: 4),
+                      Text(_short(seat.stack), style: const TextStyle(fontSize: 12, color: Color(0xFFFFD54F), fontWeight: FontWeight.bold)),
+                    ]),
+                    SizedBox(
+                      height: 13,
+                      child: Text(
+                        active && remaining != null
+                            ? '${remaining.ceil()} 秒'
+                            : (tag ?? seat.handName ?? ''),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: active && remaining != null && remaining < 8
+                              ? Colors.redAccent
+                              : (tag == '全下' ? Colors.orangeAccent : Colors.white60),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (seat.isDealer)
+            Positioned(
+              right: 0,
+              bottom: 22,
+              child: Container(
+                width: 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, border: Border.all(color: Colors.black45), boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)]),
+                child: const Text('D', style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
             ),
-          ],
-        ),
+          if (h != null && h.finished && (seat.net ?? 0) < 0)
+            Positioned(
+              top: 0,
+              child: Text(_short(seat.net!), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+        ],
       ),
     );
   }

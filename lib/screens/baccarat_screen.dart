@@ -531,7 +531,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             transform: Matrix4.translationValues(0, selected ? -6 : 0, 0),
-            child: _CasinoChip(value: c, size: 52, glow: selected),
+            child: CasinoChip(value: c, size: 52, glow: selected),
           ),
         );
       }).toList(),
@@ -684,7 +684,7 @@ class _BaccaratScreenState extends State<BaccaratScreen> {
         alignment: Alignment.bottomCenter,
         children: [
           for (var i = 0; i < stack.length; i++)
-            Positioned(bottom: i * step, child: _CasinoChip(value: stack[i], size: size, flat: true)),
+            Positioned(bottom: i * step, child: CasinoChip(value: stack[i], size: size, flat: true)),
         ],
       ),
     );
@@ -881,13 +881,15 @@ class PlayingCardFace extends StatelessWidget {
 
 
 // 賭場籌碼：圓形、外圈白色缺口條紋、內圈細線、中間寫面額。flat = 疊在一起時用（不加大陰影）。
-class _CasinoChip extends StatelessWidget {
+class CasinoChip extends StatelessWidget {
   final int value;
   final double size;
   final bool glow;
   final bool flat;
+  final Color? color; // 指定的話就不用面額換顏色（德州撲克用）
+  final String? text;
 
-  const _CasinoChip({required this.value, required this.size, this.glow = false, this.flat = false});
+  const CasinoChip({super.key, required this.value, required this.size, this.glow = false, this.flat = false, this.color, this.text});
 
   static Color colorFor(int v) {
     if (v >= 500000) return const Color(0xFF7B1FA2);
@@ -915,18 +917,18 @@ class _CasinoChip extends StatelessWidget {
         ],
       ),
       child: CustomPaint(
-        painter: _ChipPainter(colorFor(value)),
+        painter: ChipPainter(color ?? colorFor(value)),
         child: Center(
-          child: Text(label(value), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.26)),
+          child: Text(text ?? label(value), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * (text != null && text!.length > 3 ? 0.21 : 0.26))),
         ),
       ),
     );
   }
 }
 
-class _ChipPainter extends CustomPainter {
+class ChipPainter extends CustomPainter {
   final Color color;
-  _ChipPainter(this.color);
+  ChipPainter(this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -953,5 +955,5 @@ class _ChipPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ChipPainter old) => old.color != color;
+  bool shouldRepaint(covariant ChipPainter old) => old.color != color;
 }
