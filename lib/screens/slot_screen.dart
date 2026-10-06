@@ -32,7 +32,8 @@ class _Reel {
   _Reel(this.pos);
 }
 
-class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateMixin {
+class _SlotScreenState extends State<SlotScreen>
+    with SingleTickerProviderStateMixin {
   static const _freeSpeed = 70.0; // 空轉速度（格/秒）
   static const _len = 32;
 
@@ -87,8 +88,14 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       if (!mounted) return;
       setState(() {
         _info = info;
-        _strips = [for (final s in info['strips'] as List) [for (final v in s as List) (v as num).toInt()]];
-        _lines = [for (final l in info['lines'] as List) [for (final v in l as List) (v as num).toInt()]];
+        _strips = [
+          for (final s in info['strips'] as List)
+            [for (final v in s as List) (v as num).toInt()],
+        ];
+        _lines = [
+          for (final l in info['lines'] as List)
+            [for (final v in l as List) (v as num).toInt()],
+        ];
         _symbols = [for (final s in info['symbols'] as List) s as String];
         _cash = (info['cash'] as num).toDouble();
         _shownCash = _cash;
@@ -133,7 +140,11 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
             r.mode = _Mode.bounce;
             r.bounceT0 = _now;
             CasinoMusic.instance.playSfx('reelstop');
-            if (_reels.every((e) => e.mode == _Mode.bounce || e.mode == _Mode.idle)) _spinSound?.cancel();
+            if (_reels.every(
+              (e) => e.mode == _Mode.bounce || e.mode == _Mode.idle,
+            )) {
+              _spinSound?.cancel();
+            }
           }
         case _Mode.bounce:
           if (_now - r.bounceT0 > 0.4) {
@@ -209,7 +220,10 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
     _spinSound?.cancel();
     CasinoMusic.instance.playSfx('chipdrop');
     CasinoMusic.instance.playSfx('reelspin');
-    _spinSound = Timer.periodic(const Duration(milliseconds: 520), (_) => CasinoMusic.instance.playSfx('reelspin'));
+    _spinSound = Timer.periodic(
+      const Duration(milliseconds: 520),
+      (_) => CasinoMusic.instance.playSfx('reelspin'),
+    );
     _pullLever();
     // 扣掉下注額先顯示（結果出來前不要劇透輸贏）
     setState(() => _shownCash = _cash - _bet);
@@ -232,7 +246,9 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
     final extra = math.max(0.0, 0.8 - waited);
     final stops = [for (final s in res['stops'] as List) (s as num).toInt()];
     _result = res;
-    _wins = [for (final w in res['wins'] as List) (w as Map).cast<String, dynamic>()];
+    _wins = [
+      for (final w in res['wins'] as List) (w as Map).cast<String, dynamic>(),
+    ];
     for (var i = 0; i < 3; i++) {
       final r = _reels[i];
       r.dist = stops[i].toDouble(); // 暫存停輪位置，tick 裡換算成要轉的距離
@@ -269,7 +285,9 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 2)));
+      ..showSnackBar(
+        SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+      );
   }
 
   // ===== 畫面 =====
@@ -280,7 +298,13 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       body: _info == null
           ? Center(
               child: _error != null
-                  ? Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.redAccent)))
+                  ? Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.redAccent),
+                      ),
+                    )
                   : const CircularProgressIndicator(),
             )
           : SingleChildScrollView(
@@ -300,7 +324,10 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
                       Text(
                         '3 轉輪 × 5 條線（上、中、下、兩條斜線），總下注平分到 5 條線。三個一樣依賠率派彩，'
                         '左邊起連續兩顆櫻桃也有小賠。理論回報率約 94.5%。結果由伺服器抽出，贏超過 20 倍會公告到 Discord。',
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -314,26 +341,115 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
     return Stack(
       children: [
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
-            gradient: const LinearGradient(colors: [Color(0xFF8E1B2B), Color(0xFF4A0D16)], begin: Alignment.topCenter, end: Alignment.bottomCenter),
-            border: Border.all(color: const Color(0xFFE0B341), width: 4),
-            boxShadow: const [BoxShadow(color: Colors.black87, blurRadius: 16, offset: Offset(0, 6))],
-          ),
-          child: Column(
-            children: [
-              _marquee(),
-              const SizedBox(height: 6),
-              ShaderMask(
-                shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFFF3B0), Color(0xFFE0B341), Color(0xFFFFF3B0)]).createShader(r),
-                child: const Text('LUCKY  SLOT', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 6, color: Colors.white)),
+            borderRadius: BorderRadius.circular(30),
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFFFFF3B0),
+                Color(0xFFE0B341),
+                Color(0xFF8A6A12),
+                Color(0xFFE0B341),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black87,
+                blurRadius: 22,
+                offset: Offset(0, 12),
               ),
-              const SizedBox(height: 8),
-              _reelWindow(),
-              const SizedBox(height: 10),
-              _ledRow(),
+              BoxShadow(
+                color: Color(0x55E0B341),
+                blurRadius: 24,
+                spreadRadius: 1,
+              ),
             ],
+          ),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              // 縱向漸層 + 橫向光影：左右邊緣暗、中間亮，像圓弧的機身
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFFC2304A),
+                  Color(0xFF8E1B2B),
+                  Color(0xFF3A0911),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            foregroundDecoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.black.withValues(alpha: 0.35),
+                  Colors.transparent,
+                  Colors.white.withValues(alpha: 0.10),
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.35),
+                ],
+                stops: const [0, 0.18, 0.3, 0.8, 1],
+              ),
+            ),
+            child: Column(
+              children: [
+                _marquee(),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF2B0A10), Color(0xFF14040A)],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    border: Border.all(
+                      color: const Color(0xFFE0B341),
+                      width: 2,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black54,
+                        blurRadius: 6,
+                        offset: Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: ShaderMask(
+                    shaderCallback: (r) => const LinearGradient(
+                      colors: [
+                        Color(0xFFFFF8D0),
+                        Color(0xFFE0B341),
+                        Color(0xFF9A7414),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ).createShader(r),
+                    child: const Text(
+                      'LUCKY  SLOT',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 6,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _reelWindow(),
+                const SizedBox(height: 12),
+                _ledRow(),
+              ],
+            ),
           ),
         ),
         // 右側拉桿
@@ -343,7 +459,8 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
           child: IgnorePointer(
             child: AnimatedBuilder(
               animation: _frame,
-              builder: (context, _) => CustomPaint(painter: _CoinPainter(_coins, _now - _coinStart)),
+              builder: (context, _) =>
+                  CustomPaint(painter: _CoinPainter(_coins, _now - _coinStart)),
             ),
           ),
         ),
@@ -360,7 +477,17 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
         child: Stack(
           alignment: Alignment.topCenter,
           children: [
-            Positioned(top: 20, bottom: 0, child: Container(width: 8, decoration: BoxDecoration(color: const Color(0xFFB0B7BF), borderRadius: BorderRadius.circular(4)))),
+            Positioned(
+              top: 20,
+              bottom: 0,
+              child: Container(
+                width: 8,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB0B7BF),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
             Positioned(
               top: 6 + 70 * _lever,
               child: Container(
@@ -368,8 +495,13 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
                 height: 22,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const RadialGradient(colors: [Color(0xFFFF6B6B), Color(0xFFB71C1C)], center: Alignment(-0.3, -0.3)),
-                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                  gradient: const RadialGradient(
+                    colors: [Color(0xFFFF6B6B), Color(0xFFB71C1C)],
+                    center: Alignment(-0.3, -0.3),
+                  ),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black54, blurRadius: 4),
+                  ],
                 ),
               ),
             ),
@@ -394,8 +526,17 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
                 height: 9,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: (i + phase) % 3 == 0 ? const Color(0xFFFFF176) : const Color(0xFF6B4A12),
-                  boxShadow: (i + phase) % 3 == 0 ? [const BoxShadow(color: Color(0xFFFFD54F), blurRadius: 8)] : null,
+                  color: (i + phase) % 3 == 0
+                      ? const Color(0xFFFFF176)
+                      : const Color(0xFF6B4A12),
+                  boxShadow: (i + phase) % 3 == 0
+                      ? [
+                          const BoxShadow(
+                            color: Color(0xFFFFD54F),
+                            blurRadius: 8,
+                          ),
+                        ]
+                      : null,
                 ),
               ),
           ],
@@ -405,83 +546,140 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
   }
 
   Widget _reelWindow() {
-    return LayoutBuilder(builder: (context, c) {
-      final w = c.maxWidth;
-      const gap = 6.0;
-      final tileW = (w - 16 - gap * 2) / 3;
-      final tileH = tileW * 0.92;
-      final h = tileH * 3;
-      return Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: const Color(0xFF14090C),
-          border: Border.all(color: const Color(0xFFE0B341), width: 2),
-        ),
-        child: AnimatedBuilder(
-          animation: _frame,
-          builder: (context, _) {
-            final cells = <int>{};
-            if (_resultShown) {
-              for (final wn in _wins) {
-                final line = _lines[(wn['line'] as num).toInt()];
-                for (var col = 0; col < (wn['count'] as num).toInt(); col++) {
-                  cells.add(line[col] * 3 + col);
+    return LayoutBuilder(
+      builder: (context, c) {
+        final w = c.maxWidth;
+        const gap = 6.0;
+        final tileW = (w - 16 - gap * 2) / 3;
+        final tileH = tileW * 0.92;
+        final h = tileH * 3;
+        return Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFFF4F6F8),
+                Color(0xFF9AA5AE),
+                Color(0xFF454E56),
+                Color(0xFFB7C0C7),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black87,
+                blurRadius: 10,
+                offset: Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              gradient: const LinearGradient(
+                colors: [Color(0xFF000000), Color(0xFF241217)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              boxShadow: const [
+                BoxShadow(color: Colors.black, blurRadius: 8, spreadRadius: -2),
+              ],
+            ),
+            child: AnimatedBuilder(
+              animation: _frame,
+              builder: (context, _) {
+                final cells = <int>{};
+                if (_resultShown) {
+                  for (final wn in _wins) {
+                    final line = _lines[(wn['line'] as num).toInt()];
+                    for (
+                      var col = 0;
+                      col < (wn['count'] as num).toInt();
+                      col++
+                    ) {
+                      cells.add(line[col] * 3 + col);
+                    }
+                  }
                 }
-              }
-            }
-            final pulse = 0.5 + 0.5 * math.sin(_now * 9);
-            return SizedBox(
-              height: h,
-              child: Stack(
-                children: [
-                  Row(
+                final pulse = 0.5 + 0.5 * math.sin(_now * 9);
+                return SizedBox(
+                  height: h,
+                  child: Stack(
                     children: [
-                      for (var col = 0; col < 3; col++) ...[
-                        if (col > 0) const SizedBox(width: gap),
-                        _reelColumn(col, tileW, tileH, cells, pulse),
-                      ],
-                    ],
-                  ),
-                  // 玻璃反光 + 上下暗角
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Colors.black.withValues(alpha: 0.45), Colors.transparent, Colors.transparent, Colors.black.withValues(alpha: 0.45)],
-                            stops: const [0, 0.22, 0.78, 1],
+                      Row(
+                        children: [
+                          for (var col = 0; col < 3; col++) ...[
+                            if (col > 0) const SizedBox(width: gap),
+                            _reelColumn(col, tileW, tileH, cells, pulse),
+                          ],
+                        ],
+                      ),
+                      // 玻璃反光 + 上下暗角
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.45),
+                                  Colors.transparent,
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.45),
+                                ],
+                                stops: const [0, 0.22, 0.78, 1],
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                      if (_resultShown && _wins.isNotEmpty)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _LinePainter(
+                                _wins,
+                                _lines,
+                                tileW,
+                                tileH,
+                                gap,
+                                _now - _resultAt,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  if (_resultShown && _wins.isNotEmpty)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: CustomPaint(painter: _LinePainter(_wins, _lines, tileW, tileH, gap, _now - _resultAt)),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
-      );
-    });
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
   }
 
-  Widget _reelColumn(int col, double tileW, double tileH, Set<int> winCells, double pulse) {
+  Widget _reelColumn(
+    int col,
+    double tileW,
+    double tileH,
+    Set<int> winCells,
+    double pulse,
+  ) {
     final r = _reels[col];
     var pos = r.pos;
     if (r.mode == _Mode.bounce) {
       final p = ((_now - r.bounceT0) / 0.4).clamp(0.0, 1.0);
       pos += 0.18 * (1 - Curves.elasticOut.transform(p));
     }
-    final fast = r.mode == _Mode.free || (r.mode == _Mode.stopping && (_now - r.t0) / r.dur < 0.6);
+    final fast =
+        r.mode == _Mode.free ||
+        (r.mode == _Mode.stopping && (_now - r.t0) / r.dur < 0.6);
     final strip = _strips[col];
     final base = pos.floor();
     final tiles = <Widget>[];
@@ -490,19 +688,63 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       if (y < -tileH || y > tileH * 3) continue;
       final sym = strip[((k % _len) + _len) % _len];
       final row = ((pos - k).round()).clamp(0, 2);
-      final isWin = r.mode == _Mode.idle && winCells.contains(row * 3 + col) && (pos - k - row).abs() < 0.05;
-      tiles.add(Positioned(top: y, left: 0, width: tileW, height: tileH, child: _tile(sym, tileW, tileH, isWin, pulse)));
+      final isWin =
+          r.mode == _Mode.idle &&
+          winCells.contains(row * 3 + col) &&
+          (pos - k - row).abs() < 0.05;
+      // 轉輪是圓柱：離中心越遠的格子越往後傾斜、越暗，看起來像真的滾筒
+      final u = ((y + tileH / 2) - tileH * 1.5) / (tileH * 1.5);
+      tiles.add(
+        Positioned(
+          top: y,
+          left: 0,
+          width: tileW,
+          height: tileH,
+          child: Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()
+              ..setEntry(3, 2, 0.0013)
+              ..rotateX(u.clamp(-1.4, 1.4) * 0.8),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _tile(sym, tileW, tileH, isWin, pulse),
+                IgnorePointer(
+                  child: Container(
+                    margin: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      color: Colors.black.withValues(
+                        alpha: (u.abs() * u.abs() * 0.55).clamp(0.0, 0.7),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
     Widget reel = ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: SizedBox(width: tileW, height: tileH * 3, child: Stack(clipBehavior: Clip.hardEdge, children: tiles)),
+      child: SizedBox(
+        width: tileW,
+        height: tileH * 3,
+        child: Stack(clipBehavior: Clip.hardEdge, children: tiles),
+      ),
     );
-    if (fast) reel = ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaY: 5, sigmaX: 0), child: reel);
+    if (fast) {
+      reel = ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(sigmaY: 5, sigmaX: 0),
+        child: reel,
+      );
+    }
     return reel;
   }
 
   Widget _tile(int sym, double w, double h, bool win, double pulse) {
-    final glow = const Color(0xFFFFE066);
+    const glow = Color(0xFFFFE066);
     return Container(
       margin: const EdgeInsets.all(2),
       decoration: BoxDecoration(
@@ -510,57 +752,83 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: win ? const [Color(0xFFFFF8DC), Color(0xFFFFE08A)] : const [Color(0xFFFDFBF3), Color(0xFFD9D2BF)],
+          colors: win
+              ? const [Color(0xFFFFFBE6), Color(0xFFFFD866)]
+              : const [Color(0xFFFFFFFF), Color(0xFFE8E1CC), Color(0xFFC9C1A8)],
+          stops: win ? null : const [0, 0.55, 1],
         ),
-        border: Border.all(color: win ? Color.lerp(const Color(0xFFB8860B), glow, pulse)! : const Color(0xFF8D8672), width: win ? 3.5 : 1),
-        boxShadow: win ? [BoxShadow(color: glow.withValues(alpha: 0.4 + 0.4 * pulse), blurRadius: 14, spreadRadius: 1)] : null,
+        border: Border.all(
+          color: win
+              ? Color.lerp(const Color(0xFFB8860B), glow, pulse)!
+              : const Color(0xFF7A745F),
+          width: win ? 3.5 : 1.2,
+        ),
+        boxShadow: [
+          const BoxShadow(
+            color: Colors.black54,
+            blurRadius: 3,
+            offset: Offset(0, 2),
+          ),
+          if (win)
+            BoxShadow(
+              color: glow.withValues(alpha: 0.4 + 0.4 * pulse),
+              blurRadius: 14,
+              spreadRadius: 1,
+            ),
+        ],
       ),
-      alignment: Alignment.center,
-      child: Transform.scale(
-        scale: win ? 1 + 0.08 * pulse : 1,
-        child: _symbolWidget(sym, h * 0.52),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 上半部的玻璃高光
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: h * 0.4,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(9),
+                ),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.65),
+                    Colors.white.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Transform.scale(
+            scale: win ? 1 + 0.08 * pulse : 1,
+            child: _symbolWidget(sym, h * 0.52),
+          ),
+        ],
       ),
     );
   }
 
   // 星星和 7 用自己畫的（系統 emoji 的黃星、灰底 7 放在米色底上對比太低，看不清楚）
   Widget _symbolWidget(int sym, double size) {
-    if (sym == 4) return SizedBox(width: size * 1.3, height: size * 1.3, child: CustomPaint(painter: _StarPainter()));
+    if (sym == 4) {
+      return SizedBox(
+        width: size * 1.3,
+        height: size * 1.3,
+        child: CustomPaint(painter: _StarPainter()),
+      );
+    }
     if (sym == 5) {
-      Widget seven(Paint? stroke, Color? color) => Text(
-            '7',
-            style: TextStyle(
-              fontSize: size * 1.4,
-              height: 1.0,
-              fontWeight: FontWeight.w900,
-              fontStyle: FontStyle.italic,
-              color: stroke == null ? color : null,
-              foreground: stroke,
-            ),
-          );
-      return Stack(
-        alignment: Alignment.center,
-        children: [
-          seven(Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = size * 0.26
-            ..strokeJoin = StrokeJoin.round
-            ..color = const Color(0xFF1A0505), null),
-          seven(Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = size * 0.1
-            ..strokeJoin = StrokeJoin.round
-            ..color = const Color(0xFFFFD54F), null),
-          ShaderMask(
-            shaderCallback: (r) => const LinearGradient(colors: [Color(0xFFFF1744), Color(0xFFD50000)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(r),
-            child: seven(null, Colors.white),
-          ),
-        ],
+      return SizedBox(
+        width: size * 1.3,
+        height: size * 1.3,
+        child: CustomPaint(painter: _SevenPainter()),
       );
     }
     return Text(_symbols[sym], style: TextStyle(fontSize: size, height: 1.0));
   }
-
 
   // 底下三個 LED 顯示：現金、下注、本次贏得
   Widget _ledRow() {
@@ -570,24 +838,60 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       children: [
         Expanded(child: _led('現金', _shownCash, const Color(0xFF7CFFB0))),
         const SizedBox(width: 8),
-        Expanded(child: _led('下注', _bet.toDouble(), const Color(0xFFFFD54F), animate: false)),
+        Expanded(
+          child: _led(
+            '下注',
+            _bet.toDouble(),
+            const Color(0xFFFFD54F),
+            animate: false,
+          ),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _led('贏得', payout, payout > 0 ? const Color(0xFFFF8A65) : const Color(0xFF8D6E63))),
+        Expanded(
+          child: _led(
+            '贏得',
+            payout,
+            payout > 0 ? const Color(0xFFFF8A65) : const Color(0xFF8D6E63),
+          ),
+        ),
       ],
     );
   }
 
   Widget _led(String label, double value, Color color, {bool animate = true}) {
     Widget text(double v) => FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(_money.format(v), style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'monospace', shadows: [Shadow(color: color, blurRadius: 6)])),
-        );
+      fit: BoxFit.scaleDown,
+      child: Text(
+        _money.format(v),
+        style: TextStyle(
+          color: color,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'monospace',
+          shadows: [Shadow(color: color, blurRadius: 6)],
+        ),
+      ),
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFF5A4A1A))),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF000000), Color(0xFF1A1208)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        border: Border.all(color: const Color(0xFF8A7230), width: 1.5),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 3, offset: Offset(0, 2)),
+        ],
+      ),
       child: Column(
         children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 10),
+          ),
           animate
               ? TweenAnimationBuilder<double>(
                   tween: Tween(end: value),
@@ -607,7 +911,13 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
       children: [
         Opacity(
           opacity: busy ? 0.5 : 1,
-          child: IgnorePointer(ignoring: busy, child: ChipSelector(selected: _bet, onSelect: (c) => setState(() => _bet = c))),
+          child: IgnorePointer(
+            ignoring: busy,
+            child: ChipSelector(
+              selected: _bet,
+              onSelect: (c) => setState(() => _bet = c),
+            ),
+          ),
         ),
         const SizedBox(height: 12),
         Row(
@@ -622,23 +932,91 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
             const SizedBox(width: 18),
             GestureDetector(
               onTap: busy ? null : _spin,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                width: 96,
-                height: 96,
-                transform: Matrix4.identity()..scaleByDouble(busy ? 0.93 : 1.0, busy ? 0.93 : 1.0, 1.0, 1.0),
-                transformAlignment: Alignment.center,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: busy ? const [Color(0xFF8A7B3B), Color(0xFF5B4F1E)] : const [Color(0xFFFFE57A), Color(0xFFD99A0B)],
-                    center: const Alignment(-0.3, -0.4),
-                  ),
-                  border: Border.all(color: const Color(0xFFFFF3B0), width: 3),
-                  boxShadow: [BoxShadow(color: busy ? Colors.black54 : const Color(0xFFFFC107).withValues(alpha: 0.7), blurRadius: busy ? 4 : 18)],
+              child: SizedBox(
+                width: 104,
+                height: 108,
+                child: Stack(
+                  alignment: Alignment.topCenter,
+                  children: [
+                    // 底座（深色，露出來的高度就是按鈕厚度）
+                    Positioned(
+                      bottom: 0,
+                      child: Container(
+                        width: 104,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF9A6A00), Color(0xFF3F2A00)],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black87,
+                              blurRadius: 12,
+                              offset: Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // 按鈕面：按下去會往下沉
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 90),
+                      top: busy ? 8 : 0,
+                      child: Container(
+                        width: 104,
+                        height: 100,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: busy
+                                ? const [Color(0xFFB59B3F), Color(0xFF6F5E22)]
+                                : const [
+                                    Color(0xFFFFF3A8),
+                                    Color(0xFFFFC62E),
+                                    Color(0xFFD08A00),
+                                  ],
+                            stops: busy ? null : const [0, 0.55, 1],
+                            center: const Alignment(-0.35, -0.5),
+                            radius: 0.95,
+                          ),
+                          border: Border.all(
+                            color: const Color(0xFFFFF8D0),
+                            width: 2.5,
+                          ),
+                          boxShadow: busy
+                              ? null
+                              : [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFFFFC107,
+                                    ).withValues(alpha: 0.6),
+                                    blurRadius: 18,
+                                  ),
+                                ],
+                        ),
+                        child: Text(
+                          busy ? '轉動中' : 'SPIN',
+                          style: const TextStyle(
+                            color: Color(0xFF4A2A00),
+                            fontSize: 21,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1,
+                            shadows: [
+                              Shadow(
+                                color: Color(0x88FFFFFF),
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                child: Text(busy ? '轉動中' : 'SPIN', style: const TextStyle(color: Color(0xFF4A2A00), fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1)),
               ),
             ),
             const SizedBox(width: 18),
@@ -672,9 +1050,13 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
   }
 
   void _showPaytable() {
-    final tp = (_info!['triple_pay'] as Map).map((k, v) => MapEntry(int.parse(k as String), (v as num).toInt()));
+    final tp = (_info!['triple_pay'] as Map).map(
+      (k, v) => MapEntry(int.parse(k as String), (v as num).toInt()),
+    );
     final order = tp.keys.toList()..sort((a, b) => tp[b]!.compareTo(tp[a]!));
-    final cp = (_info!['cherry_left_pay'] as Map).map((k, v) => MapEntry(int.parse(k as String), (v as num).toInt()));
+    final cp = (_info!['cherry_left_pay'] as Map).map(
+      (k, v) => MapEntry(int.parse(k as String), (v as num).toInt()),
+    );
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -684,27 +1066,66 @@ class _SlotScreenState extends State<SlotScreen> with SingleTickerProviderStateM
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('賠率表（每條線的下注額 × 倍數）', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Text(
+                '賠率表（每條線的下注額 × 倍數）',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
               const SizedBox(height: 4),
-              Text('總下注會平分給 5 條線，所以每條線 = 總下注 ÷ 5。', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text(
+                '總下注會平分給 5 條線，所以每條線 = 總下注 ÷ 5。',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
               const SizedBox(height: 10),
               for (final s in order)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(children: [
-                    Row(children: [for (var i = 0; i < 3; i++) Padding(padding: const EdgeInsets.only(right: 4), child: _symbolWidget(s, 24))]),
-                    const Spacer(),
-                    Text('× ${tp[s]}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFFFFD54F))),
-                  ]),
+                  child: Row(
+                    children: [
+                      Row(
+                        children: [
+                          for (var i = 0; i < 3; i++)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: _symbolWidget(s, 24),
+                            ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        '× ${tp[s]}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Color(0xFFFFD54F),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               const Divider(),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(children: [
-                  Row(children: [_symbolWidget(0, 24), _symbolWidget(0, 24), const SizedBox(width: 6), const Text('（最左邊起）')]),
-                  const Spacer(),
-                  Text('× ${cp[2]}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFFFFD54F))),
-                ]),
+                child: Row(
+                  children: [
+                    Row(
+                      children: [
+                        _symbolWidget(0, 24),
+                        _symbolWidget(0, 24),
+                        const SizedBox(width: 6),
+                        const Text('（最左邊起）'),
+                      ],
+                    ),
+                    const Spacer(),
+                    Text(
+                      '× ${cp[2]}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Color(0xFFFFD54F),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -721,7 +1142,13 @@ class _LinePainter extends CustomPainter {
   final double tileW, tileH, gap, t;
   _LinePainter(this.wins, this.lines, this.tileW, this.tileH, this.gap, this.t);
 
-  static const colors = [Color(0xFFFF5252), Color(0xFF40C4FF), Color(0xFFB2FF59), Color(0xFFFFAB40), Color(0xFFE040FB)];
+  static const colors = [
+    Color(0xFFFF5252),
+    Color(0xFF40C4FF),
+    Color(0xFFB2FF59),
+    Color(0xFFFFAB40),
+    Color(0xFFE040FB),
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -730,30 +1157,50 @@ class _LinePainter extends CustomPainter {
     final w = wins[idx];
     final li = (w['line'] as num).toInt();
     final line = lines[li];
-    final pts = [for (var c = 0; c < 3; c++) Offset(c * (tileW + gap) + tileW / 2, line[c] * tileH + tileH / 2)];
+    final pts = [
+      for (var c = 0; c < 3; c++)
+        Offset(c * (tileW + gap) + tileW / 2, line[c] * tileH + tileH / 2),
+    ];
     final color = colors[li % colors.length];
     final path = Path()..moveTo(pts[0].dx - tileW * 0.35, pts[0].dy);
     for (final p in pts) {
       path.lineTo(p.dx, p.dy);
     }
     path.lineTo(pts[2].dx + tileW * 0.35, pts[2].dy);
-    canvas.drawPath(path, Paint()
-      ..color = color.withValues(alpha: 0.35)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeJoin = StrokeJoin.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
-    canvas.drawPath(path, Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5
-      ..strokeJoin = StrokeJoin.round);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color.withValues(alpha: 0.35)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 12
+        ..strokeJoin = StrokeJoin.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.5
+        ..strokeJoin = StrokeJoin.round,
+    );
     final amount = (w['amount'] as num).toInt();
     final tp = TextPainter(
-      text: TextSpan(text: '+${_money.format(amount)}', style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w900, shadows: const [Shadow(color: Colors.black, blurRadius: 6)])),
+      text: TextSpan(
+        text: '+${_money.format(amount)}',
+        style: TextStyle(
+          color: color,
+          fontSize: 20,
+          fontWeight: FontWeight.w900,
+          shadows: const [Shadow(color: Colors.black, blurRadius: 6)],
+        ),
+      ),
       textDirection: ui.TextDirection.ltr,
     )..layout();
-    tp.paint(canvas, Offset(size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2));
+    tp.paint(
+      canvas,
+      Offset(size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2),
+    );
   }
 
   @override
@@ -763,12 +1210,12 @@ class _LinePainter extends CustomPainter {
 class _Coin {
   final double x, vy, vx, r, spin, delay;
   _Coin(math.Random rnd)
-      : x = rnd.nextDouble(),
-        vy = 0.5 + rnd.nextDouble() * 0.7,
-        vx = (rnd.nextDouble() - 0.5) * 0.3,
-        r = 6 + rnd.nextDouble() * 6,
-        spin = rnd.nextDouble() * 8,
-        delay = rnd.nextDouble() * 0.8;
+    : x = rnd.nextDouble(),
+      vy = 0.5 + rnd.nextDouble() * 0.7,
+      vx = (rnd.nextDouble() - 0.5) * 0.3,
+      r = 6 + rnd.nextDouble() * 6,
+      spin = rnd.nextDouble() * 8,
+      delay = rnd.nextDouble() * 0.8;
 }
 
 // 金幣雨：大獎時從上方掉下來的金色硬幣
@@ -787,12 +1234,19 @@ class _CoinPainter extends CustomPainter {
       if (y > size.height + 20) continue;
       final x = (c.x + c.vx * tt) * size.width;
       final squish = (math.cos(tt * c.spin * 3)).abs() * 0.8 + 0.2;
-      final rect = Rect.fromCenter(center: Offset(x, y), width: c.r * 2 * squish, height: c.r * 2);
+      final rect = Rect.fromCenter(
+        center: Offset(x, y),
+        width: c.r * 2 * squish,
+        height: c.r * 2,
+      );
       canvas.drawOval(rect, Paint()..color = const Color(0xFFFFC107));
-      canvas.drawOval(rect.deflate(c.r * 0.28), Paint()
-        ..color = const Color(0xFFFFE082)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5);
+      canvas.drawOval(
+        rect.deflate(c.r * 0.28),
+        Paint()
+          ..color = const Color(0xFFFFE082)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
     }
   }
 
@@ -815,22 +1269,97 @@ class _StarPainter extends CustomPainter {
       i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
     }
     path.close();
-    canvas.drawPath(path, Paint()
-      ..color = const Color(0xFF1A0505)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = R * 0.3
-      ..strokeJoin = StrokeJoin.round);
-    canvas.drawPath(path, Paint()
-      ..shader = const LinearGradient(colors: [Color(0xFFFF1744), Color(0xFFD50000)], begin: Alignment.topCenter, end: Alignment.bottomCenter)
-          .createShader(Offset.zero & size));
-    canvas.drawPath(path, Paint()
-      ..color = const Color(0xFFFFD54F)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = R * 0.07
-      ..strokeJoin = StrokeJoin.round);
-    canvas.drawCircle(Offset(c.dx - R * 0.18, c.dy - R * 0.22), R * 0.1, Paint()..color = Colors.white70);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFF1A0505)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = R * 0.3
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0xFFFF1744), Color(0xFFD50000)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ).createShader(Offset.zero & size),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFFFFD54F)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = R * 0.07
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawCircle(
+      Offset(c.dx - R * 0.18, c.dy - R * 0.22),
+      R * 0.1,
+      Paint()..color = Colors.white70,
+    );
   }
 
   @override
   bool shouldRepaint(covariant _StarPainter old) => false;
+}
+
+// 紅色粗體 7：用路徑畫，位置正好置中（不靠字型，字型的上下留白會讓 7 偏掉）
+class _SevenPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    Offset p(double x, double y) => Offset(x * w, y * h);
+    final path = Path()
+      ..moveTo(p(0.12, 0.10).dx, p(0.12, 0.10).dy)
+      ..lineTo(p(0.88, 0.10).dx, p(0.88, 0.10).dy)
+      ..lineTo(p(0.88, 0.27).dx, p(0.88, 0.27).dy)
+      ..lineTo(p(0.47, 0.92).dx, p(0.47, 0.92).dy)
+      ..lineTo(p(0.22, 0.92).dx, p(0.22, 0.92).dy)
+      ..lineTo(p(0.60, 0.30).dx, p(0.60, 0.30).dy)
+      ..lineTo(p(0.12, 0.30).dx, p(0.12, 0.30).dy)
+      ..close();
+    // 立體感：往右下偏移的深色陰影
+    canvas.drawPath(
+      path.shift(Offset(w * 0.04, h * 0.05)),
+      Paint()..color = Colors.black54,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFF1A0505)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w * 0.13
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0xFFFF5252), Color(0xFFD50000), Color(0xFF8E0000)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ).createShader(Offset.zero & size),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = const Color(0xFFFFD54F)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = w * 0.035
+        ..strokeJoin = StrokeJoin.round,
+    );
+    // 上橫槓的高光
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(w * 0.17, h * 0.135, w * 0.66, h * 0.045),
+        Radius.circular(w * 0.02),
+      ),
+      Paint()..color = Colors.white.withValues(alpha: 0.55),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SevenPainter old) => false;
 }
