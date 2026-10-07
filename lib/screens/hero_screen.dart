@@ -453,9 +453,12 @@ class _HeroScreenState extends State<HeroScreen> {
             label: const Text('商店', style: TextStyle(color: Color(0xFFFFD36B))),
           ),
           TextButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TowerScreen()),
-            ),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TowerScreen()),
+              );
+              if (mounted) _load(); // 塔裡掉的新裝備要在回來時重抓物品欄
+            },
             icon: const Icon(Icons.fort, color: Color(0xFFFFD36B)),
             label: const Text('百層塔', style: TextStyle(color: Color(0xFFFFD36B))),
           ),
