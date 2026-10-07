@@ -90,7 +90,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   }
   int _floor = 1; // 選擇中的樓層
   bool _autoUp = true;
-  double _speed = 1;
+  double _speed = 2;
 
   // 探索狀態
   int _runFloor = 1;
