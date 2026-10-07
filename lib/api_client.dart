@@ -259,6 +259,18 @@ class ApiClient {
       '/api/hero/equip', {'inv_id': invId, if (slot != null) 'slot': slot}, (j) => j as Map<String, dynamic>,
       withAuth: true);
 
+  Future<Map<String, dynamic>> fetchTowerState() =>
+      _get('/api/tower/state', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> towerEnter(int floor) =>
+      _post('/api/tower/enter', {'floor': floor}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> towerFight() =>
+      _post('/api/tower/fight', {}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> towerLeave() =>
+      _post('/api/tower/leave', {}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> heroDiscard(int invId) =>
       _post('/api/hero/discard', {'inv_id': invId}, (j) => j as Map<String, dynamic>, withAuth: true);
 

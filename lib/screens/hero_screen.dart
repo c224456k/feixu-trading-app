@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../widgets/hero_art.dart';
+import 'tower_screen.dart';
 
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
 // 裝備資料全由伺服器（hero_game.py）提供，這裡只負責顯示。
@@ -425,6 +426,15 @@ class _HeroScreenState extends State<HeroScreen> {
       appBar: AppBar(
         title: const Text('勇者裝備'),
         backgroundColor: const Color(0xFF1B1710),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TowerScreen()),
+            ),
+            icon: const Icon(Icons.fort, color: Color(0xFFFFD36B)),
+            label: const Text('百層塔', style: TextStyle(color: Color(0xFFFFD36B))),
+          ),
+        ],
       ),
       body: _error != null
           ? Center(
