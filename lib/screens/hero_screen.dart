@@ -356,10 +356,15 @@ class _HeroScreenState extends State<HeroScreen> {
     );
   }
 
-  String _statLine(Map<String, dynamic> item) => [
-    for (final k in _statOrder)
-      if ((item[k] as num) != 0) '${_statLabels[k]}+${item[k]}',
-  ].join('  ');
+  String _statLine(Map<String, dynamic> item) =>
+      [
+        for (final k in _statOrder)
+          if ((item[k] as num) != 0) '${_statLabels[k]}+${item[k]}',
+      ].join('  ') +
+      (item['quality'] != null ? '  （品質 ${item['quality']}%）' : '');
+
+  // 品質：這件裝備數值相對基礎值的百分比（掉落/商店裝備才有；90% 以下偏弱、110% 以上算好貨）
+  Color _qualityColor(int q) => q >= 110 ? const Color(0xFFFFD36B) : (q >= 100 ? const Color(0xFF7DFFA0) : (q >= 90 ? Colors.white70 : const Color(0xFFFF8A80)));
 
   Widget _itemDetail(
     String slotKey,
@@ -389,9 +394,18 @@ class _HeroScreenState extends State<HeroScreen> {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    '${_tierNames[tier]}・$slotName',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      children: [
+                        TextSpan(text: '${_tierNames[tier]}・$slotName'),
+                        if (item['quality'] != null)
+                          TextSpan(
+                            text: '・品質 ${item['quality']}%',
+                            style: TextStyle(color: _qualityColor((item['quality'] as num).toInt()), fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),

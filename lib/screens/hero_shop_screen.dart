@@ -43,7 +43,7 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
   double _cash = 0;
   int _invCount = 0;
   int _invCap = 40;
-  int _tier = 1; // 目前篩選的品階
+  int _tier = 3; // 目前篩選的品階
   String? _error;
   bool _loading = true;
   bool _buying = false;
@@ -60,6 +60,10 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
       if (!mounted) return;
       setState(() {
         _items = [for (final i in (r['items'] as List)) (i as Map).cast<String, dynamic>()];
+        final tiers = {for (final i in _items) (i['tier'] as num).toInt()};
+        if (!tiers.contains(_tier) && tiers.isNotEmpty) {
+          _tier = (tiers.toList()..sort()).first;
+        }
         _cash = (r['cash'] as num).toDouble();
         _invCount = (r['inventory_count'] as num).toInt();
         _invCap = (r['inventory_capacity'] as num).toInt();
@@ -87,7 +91,7 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('買下 ${item['name']}？'),
-        content: Text('${_statLine(item)}\n\n要花 ${_money.format(price)} 元（現金不會退，也不能賣回）。\n你現在有 ${_money.format(_cash)} 元。'),
+        content: Text('基礎 ${_statLine(item)}（實際數值 ±20% 隨機）\n\n要花 ${_money.format(price)} 元（現金不會退，也不能賣回）。\n你現在有 ${_money.format(_cash)} 元。'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('買下')),
@@ -152,7 +156,7 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       children: [
-                        for (var t = 1; t <= 5; t++)
+                        for (final t in ({for (final i in _items) (i['tier'] as num).toInt()}.toList()..sort()))
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: ChoiceChip(
@@ -173,7 +177,7 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
                         if (i == 0) {
                           return const Padding(
                             padding: EdgeInsets.only(bottom: 6),
-                            child: Text('買到的裝備直接放進物品欄；現金花掉就沒了，不能賣回。', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                            child: Text('買到的裝備直接放進物品欄；每件數值會在 ±20% 內隨機浮動（下面是基礎值，買了才知道實際數值）。現金花掉就沒了，不能賣回。', style: TextStyle(color: Colors.white38, fontSize: 11)),
                           );
                         }
                         return _itemCard(shown[i - 1]);
