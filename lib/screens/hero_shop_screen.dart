@@ -189,6 +189,7 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
     final price = (item['price'] as num).toInt();
     final canAfford = _cash >= price;
     final full = _invCount >= _invCap;
+    final locked = item['locked'] == true;
     return Card(
       color: const Color(0xFF1B1710),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: _tierColors[tier].withValues(alpha: 0.5))),
@@ -207,13 +208,13 @@ class _HeroShopScreenState extends State<HeroShopScreen> {
           ),
           const SizedBox(width: 8),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(_money.format(price), style: TextStyle(color: canAfford ? const Color(0xFFFFD36B) : const Color(0xFFFF8A80), fontWeight: FontWeight.bold)),
+            Text(_money.format(price), style: TextStyle(color: (canAfford && !locked) ? const Color(0xFFFFD36B) : const Color(0xFFFF8A80), fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             SizedBox(
               height: 32,
               child: FilledButton(
-                onPressed: (_buying || !canAfford || full) ? null : () => _buy(item),
-                child: Text(full ? '物品欄滿' : (canAfford ? '購買' : '錢不夠')),
+                onPressed: (_buying || locked || !canAfford || full) ? null : () => _buy(item),
+                child: Text(locked ? '🔒 未開放' : (full ? '物品欄滿' : (canAfford ? '購買' : '錢不夠'))),
               ),
             ),
           ]),
