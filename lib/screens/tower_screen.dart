@@ -73,7 +73,6 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   int _meatMax = 60;
   int _meatCost = 10;
   int _meatRegen = 60;
-  bool _noMeat = false;
   double get _meat => math.min(_meatMax.toDouble(), _meatBase + DateTime.now().difference(_meatStamp).inMilliseconds / 1000 / _meatRegen);
 
   void _setMeat(Map<String, dynamic> m) {
@@ -209,6 +208,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     try {
       final r = await _api.towerEnter(floor);
       if (!mounted) return;
+      _setMeat(r);
       if (r['ok'] == true) {
         setState(() {
           _floor = floor;
@@ -254,9 +254,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     try {
       final r = await _api.towerFight();
       if (!mounted) return;
-      _setMeat(r);
       if (r['ok'] != true) {
-        _noMeat = r['no_meat'] == true;
         final retry = (r['retry_after'] as num?)?.toDouble();
         if (retry != null) {
           _retryIn = retry + 0.1;
@@ -269,7 +267,6 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         return;
       }
       setState(() {
-        _noMeat = false;
         _result = r;
         _mons = [for (final m in (r['monsters'] as List)) _Mon((m as Map).cast<String, dynamic>())];
         _log = [for (final e in (r['log'] as List)) (e as Map).cast<String, dynamic>()];
@@ -513,7 +510,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
             '・怪物最多同時三隻；每 10 層有一隻頭目（帶兩隻小怪）。\n'
             '・每層有 5 場戰鬥，打完就通關；每場勝利回復 15% 血量，通關回滿。\n'
             '・樓層越高怪物越強；裝備越好的勇者才能爬得越高。\n'
-            '・每打一場戰鬥要消耗 10 塊肉🍖，肉每分鐘恢復 1 塊、上限 60（約 60 分鐘回滿）；肉不夠時勇者會停下等待。\n'
+            '・每挑戰一層（出發或上樓）消耗 10 塊肉🍖，肉每分鐘恢復 1 塊、上限 60（約 60 分鐘回滿）；層內的戰鬥不另外扣，肉不夠就不能出發。\n'
             '・勇者戰敗要等 5 分鐘才能復活。\n'
             '・獎勵只有裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的。\n'
             '・結果由伺服器決定，中途離開頁面也算數。',
@@ -615,11 +612,11 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         Text('🍖 肉  ${m.floor()} / $_meatMax', style: TextStyle(color: enough ? Colors.white70 : const Color(0xFFFF8A80), fontSize: 12)),
         const Spacer(),
         Text(
-          _noMeat || !enough
-              ? '肉不夠（每場 $_meatCost 塊），等待恢復…'
+          !enough
+              ? '肉不夠（每層 $_meatCost 塊），等待恢復…'
               : full
-                  ? '已滿（每場 $_meatCost 塊）'
-                  : '每場 $_meatCost 塊・下一塊 $secsToNext 秒',
+                  ? '已滿（每層 $_meatCost 塊）'
+                  : '每層 $_meatCost 塊・下一塊 $secsToNext 秒',
           style: TextStyle(color: enough ? Colors.white38 : const Color(0xFFFF8A80), fontSize: 11),
         ),
       ]),
