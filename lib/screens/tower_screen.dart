@@ -89,7 +89,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     _meatRegen = (m['meat_regen_seconds'] as num?)?.toInt() ?? _meatRegen;
   }
   int _floor = 1; // 選擇中的樓層
-  bool _autoUp = false;
+  bool _autoUp = true;
   double _speed = 1;
 
   // 探索狀態
