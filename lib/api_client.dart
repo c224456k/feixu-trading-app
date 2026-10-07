@@ -259,6 +259,12 @@ class ApiClient {
       '/api/hero/equip', {'inv_id': invId, if (slot != null) 'slot': slot}, (j) => j as Map<String, dynamic>,
       withAuth: true);
 
+  Future<Map<String, dynamic>> heroDiscard(int invId) =>
+      _post('/api/hero/discard', {'inv_id': invId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> heroAckDrops() =>
+      _post('/api/hero/drops/ack', {}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> heroUnequip(String slot) =>
       _post('/api/hero/unequip', {'slot': slot}, (j) => j as Map<String, dynamic>, withAuth: true);
 
@@ -271,8 +277,9 @@ class ApiClient {
   Future<Map<String, dynamic>> slotSpin(int bet) =>
       _post('/api/slot/spin', {'bet': bet}, (j) => j as Map<String, dynamic>, withAuth: true);
 
-  Future<int> fetchBossCooldown() =>
-      _get('/api/boss/cooldown', (j) => (j as Map<String, dynamic>)['seconds'] as int, withAuth: true);
+  // 回傳 {seconds: 冷卻剩餘秒數, bomb_damage: 我現在一顆炸彈的傷害（含裝備加成）}
+  Future<Map<String, dynamic>> fetchBossCooldown() =>
+      _get('/api/boss/cooldown', (j) => j as Map<String, dynamic>, withAuth: true);
 
   Future<BossAttackResult> attackBoss() => _post(
         '/api/boss/attack',

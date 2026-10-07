@@ -50,6 +50,12 @@ class _HeroScreenState extends State<HeroScreen> {
         _data = d;
         _error = null;
       });
+      final drops = ((d['new_drops'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>();
+      if (drops.isNotEmpty) {
+        _api.heroAckDrops().catchError((_) => <String, dynamic>{});
+        _showDrops(drops);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -61,6 +67,89 @@ class _HeroScreenState extends State<HeroScreen> {
       if (s['key'] == key) return s as Map<String, dynamic>;
     }
     return null;
+  }
+
+  void _showDrops(List<Map<String, dynamic>> drops) {
+    const reasons = {
+      'participant': '參戰獎勵',
+      'top_damage': '傷害第一名',
+      'last_hit': '最後一擊',
+    };
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1710),
+        title: const Text(
+          '🎁 Boss 掉落',
+          style: TextStyle(color: Color(0xFFFFD36B)),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final d in drops)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: _SlotBox(
+                    slot: (d['item'] as Map)['slot'] as String,
+                    item: d['item'] as Map<String, dynamic>,
+                    size: 48,
+                  ),
+                  title: Text(
+                    '${(d['item'] as Map)['name']}',
+                    style: TextStyle(
+                      color:
+                          _tierColors[((d['item'] as Map)['tier'] as num)
+                              .toInt()
+                              .clamp(0, 5)],
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${_tierNames[((d['item'] as Map)['tier'] as num).toInt().clamp(0, 5)]}・${reasons[d['reason']] ?? ''}\n${_statLine(d['item'] as Map<String, dynamic>)}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ),
+              const SizedBox(height: 4),
+              const Text(
+                '已放進物品欄',
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('收下'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmDiscard(Map<String, dynamic> entry) async {
+    final item = entry['item'] as Map<String, dynamic>;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('丟棄裝備？'),
+        content: Text('「${item['name']}」丟掉就拿不回來了，也沒有補償。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('丟棄'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _act(() => _api.heroDiscard((entry['inv_id'] as num).toInt()));
+    }
   }
 
   List<Map<String, dynamic>> get _inventory =>
@@ -245,6 +334,19 @@ class _HeroScreenState extends State<HeroScreen> {
               },
               icon: const Icon(Icons.file_upload_outlined),
               label: Text(current == null ? '裝備' : '換上'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _confirmDiscard(entry);
+              },
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('丟棄'),
+              style: TextButton.styleFrom(foregroundColor: Colors.white38),
             ),
           ),
         ],
@@ -508,6 +610,34 @@ class _HeroScreenState extends State<HeroScreen> {
     );
   }
 
+  // 攻擊 → Boss 炸彈傷害（上限 +atk_cap%）
+  Widget _bombRow() {
+    final dmg = (_data!['bomb_damage'] as num?)?.toInt();
+    if (dmg == null) return const SizedBox.shrink();
+    final cap = (_data!['atk_cap'] as num?)?.toInt() ?? 60;
+    final atk = ((_data!['stats'] as Map)['atk'] as num).toInt();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0x22FF8A3D),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Text('💣', style: TextStyle(fontSize: 18)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '炸彈傷害 $dmg（基礎 50，裝備攻擊 +${atk > cap ? cap : atk}%${atk >= cap ? '・已達上限' : '・上限 +$cap%'}）',
+              style: const TextStyle(color: Color(0xFFFFB27A), fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _statsCard(Map<String, dynamic> base, Map<String, dynamic> bonus) {
     return Container(
       width: double.infinity,
@@ -528,6 +658,7 @@ class _HeroScreenState extends State<HeroScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          _bombRow(),
           for (final k in _statOrder)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),

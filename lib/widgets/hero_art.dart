@@ -25,7 +25,23 @@ const _copper = _Pal(Color(0xFFC97C3C), Color(0xFF7A4318), Color(0xFFF2B374));
 const _silver = _Pal(Color(0xFFCBD4DE), Color(0xFF76818E), Color(0xFFFFFFFF));
 const _gold = _Pal(Color(0xFFE2B33C), Color(0xFF8A6612), Color(0xFFFFE58A));
 
+const _steel = _Pal(Color(0xFF9DB0C4), Color(0xFF4F6176), Color(0xFFDCE8F5));
+const _mithril = _Pal(Color(0xFF69D2E7), Color(0xFF2B7A8C), Color(0xFFD5F8FF));
+const _jade = _Pal(Color(0xFF4CC38A), Color(0xFF1F6E49), Color(0xFFBFF5D8));
+const _dragon = _Pal(Color(0xFFC8423B), Color(0xFF6E1B18), Color(0xFFFF9C8F));
+const _shadow = _Pal(Color(0xFF7A5BC0), Color(0xFF38245F), Color(0xFFC8B2F5));
+const _star = _Pal(Color(0xFFFFE9A0), Color(0xFF9C7A22), Color(0xFFFFFFFF));
+
 _Pal _palFor(String id, int tier) {
+  if (id.startsWith('bronze')) return _copper;
+  if (id.startsWith('iron')) return _iron;
+  if (id.startsWith('steel')) return _steel;
+  if (id.startsWith('mithril')) return _mithril;
+  if (id.startsWith('jade')) return _jade;
+  if (id.startsWith('dragon')) return _dragon;
+  if (id.startsWith('shadow')) return _shadow;
+  if (id.startsWith('holy')) return _gold;
+  if (id.startsWith('star')) return _star;
   if (id.startsWith('rusty')) return _rustIron;
   if (id.contains('silver')) return _silver;
   if (id.contains('copper')) return _copper;

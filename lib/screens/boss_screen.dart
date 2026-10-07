@@ -23,6 +23,7 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
   bool _attacking = false; // 動畫播放+API呼叫進行中，鎖住按鈕避免連點
   Timer? _refreshTimer;
   Timer? _clockTimer;
+  int? _myBombDamage; // 含裝備加成的個人炸彈傷害
   DateTime? _cooldownUntil; // 我的炸彈冷卻到什麼時候（本機時鐘）
 
   int get _cooldownLeft {
@@ -68,11 +69,15 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
     try {
       final status = await _api.fetchBossStatus();
       int cd = 0;
+      int? myDamage;
       try {
-        cd = await _api.fetchBossCooldown();
+        final r = await _api.fetchBossCooldown();
+        cd = (r['seconds'] as num?)?.toInt() ?? 0;
+        myDamage = (r['bomb_damage'] as num?)?.toInt();
       } catch (_) {}
       if (!mounted) return;
       setState(() {
+        _myBombDamage = myDamage;
         _cooldownUntil = cd > 0 ? DateTime.now().add(Duration(seconds: cd)) : null;
         _status = status;
         _error = null;
@@ -103,7 +108,7 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
         }
       });
       if (result.defeated) {
-        _showResultDialog('🎉 打倒了！', result.message);
+        _showResultDialog('🎉 打倒了！', '${result.message}\n\n🎁 掉落的裝備已經放進勇者物品欄（首頁右上角盾牌）');
       } else if (!result.ok) {
         _showSnack(result.message);
       }
@@ -113,6 +118,13 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
       _throwController.reset();
       if (mounted) setState(() => _attacking = false);
     }
+  }
+
+  String _bonusText(BossStatus status) {
+    final my = _myBombDamage;
+    final base = status.bombDamage;
+    if (my == null || base == null || my <= base) return '';
+    return '，裝備加成 +${((my - base) * 100 / base).round()}%';
   }
 
   void _showSnack(String text) {
@@ -269,7 +281,7 @@ class _BossScreenState extends State<BossScreen> with TickerProviderStateMixin {
                 const SizedBox(height: 16),
                 _row('⏳ 剩餘時間', _formatCountdown(status.endsAt!)),
                 _row('💰 獎金池', '${NumberFormat('#,##0').format(status.prizePool)} 元'),
-                _row('💣 炸彈價格', '${NumberFormat('#,##0').format(status.bombCost)} 元／顆（${status.bombDamage} 傷害）'),
+                _row('💣 炸彈價格', '${NumberFormat('#,##0').format(status.bombCost)} 元／顆（${_myBombDamage ?? status.bombDamage} 傷害${_bonusText(status)}）'),
               ],
             ),
           ),
