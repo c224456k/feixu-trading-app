@@ -190,11 +190,31 @@ class TradeResult {
 class BossDamageEntry {
   final String userId;
   final int damage;
+  final String? name;
 
-  BossDamageEntry({required this.userId, required this.damage});
+  BossDamageEntry({required this.userId, required this.damage, this.name});
 
   factory BossDamageEntry.fromJson(Map<String, dynamic> json) {
-    return BossDamageEntry(userId: json['user_id'] as String, damage: json['damage'] as int);
+    return BossDamageEntry(userId: json['user_id'] as String, damage: json['damage'] as int, name: json['name'] as String?);
+  }
+}
+
+/// 最近的攻擊紀錄（別的玩家正在轟炸 Boss 的特效就是靠這個播的）。
+class BossHit {
+  final int id;
+  final String userId;
+  final String name;
+  final int damage;
+
+  BossHit({required this.id, required this.userId, required this.name, required this.damage});
+
+  factory BossHit.fromJson(Map<String, dynamic> json) {
+    return BossHit(
+      id: (json['id'] as num).toInt(),
+      userId: json['user_id'] as String,
+      name: (json['name'] as String?) ?? '有人',
+      damage: (json['damage'] as num).toInt(),
+    );
   }
 }
 
@@ -208,6 +228,8 @@ class BossStatus {
   final int? bombDamage;
   final List<BossDamageEntry> topDamage;
   final DateTime? nextSpawnEta;
+  final int? bossId;
+  final List<BossHit> recentHits;
 
   BossStatus({
     required this.active,
@@ -219,6 +241,8 @@ class BossStatus {
     this.bombDamage,
     this.topDamage = const [],
     this.nextSpawnEta,
+    this.bossId,
+    this.recentHits = const [],
   });
 
   factory BossStatus.fromJson(Map<String, dynamic> json) {
@@ -240,6 +264,10 @@ class BossStatus {
       bombDamage: json['bomb_damage'] as int,
       topDamage: (json['top_damage'] as List)
           .map((e) => BossDamageEntry.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      bossId: (json['boss_id'] as num?)?.toInt(),
+      recentHits: ((json['recent_hits'] as List?) ?? const [])
+          .map((e) => BossHit.fromJson(e as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -389,6 +417,8 @@ class BossAttackResult {
   final bool defeated;
   final BossStatus status;
   final int cooldownSeconds;
+  final int? hitId;
+  final int? damage;
 
   BossAttackResult({
     required this.ok,
@@ -396,6 +426,8 @@ class BossAttackResult {
     required this.defeated,
     required this.status,
     this.cooldownSeconds = 0,
+    this.hitId,
+    this.damage,
   });
 
   factory BossAttackResult.fromJson(Map<String, dynamic> json) {
@@ -405,6 +437,8 @@ class BossAttackResult {
       defeated: json['defeated'] as bool,
       status: BossStatus.fromJson(json['status'] as Map<String, dynamic>),
       cooldownSeconds: (json['cooldown_seconds'] as num?)?.toInt() ?? 0,
+      hitId: (json['hit_id'] as num?)?.toInt(),
+      damage: (json['damage'] as num?)?.toInt(),
     );
   }
 }
