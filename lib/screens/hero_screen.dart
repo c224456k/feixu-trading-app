@@ -70,26 +70,129 @@ class _HeroScreenState extends State<HeroScreen> {
     return null;
   }
 
-  void _showItem(Map<String, dynamic> slot) {
-    final item = slot['item'] as Map<String, dynamic>?;
+  List<Map<String, dynamic>> get _inventory =>
+      ((_data!['inventory'] as List?) ?? const []).cast<Map<String, dynamic>>();
+
+  bool _fits(Map<String, dynamic> item, String slotKey) {
+    final t = item['slot'] as String;
+    return t == slotKey || (t == 'ring' && (slotKey == 'ring1' || slotKey == 'ring2'));
+  }
+
+  Future<void> _act(Future<Map<String, dynamic>> Function() call) async {
+    try {
+      final r = await call();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${r['message'] ?? ''}')));
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  void _sheet(Widget child) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1B1710),
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-        child: item == null
-            ? Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('${slot['name']}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                const Text('這個欄位還是空的', style: TextStyle(color: Colors.white54)),
-              ])
-            : _itemDetail(slot, item),
+      builder: (ctx) => SafeArea(
+        child: Padding(padding: const EdgeInsets.fromLTRB(20, 18, 20, 24), child: SingleChildScrollView(child: child)),
       ),
     );
   }
 
-  Widget _itemDetail(Map<String, dynamic> slot, Map<String, dynamic> item) {
+  // 點裝備欄：有裝備 → 看說明＋脫下；空的 → 列出物品欄裡能放這格的裝備
+  void _showSlot(Map<String, dynamic> slot) {
+    final item = slot['item'] as Map<String, dynamic>?;
+    if (item != null) {
+      _sheet(Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _itemDetail(slot['key'] as String, slot['name'] as String, item),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _act(() => _api.heroUnequip(slot['key'] as String));
+            },
+            icon: const Icon(Icons.file_download_outlined),
+            label: const Text('脫下'),
+          ),
+        ),
+      ]));
+      return;
+    }
+    final candidates = _inventory.where((e) => _fits(e['item'] as Map<String, dynamic>, slot['key'] as String)).toList();
+    _sheet(Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('${slot['name']}（空）', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 10),
+      if (candidates.isEmpty)
+        const Text('物品欄裡沒有可以放這格的裝備', style: TextStyle(color: Colors.white54))
+      else
+        for (final c in candidates)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: _SlotBox(
+                icon: _slotIcons[slot['key']] ?? Icons.help,
+                color: _tierColors[((c['item'] as Map)['tier'] as num).toInt().clamp(0, 5)],
+                filled: true,
+                size: 44),
+            title: Text('${(c['item'] as Map)['name']}', style: const TextStyle(color: Colors.white)),
+            subtitle: Text(_statLine(c['item'] as Map<String, dynamic>), style: const TextStyle(color: Color(0xFF7DFFA0), fontSize: 12)),
+            trailing: const Text('裝備', style: TextStyle(color: Color(0xFFFFD36B))),
+            onTap: () {
+              Navigator.pop(context);
+              _act(() => _api.heroEquip((c['inv_id'] as num).toInt(), slot: slot['key'] as String));
+            },
+          ),
+    ]));
+  }
+
+  // 點物品欄的裝備：看說明、跟目前穿的比較、裝備
+  void _showInventoryItem(Map<String, dynamic> entry) {
+    final item = entry['item'] as Map<String, dynamic>;
+    String target = item['slot'] as String;
+    if (target == 'ring') {
+      final r1 = _slot('ring1')!['item'];
+      target = r1 == null ? 'ring1' : (_slot('ring2')!['item'] == null ? 'ring2' : 'ring1');
+    }
+    final current = _slot(target)?['item'] as Map<String, dynamic>?;
+    _sheet(Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _itemDetail(target, '${_slot(target)?['name']}', item),
+      const SizedBox(height: 12),
+      if (current != null) ...[
+        Text('目前穿著：${current['name']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 4),
+        for (final k in _statOrder)
+          if ((item[k] as num) != (current[k] as num))
+            Text(
+              '${_statLabels[k]} ${(item[k] as num) - (current[k] as num) > 0 ? '+' : ''}${(item[k] as num) - (current[k] as num)}',
+              style: TextStyle(
+                  color: (item[k] as num) > (current[k] as num) ? const Color(0xFF7DFFA0) : const Color(0xFFFF7D7D), fontSize: 13),
+            ),
+      ],
+      const SizedBox(height: 14),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: () {
+            Navigator.pop(context);
+            _act(() => _api.heroEquip((entry['inv_id'] as num).toInt(), slot: item['slot'] == 'ring' ? target : null));
+          },
+          icon: const Icon(Icons.file_upload_outlined),
+          label: Text(current == null ? '裝備' : '換上'),
+        ),
+      ),
+    ]));
+  }
+
+  String _statLine(Map<String, dynamic> item) => [
+        for (final k in _statOrder)
+          if ((item[k] as num) != 0) '${_statLabels[k]}+${item[k]}'
+      ].join('  ');
+
+  Widget _itemDetail(String slotKey, String slotName, Map<String, dynamic> item) {
     final tier = (item['tier'] as num).toInt().clamp(0, 5);
     final color = _tierColors[tier];
     return Column(
@@ -97,13 +200,13 @@ class _HeroScreenState extends State<HeroScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(children: [
-          _SlotBox(icon: _slotIcons[slot['key']] ?? Icons.help, color: color, filled: true, size: 56),
+          _SlotBox(icon: _slotIcons[slotKey] ?? Icons.help, color: color, filled: true, size: 56),
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('${item['name']}', style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 2),
-              Text('${_tierNames[tier]}・${slot['name']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              Text('${_tierNames[tier]}・$slotName', style: const TextStyle(color: Colors.white54, fontSize: 12)),
             ]),
           ),
         ]),
@@ -181,6 +284,8 @@ class _HeroScreenState extends State<HeroScreen> {
             ),
             const SizedBox(height: 16),
             _statsCard(base, stats),
+            const SizedBox(height: 16),
+            _inventoryCard(),
           ]),
         ),
       ),
@@ -194,13 +299,55 @@ class _HeroScreenState extends State<HeroScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: GestureDetector(
-        onTap: () => _showItem(slot),
+        onTap: () => _showSlot(slot),
         child: Column(children: [
           _SlotBox(icon: _slotIcons[key] ?? Icons.help, color: _tierColors[tier], filled: item != null, size: 56),
           const SizedBox(height: 2),
           Text('${slot['name']}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
         ]),
       ),
+    );
+  }
+
+  Widget _inventoryCard() {
+    final inv = _inventory;
+    final cap = (_data!['inventory_capacity'] as num?)?.toInt() ?? 40;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1710),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF3D3320)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('物品欄', style: TextStyle(color: Color(0xFFFFD36B), fontWeight: FontWeight.bold)),
+          const Spacer(),
+          Text('${inv.length} / $cap', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        ]),
+        const SizedBox(height: 10),
+        if (inv.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('物品欄是空的', style: TextStyle(color: Colors.white38)),
+          )
+        else
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final e in inv)
+              GestureDetector(
+                onTap: () => _showInventoryItem(e),
+                child: _SlotBox(
+                  icon: _slotIcons[(e['item'] as Map)['slot'] == 'ring' ? 'ring1' : (e['item'] as Map)['slot']] ?? Icons.help,
+                  color: _tierColors[((e['item'] as Map)['tier'] as num).toInt().clamp(0, 5)],
+                  filled: true,
+                  size: 52,
+                ),
+              ),
+          ]),
+        const SizedBox(height: 8),
+        const Text('點裝備欄可以脫下，點物品欄裡的裝備可以換上。', style: TextStyle(color: Colors.white30, fontSize: 11)),
+      ]),
     );
   }
 
