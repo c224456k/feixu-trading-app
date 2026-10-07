@@ -255,6 +255,12 @@ class ApiClient {
   Future<Map<String, dynamic>> fetchHeroEquipment() =>
       _get('/api/hero/equipment', (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> fetchHeroShop() =>
+      _get('/api/hero/shop', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> heroShopBuy(String itemId) =>
+      _post('/api/hero/shop/buy', {'item_id': itemId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> heroEquip(int invId, {String? slot}) => _post(
       '/api/hero/equip', {'inv_id': invId, if (slot != null) 'slot': slot}, (j) => j as Map<String, dynamic>,
       withAuth: true);

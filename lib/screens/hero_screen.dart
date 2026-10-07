@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api_client.dart';
 import '../widgets/hero_art.dart';
+import 'hero_shop_screen.dart';
 import 'tower_screen.dart';
 
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
@@ -427,6 +428,16 @@ class _HeroScreenState extends State<HeroScreen> {
         title: const Text('勇者裝備'),
         backgroundColor: const Color(0xFF1B1710),
         actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const HeroShopScreen()),
+              );
+              if (mounted) _load(); // 回來時重抓物品欄（可能買了新裝備）
+            },
+            icon: const Icon(Icons.storefront, color: Color(0xFFFFD36B)),
+            label: const Text('商店', style: TextStyle(color: Color(0xFFFFD36B))),
+          ),
           TextButton.icon(
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const TowerScreen()),
