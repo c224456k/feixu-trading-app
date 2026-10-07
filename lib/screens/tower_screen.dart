@@ -64,6 +64,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   Map<String, ({String id, int tier})> _equipped = {};
   Map<String, dynamic> _hero = {'atk': 10, 'def': 5, 'hp': 300, 'agi': 5, 'luk': 5};
   int _maxFloor = 100;
+  int get _maxSelectable => math.min(_maxFloor, _bestFloor + 1); // 要先通關才能挑更高的樓層
   int _bestFloor = 0;
   int _dropsLeft = 20;
   int _floor = 1; // 選擇中的樓層
@@ -143,7 +144,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     _maxFloor = (st['max_floor'] as num?)?.toInt() ?? 100;
     _bestFloor = (st['best_floor'] as num).toInt();
     _dropsLeft = (st['drops_left'] as num?)?.toInt() ?? 0;
-    _floor = (st['selected_floor'] as num).toInt().clamp(1, _maxFloor);
+    _floor = (st['selected_floor'] as num).toInt().clamp(1, _maxSelectable);
     final dead = (st['dead_seconds'] as num?)?.toInt() ?? 0;
     final run = st['run'] as Map<String, dynamic>?;
     _heroMax = (_hero['hp'] as num).toInt();
@@ -484,7 +485,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         title: const Text('百層塔玩法'),
         content: const SingleChildScrollView(
           child: Text(
-            '・選一個樓層出發，勇者會自動往右走，碰到怪物就進入回合戰鬥，全自動攻擊。\n'
+            '・只能選「最高通關層數 + 1」以內的樓層，要先爬上去才能挑戰更高的。\n・選一個樓層出發，勇者會自動往右走，碰到怪物就進入回合戰鬥，全自動攻擊。\n'
             '・怪物最多同時三隻；每 10 層有一隻頭目（帶兩隻小怪）。\n'
             '・每層有 5 場戰鬥，打完就通關；每場勝利回復 15% 血量，通關回滿。\n'
             '・樓層越高怪物越強；裝備越好的勇者才能爬得越高。\n'
@@ -591,7 +592,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   }
 
   Widget _floorSelector(bool running) {
-    void set(int v) => setState(() => _floor = v.clamp(1, _maxFloor));
+    void set(int v) => setState(() => _floor = v.clamp(1, _maxSelectable));
     final band = _bandNames[((_floor - 1) ~/ 10).clamp(0, 9)];
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
@@ -602,19 +603,21 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
           const SizedBox(width: 8),
           Text('$band${_floor % 10 == 0 ? '・頭目層' : ''}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
           const Spacer(),
-          Text('最高通關 $_bestFloor 層', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          Text('最高通關 $_bestFloor 層・可選到 $_maxSelectable 層', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         ]),
         Row(children: [
           IconButton(onPressed: () => set(_floor - 10), icon: const Icon(Icons.keyboard_double_arrow_left, color: Colors.white70), tooltip: '-10'),
           IconButton(onPressed: () => set(_floor - 1), icon: const Icon(Icons.chevron_left, color: Colors.white70)),
           Expanded(
-            child: Slider(
-              value: _floor.toDouble(),
-              min: 1,
-              max: _maxFloor.toDouble(),
-              divisions: _maxFloor - 1,
-              onChanged: (v) => set(v.round()),
-            ),
+            child: _maxSelectable <= 1
+                ? const Center(child: Text('通關第 1 層後解鎖更高樓層', style: TextStyle(color: Colors.white38, fontSize: 12)))
+                : Slider(
+                    value: _floor.toDouble().clamp(1, _maxSelectable.toDouble()),
+                    min: 1,
+                    max: _maxSelectable.toDouble(),
+                    divisions: _maxSelectable - 1,
+                    onChanged: (v) => set(v.round()),
+                  ),
           ),
           IconButton(onPressed: () => set(_floor + 1), icon: const Icon(Icons.chevron_right, color: Colors.white70)),
           IconButton(onPressed: () => set(_floor + 10), icon: const Icon(Icons.keyboard_double_arrow_right, color: Colors.white70), tooltip: '+10'),
