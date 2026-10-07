@@ -36,7 +36,22 @@ jobs:
           channel: 'stable'
       - run: flutter pub get
       # --base-href 要跟 Pages 網址的路徑（/repo 名稱/）一致，不然會找不到 js / 資源檔
-      - run: flutter build web --release --base-href /feixu-trading-app/
+      # APP_BUILD = 部署流水號-commit 前 7 碼，顯示在畫面底下，也寫進 build_info.json 讓舊版頁面偵測到有新版
+      - name: 編譯網頁版
+        run: flutter build web --release --base-href /feixu-trading-app/ --dart-define=APP_BUILD=${{ github.run_number }}-${GITHUB_SHA::7}
+      - name: 產生版本資訊檔（給前端偵測新版用）
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          msg = (os.environ.get("COMMIT_MSG") or "").strip().splitlines()
+          sha = os.environ["GITHUB_SHA"][:7]
+          build = os.environ["RUN_NUMBER"] + "-" + sha
+          json.dump({"build": build, "notes": msg[0] if msg else ""}, open("build/web/build_info.json", "w"), ensure_ascii=False)
+          PY
+          cat build/web/build_info.json
       # 在程式檔網址後面加上這次提交的版本參數：GitHub Pages 預設讓瀏覽器快取檔案 10 分鐘，
       # 而且「加入主畫面」的網頁版常常更久，沒有這個參數玩家會一直看到舊版畫面。
       # 有版本參數，每次部署後只要重新開啟網頁就一定載入新的程式檔。

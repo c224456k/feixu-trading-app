@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'screens/home_screen.dart';
+import 'widgets/version_shell.dart';
 import 'screens/settings_screen.dart';
 import 'settings_store.dart';
 
@@ -23,6 +24,7 @@ class FeixuApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0F141C),
         cardTheme: const CardThemeData(color: Color(0xFF1A2230)),
       ),
+      builder: (context, child) => VersionShell(child: child ?? const SizedBox.shrink()),
       home: const _StartupGate(),
     );
   }
