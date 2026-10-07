@@ -9,7 +9,7 @@ import '../widgets/monster_art.dart';
 
 // 百層塔：勇者在走廊往右走，碰到怪就進入回合戰鬥（勇者在左、怪物在右，最多同時三隻），自動攻擊。
 // 規則與戰鬥結果全由伺服器（tower_game.py）裁決：一次 fight 呼叫就把整場算完回傳紀錄，這裡只負責播放動畫。
-// 勇者戰敗要等 5 分鐘復活；獎勵只有裝備掉落。
+// 勇者戰敗要等 5 分鐘復活；獎勵是裝備掉落加每場勝利的現金。
 
 enum _Phase { loading, idle, entering, walking, waiting, battle, after, cleared, dead }
 
@@ -67,6 +67,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   int get _maxSelectable => math.min(_maxFloor, _bestFloor + 1); // 要先通關才能挑更高的樓層
   int _bestFloor = 0;
   int _dropsLeft = 20;
+  int _goldLeft = 0;
+  int _goldCap = 0;
   // 肉（體力）：每場戰鬥消耗 10，每分鐘恢復 1，上限 60（以伺服器回報為準，本機只做倒數顯示）
   double _meatBase = 60;
   DateTime _meatStamp = DateTime.now();
@@ -164,6 +166,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     _setMeat(st);
     _bestFloor = (st['best_floor'] as num).toInt();
     _dropsLeft = (st['drops_left'] as num?)?.toInt() ?? 0;
+    _goldLeft = (st['gold_left'] as num?)?.toInt() ?? 0;
+    _goldCap = (st['gold_cap'] as num?)?.toInt() ?? 0;
     _floor = (st['selected_floor'] as num).toInt().clamp(1, _maxSelectable);
     final dead = (st['dead_seconds'] as num?)?.toInt() ?? 0;
     final run = st['run'] as Map<String, dynamic>?;
@@ -285,6 +289,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _requesting = false;
     }
   }
+
+  String _fmtGold(int v) => v.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
 
   void _toast(String text) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -418,6 +424,11 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _heroHp = after;
       _bestFloor = (r['best_floor'] as num).toInt();
       _dropsLeft = (r['drops_left'] as num?)?.toInt() ?? _dropsLeft;
+      _goldLeft = (r['gold_left'] as num?)?.toInt() ?? _goldLeft;
+      final gold = (r['gold'] as num?)?.toInt() ?? 0;
+      if (gold > 0) {
+        _floats.add(_Float('+${_fmtGold(gold)}', _heroX, _groundY - 190, const Color(0xFFFFD93D), 22));
+      }
       _banner = r['cleared'] == true ? '第 $_runFloor 層通關！' : '勝利！';
       _bannerT = 1.4;
       for (final d in (r['drops'] as List)) {
@@ -512,7 +523,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
             '・樓層越高怪物越強；裝備越好的勇者才能爬得越高。\n'
             '・每挑戰一層（出發或上樓）消耗 10 塊肉🍖，肉每分鐘恢復 1 塊、上限 60（約 60 分鐘回滿）；層內的戰鬥不另外扣，肉不夠就不能出發。\n'
             '・勇者戰敗要等 5 分鐘才能復活。\n'
-            '・獎勵只有裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的。\n'
+            '・每場戰鬥勝利給現金：10 層約 2,500 元，越高越多，100 層約 10,000 元，頭目那場加倍；每天最多從塔領 500,000 元。\n'
+            '・裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的。\n'
             '・結果由伺服器決定，中途離開頁面也算數。',
           ),
         ),
@@ -738,6 +750,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
           s('幸運', _hero['luk']),
         ]),
         const SizedBox(height: 6),
+        Text('💰 今日還能領 ${_fmtGold(_goldLeft)} / ${_fmtGold(_goldCap)} 元獎金（每場勝利給錢）', style: const TextStyle(color: Color(0xFFFFD36B), fontSize: 12)),
+        const SizedBox(height: 2),
         Text('今日還能掉落 $_dropsLeft 件裝備（每天上限 20 件）', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         const Text('想爬更高：用 Boss 掉的裝備把勇者練強。', style: TextStyle(color: Colors.white30, fontSize: 11)),
       ]),
