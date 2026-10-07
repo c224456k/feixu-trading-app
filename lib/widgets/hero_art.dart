@@ -171,7 +171,7 @@ class ItemIconPainter extends CustomPainter {
 }
 
 /// 在 0~100 方框內畫一件裝備（紙娃娃也會重複用，畫在人物身上）
-void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier) {
+void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier, {bool sparkles = true}) {
   final s = slot.startsWith('ring') ? 'ring' : slot;
   switch (s) {
     case 'weapon':
@@ -192,6 +192,64 @@ void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier) {
       _ring(c, pal, id.contains('silver'));
     case 'amulet':
       _amulet(c, pal);
+  }
+  if (id != 'empty') _ornament(c, s, tier, sparkles: sparkles);
+}
+
+const _gemColors = [
+  Color(0xFF9A9A9A),
+  Color(0xFFE8D9A8),
+  Color(0xFF4CD964),
+  Color(0xFF3FA9FF),
+  Color(0xFFB36BFF),
+  Color(0xFFFFD36B),
+];
+
+void _sparkle(Canvas c, Offset o, double r, Color color) {
+  final p = Path()
+    ..moveTo(o.dx, o.dy - r)
+    ..quadraticBezierTo(o.dx, o.dy, o.dx + r, o.dy)
+    ..quadraticBezierTo(o.dx, o.dy, o.dx, o.dy + r)
+    ..quadraticBezierTo(o.dx, o.dy, o.dx - r, o.dy)
+    ..quadraticBezierTo(o.dx, o.dy, o.dx, o.dy - r)
+    ..close();
+  c.drawPath(p, Paint()..color = color);
+}
+
+// 高階裝備的裝飾：精良起鑲寶石、史詩起加閃光（寶石顏色對應品階）
+void _ornament(Canvas c, String slot, int tier, {bool sparkles = true}) {
+  if (tier < 2) return;
+  final color = _gemColors[tier.clamp(0, 5)];
+  final pos = {
+    'head': const Offset(50, 36),
+    'weapon': const Offset(36, 71),
+    'armor': const Offset(50, 54),
+    'boots': const Offset(43, 36),
+    'gloves': const Offset(50, 56),
+    'cloak': const Offset(50, 14),
+    'belt': const Offset(50, 50),
+    'amulet': const Offset(50, 72),
+  }[slot];
+  if (pos != null) {
+    final r = 3.2 + tier * 0.7;
+    final g = _poly([pos.translate(0, -r), pos.translate(r * 0.85, 0), pos.translate(0, r), pos.translate(-r * 0.85, 0)]);
+    c.drawPath(g, Paint()..color = color);
+    c.drawPath(
+        g,
+        Paint()
+          ..color = Colors.black.withValues(alpha: 0.55)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2);
+    c.drawPath(_poly([pos.translate(0, -r), pos.translate(r * 0.4, -r * 0.1), pos.translate(0, 0), pos.translate(-r * 0.4, -r * 0.1)]),
+        Paint()..color = Colors.white.withValues(alpha: 0.75));
+  }
+  if (!sparkles) return;
+  if (tier >= 4) {
+    _sparkle(c, const Offset(88, 14), 7, Colors.white.withValues(alpha: 0.9));
+    _sparkle(c, const Offset(12, 34), 4.5, color.withValues(alpha: 0.9));
+  }
+  if (tier >= 5) {
+    _sparkle(c, const Offset(90, 84), 5, Colors.white.withValues(alpha: 0.85));
   }
 }
 
@@ -835,398 +893,432 @@ class HeroPaperDoll extends CustomPainter {
   final Map<String, ({String id, int tier})> equipped;
   HeroPaperDoll(this.equipped);
 
-  static const _skin = Color(0xFFF1C9A0);
-  static const _skinDark = Color(0xFFC99872);
+  static const _skin = Color(0xFFF3CFA7);
+  static const _skinLight = Color(0xFFFFE3C4);
+  static const _skinDark = Color(0xFFD3A27A);
+  static const _outline = Color(0xFF3A2A1C);
 
+  // 人物座標系 180 x 400（中心 x = 90）
   @override
   void paint(Canvas canvas, Size size) {
-    final k = math.min(size.width / 200, size.height / 400);
+    final k = math.min(size.width / 180, size.height / 400);
     canvas.save();
-    canvas.translate((size.width - 200 * k) / 2, (size.height - 400 * k) / 2);
+    canvas.translate((size.width - 180 * k) / 2, (size.height - 400 * k) / 2);
     canvas.scale(k);
+    canvas.translate(-10, 0); // 內部仍用 200 寬的座標，左右各裁掉 10
     _scene(canvas);
     canvas.restore();
   }
 
-  // 把 0~100 的裝備圖示放到人物座標：中心 (cx,cy)、寬 w、可旋轉
-  void _place(
-    Canvas c,
-    String slot,
-    String id,
-    _Pal pal,
-    int tier,
-    double cx,
-    double cy,
-    double w, {
-    double rot = 0,
-    bool flip = false,
-  }) {
+  void _place(Canvas c, String slot, String id, int tier, double cx, double cy, double w, {double rot = 0, bool flip = false}) {
     c.save();
     c.translate(cx, cy);
     c.rotate(rot);
     final s = w / 100;
     c.scale(flip ? -s : s, s);
     c.translate(-50, -50);
-    _drawItem(c, slot, id, pal, tier);
+    _drawItem(c, slot, id, _palFor(id, tier), tier, sparkles: false);
     c.restore();
   }
 
-  void _limb(
-    Canvas c,
-    Offset a,
-    Offset b,
-    double w,
-    Color color, {
-    Color? edge,
-  }) {
-    c.drawLine(
-      a,
-      b,
-      Paint()
-        ..color = edge ?? Colors.black.withValues(alpha: 0.35)
-        ..strokeWidth = w + 3
-        ..strokeCap = StrokeCap.round,
-    );
-    c.drawLine(
-      a,
-      b,
-      Paint()
-        ..color = color
-        ..strokeWidth = w
-        ..strokeCap = StrokeCap.round,
-    );
+  // 錐形肢體（a→b，兩端寬度不同，兩端圓角），帶左亮右暗的漸層與描邊
+  void _limb(Canvas c, Offset a, Offset b, double wa, double wb, Color light, Color dark, {Color? edge}) {
+    final d = b - a;
+    final len = d.distance;
+    final n = Offset(-d.dy / len, d.dx / len);
+    final poly = _poly([
+      a + n * (wa / 2),
+      b + n * (wb / 2),
+      b - n * (wb / 2),
+      a - n * (wa / 2),
+    ]);
+    var path = Path.combine(PathOperation.union, poly, Path()..addOval(Rect.fromCircle(center: a, radius: wa / 2)));
+    path = Path.combine(PathOperation.union, path, Path()..addOval(Rect.fromCircle(center: b, radius: wb / 2)));
+    _gradFill(c, path, light, dark);
+    c.drawPath(
+        path,
+        Paint()
+          ..color = edge ?? _outline.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..strokeJoin = StrokeJoin.round);
+  }
+
+  void _gradFill(Canvas c, Path p, Color light, Color dark) {
+    final b = p.getBounds();
+    c.drawPath(
+        p,
+        Paint()
+          ..shader = LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [light, dark]).createShader(b));
+  }
+
+  void _stroke(Canvas c, Path p, {double w = 2, Color? color}) {
+    c.drawPath(
+        p,
+        Paint()
+          ..color = color ?? _outline.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w
+          ..strokeJoin = StrokeJoin.round
+          ..strokeCap = StrokeCap.round);
   }
 
   void _scene(Canvas c) {
-    // 地面光圈與影子
+    final maxTier = equipped.values.fold<int>(-1, (m, e) => math.max(m, e.tier));
+
+    // 光暈（依最高品階換顏色）與地面
+    final aura = maxTier >= 0 ? _gemColors[maxTier.clamp(0, 5)] : const Color(0xFFFFD36B);
+    c.drawCircle(
+        const Offset(100, 210),
+        190,
+        Paint()
+          ..shader = RadialGradient(colors: [aura.withValues(alpha: maxTier >= 3 ? 0.30 : 0.14), Colors.transparent])
+              .createShader(Rect.fromCircle(center: const Offset(100, 210), radius: 190)));
+    c.drawOval(const Rect.fromLTWH(22, 366, 156, 30), Paint()..color = const Color(0x55000000));
     c.drawOval(
-      const Rect.fromLTWH(30, 372, 140, 22),
-      Paint()..color = const Color(0x66000000),
-    );
-    c.drawOval(
-      const Rect.fromLTWH(52, 378, 96, 12),
-      Paint()..color = const Color(0x55000000),
-    );
+        const Rect.fromLTWH(34, 372, 132, 20),
+        Paint()
+          ..color = aura.withValues(alpha: 0.5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2);
+    c.drawOval(const Rect.fromLTWH(52, 378, 96, 10), Paint()..color = const Color(0x66000000));
 
     final cloak = equipped['cloak'];
     if (cloak != null) {
-      // 斗篷披在背後（比身體寬、往下垂）
       final p = _palFor(cloak.id, cloak.tier);
       final path = Path()
-        ..moveTo(66, 112)
-        ..lineTo(134, 112)
-        ..lineTo(160, 300)
-        ..quadraticBezierTo(148, 322, 134, 304)
-        ..quadraticBezierTo(116, 326, 100, 306)
-        ..quadraticBezierTo(84, 326, 66, 304)
-        ..quadraticBezierTo(52, 322, 40, 300)
+        ..moveTo(64, 112)
+        ..quadraticBezierTo(100, 100, 136, 112)
+        ..lineTo(166, 306)
+        ..quadraticBezierTo(152, 330, 138, 308)
+        ..quadraticBezierTo(120, 332, 102, 310)
+        ..quadraticBezierTo(84, 332, 66, 308)
+        ..quadraticBezierTo(50, 330, 34, 306)
         ..close();
-      _fillStroke(c, path, p.dark, Colors.black.withValues(alpha: 0.5), w: 2.5);
-      c.drawLine(
-        const Offset(100, 120),
-        const Offset(100, 302),
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.25)
-          ..strokeWidth = 2,
-      );
-      c.drawLine(
-        const Offset(80, 120),
-        const Offset(60, 296),
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.2)
-          ..strokeWidth = 2,
-      );
-      c.drawLine(
-        const Offset(120, 120),
-        const Offset(140, 296),
-        Paint()
-          ..color = Colors.black.withValues(alpha: 0.2)
-          ..strokeWidth = 2,
-      );
+      _gradFill(c, path, p.main, p.dark);
+      // 內裡（較亮）與皺褶
+      c.save();
+      c.clipPath(path);
+      c.drawPath(
+          Path()
+            ..moveTo(100, 108)
+            ..lineTo(36, 320)
+            ..lineTo(164, 320)
+            ..close(),
+          Paint()..color = p.light.withValues(alpha: 0.18));
+      c.restore();
+      for (final x in [52.0, 76.0, 100.0, 124.0, 148.0]) {
+        c.drawLine(Offset(100 + (x - 100) * 0.35, 118), Offset(x, 306),
+            Paint()
+              ..color = Colors.black.withValues(alpha: 0.22)
+              ..strokeWidth = 2);
+      }
+      _stroke(c, path, w: 2.5);
+      if (cloak.tier >= 2) {
+        c.drawPath(
+            Path()
+              ..moveTo(34, 306)
+              ..quadraticBezierTo(50, 330, 66, 308)
+              ..quadraticBezierTo(84, 332, 102, 310)
+              ..quadraticBezierTo(120, 332, 138, 308)
+              ..quadraticBezierTo(152, 330, 166, 306),
+            Paint()
+              ..color = _gold.main
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3);
+      }
     }
 
     // 腿（褲子）
-    const pants = Color(0xFF3F4A66);
-    _limb(c, const Offset(86, 252), const Offset(84, 346), 22, pants);
-    _limb(c, const Offset(114, 252), const Offset(116, 346), 22, pants);
+    const pantsL = Color(0xFF5B6B94);
+    const pantsD = Color(0xFF2F3A58);
+    _limb(c, const Offset(87, 252), const Offset(85, 346), 25, 17, pantsL, pantsD);
+    _limb(c, const Offset(113, 252), const Offset(115, 346), 25, 17, pantsL, pantsD);
+    for (final x in [85.0, 115.0]) {
+      c.drawLine(Offset(x - 5, 298), Offset(x + 5, 300),
+          Paint()
+            ..color = Colors.black.withValues(alpha: 0.25)
+            ..strokeWidth = 1.6);
+    }
     // 腳 / 鞋
     final boots = equipped['boots'];
     if (boots == null) {
-      c.drawOval(const Rect.fromLTWH(64, 346, 30, 16), Paint()..color = _skin);
-      c.drawOval(const Rect.fromLTWH(106, 346, 30, 16), Paint()..color = _skin);
-      c.drawOval(
-        const Rect.fromLTWH(64, 346, 30, 16),
-        Paint()
-          ..color = _skinDark
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
-      c.drawOval(
-        const Rect.fromLTWH(106, 346, 30, 16),
-        Paint()
-          ..color = _skinDark
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
+      for (final x in [72.0, 128.0]) {
+        final foot = Path()..addOval(Rect.fromCenter(center: Offset(x, 354), width: 32, height: 16));
+        _gradFill(c, foot, _skinLight, _skinDark);
+        _stroke(c, foot, w: 1.8);
+      }
     } else {
-      final p = _palFor(boots.id, boots.tier);
-      _place(c, 'boots', boots.id, p, boots.tier, 78, 340, 52, flip: true);
-      _place(c, 'boots', boots.id, p, boots.tier, 122, 340, 52);
+      _place(c, 'boots', boots.id, boots.tier, 80, 342, 56, flip: true);
+      _place(c, 'boots', boots.id, boots.tier, 120, 342, 56);
     }
 
     // 軀幹
     final armor = equipped['armor'];
     final torso = Path()
-      ..moveTo(68, 116)
-      ..quadraticBezierTo(100, 104, 132, 116)
-      ..lineTo(128, 256)
-      ..quadraticBezierTo(100, 266, 72, 256)
+      ..moveTo(66, 118)
+      ..quadraticBezierTo(100, 104, 134, 118)
+      ..lineTo(128, 190)
+      ..lineTo(126, 258)
+      ..quadraticBezierTo(100, 270, 74, 258)
+      ..lineTo(72, 190)
       ..close();
     if (armor == null) {
-      _fillStroke(
-        c,
-        torso,
-        const Color(0xFFEDE3CC),
-        const Color(0xFF8B7E5E),
-        w: 2.5,
-      );
-      c.drawLine(
-        const Offset(100, 120),
-        const Offset(100, 250),
-        Paint()
-          ..color = const Color(0x22000000)
-          ..strokeWidth = 2,
-      );
+      _gradFill(c, torso, const Color(0xFFFFF3DC), const Color(0xFFD9C9A4));
+      _stroke(c, torso, w: 2.4);
+      // 領口與綁帶
+      final v = Path()
+        ..moveTo(86, 110)
+        ..lineTo(100, 138)
+        ..lineTo(114, 110)
+        ..close();
+      c.drawPath(v, Paint()..color = _skin);
+      _stroke(c, v, w: 1.6);
+      for (final y in [120.0, 128.0, 136.0]) {
+        c.drawLine(Offset(95, y), Offset(105, y + 3), Paint()
+          ..color = const Color(0xFF8B7E5E)
+          ..strokeWidth = 1.4);
+      }
     } else {
       final p = _palFor(armor.id, armor.tier);
-      _fillStroke(c, torso, p.main, p.dark, w: 2.5);
+      _gradFill(c, torso, p.light, p.dark);
       _shine(c, torso, p);
+      _stroke(c, torso, w: 2.6);
       if (armor.id.contains('cloth')) {
-        for (var y = 140.0; y < 250; y += 12) {
-          c.drawLine(
-            Offset(100, y),
-            Offset(100, y + 6),
-            Paint()
-              ..color = p.dark
-              ..strokeWidth = 1.6,
-          );
+        for (var y = 146.0; y < 252; y += 12) {
+          c.drawLine(Offset(100, y), Offset(100, y + 6), Paint()
+            ..color = p.dark
+            ..strokeWidth = 1.6);
         }
-        c.drawLine(
-          const Offset(90, 112),
-          const Offset(90, 134),
-          Paint()
-            ..color = p.dark
-            ..strokeWidth = 2,
-        );
-        c.drawLine(
-          const Offset(110, 112),
-          const Offset(110, 134),
-          Paint()
-            ..color = p.dark
-            ..strokeWidth = 2,
-        );
+        final v = Path()
+          ..moveTo(88, 110)
+          ..lineTo(100, 134)
+          ..lineTo(112, 110)
+          ..close();
+        c.drawPath(v, Paint()..color = _skin);
+        _stroke(c, v, w: 1.5);
       } else {
-        c.drawLine(
-          const Offset(100, 120),
-          const Offset(100, 252),
-          Paint()
-            ..color = p.dark
-            ..strokeWidth = 2.5,
-        );
-        c.drawArc(
-          const Rect.fromLTWH(78, 130, 44, 50),
-          0.2,
-          math.pi - 0.4,
-          false,
-          Paint()
-            ..color = p.dark
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.5,
-        );
+        c.drawLine(const Offset(100, 122), const Offset(100, 258), Paint()
+          ..color = p.dark
+          ..strokeWidth = 2.5);
+        for (final dy in [0.0, 22.0, 44.0]) {
+          c.drawArc(Rect.fromLTWH(78, 136 + dy, 44, 34), 0.15, math.pi - 0.3, false,
+              Paint()
+                ..color = p.dark.withValues(alpha: 0.8)
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 2.2);
+        }
+        if (armor.tier >= 2) {
+          c.drawPath(
+              Path()
+                ..moveTo(70, 252)
+                ..quadraticBezierTo(100, 266, 130, 252),
+              Paint()
+                ..color = _gold.main
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 3);
+        }
+        if (armor.tier >= 3) {
+          final g = _gemColors[armor.tier.clamp(0, 5)];
+          final gp = _poly(const [Offset(100, 156), Offset(108, 168), Offset(100, 180), Offset(92, 168)]);
+          c.drawPath(gp, Paint()..color = g);
+          _stroke(c, gp, w: 1.5);
+        }
       }
     }
-    // 肩膀（有裝備時加肩甲）
+    // 肩甲
     if (armor != null && !armor.id.contains('cloth')) {
       final p = _palFor(armor.id, armor.tier);
       for (final x in [62.0, 138.0]) {
-        c.drawCircle(Offset(x, 124), 15, Paint()..color = p.main);
-        c.drawCircle(
-          Offset(x, 124),
-          15,
-          Paint()
-            ..color = p.dark
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.5,
-        );
+        final sp = Path()..addOval(Rect.fromCenter(center: Offset(x, 124), width: 34, height: 28));
+        _gradFill(c, sp, p.light, p.dark);
+        _stroke(c, sp, w: 2.4);
+        c.drawCircle(Offset(x, 124), 3, Paint()..color = p.light);
+        if (armor.tier >= 4) {
+          final spike = _poly([Offset(x + (x < 100 ? -14 : 14), 118), Offset(x + (x < 100 ? -26 : 26), 104), Offset(x + (x < 100 ? -6 : 6), 112)]);
+          c.drawPath(spike, Paint()..color = p.main);
+          _stroke(c, spike, w: 1.6);
+        }
       }
     }
 
     // 腰帶
     final belt = equipped['belt'];
     if (belt != null) {
-      final p = _palFor(belt.id, belt.tier);
-      _place(c, 'belt', belt.id, p, belt.tier, 100, 244, 64);
+      _place(c, 'belt', belt.id, belt.tier, 100, 246, 70);
     }
 
-    // 手臂
-    final sleeve = armor != null
-        ? _palFor(armor.id, armor.tier).main
-        : const Color(0xFFEDE3CC);
-    _limb(c, const Offset(62, 126), const Offset(46, 214), 18, sleeve);
-    _limb(c, const Offset(138, 126), const Offset(154, 214), 18, sleeve);
-    _limb(
-      c,
-      const Offset(49, 196),
-      const Offset(44, 228),
-      15,
-      _skin,
-      edge: _skinDark,
-    );
-    _limb(
-      c,
-      const Offset(151, 196),
-      const Offset(156, 228),
-      15,
-      _skin,
-      edge: _skinDark,
-    );
+    // 手臂（袖子 + 前臂）
+    final sleeveL = armor != null ? _palFor(armor.id, armor.tier).light : const Color(0xFFFFF3DC);
+    final sleeveD = armor != null ? _palFor(armor.id, armor.tier).dark : const Color(0xFFD9C9A4);
+    for (final side in [-1.0, 1.0]) {
+      final sx = 100 + side * 38;
+      _limb(c, Offset(sx + side * 2, 128), Offset(100 + side * 52, 196), 22, 17, sleeveL, sleeveD);
+      _limb(c, Offset(100 + side * 52, 194), Offset(100 + side * 56, 226), 16, 13, _skinLight, _skinDark);
+    }
     final gloves = equipped['gloves'];
-    if (gloves != null) {
-      final p = _palFor(gloves.id, gloves.tier);
-      _place(c, 'gloves', gloves.id, p, gloves.tier, 44, 226, 38);
-      _place(c, 'gloves', gloves.id, p, gloves.tier, 156, 226, 38, flip: true);
-    } else {
-      c.drawCircle(const Offset(44, 232), 9, Paint()..color = _skin);
-      c.drawCircle(const Offset(156, 232), 9, Paint()..color = _skin);
+    for (final side in [-1.0, 1.0]) {
+      final hx = 100 + side * 56;
+      if (gloves != null) {
+        // 手套：袖口在上、手指朝下（圖示本身是手指朝上，所以轉 180 度）
+        _place(c, 'gloves', gloves.id, gloves.tier, hx, 236, 40, rot: math.pi, flip: side < 0);
+      } else {
+        final hand = Path()..addOval(Rect.fromCenter(center: Offset(hx, 234), width: 18, height: 22));
+        _gradFill(c, hand, _skinLight, _skinDark);
+        _stroke(c, hand, w: 1.6);
+        c.drawOval(Rect.fromCenter(center: Offset(hx - side * 7, 230), width: 7, height: 11), Paint()..color = _skin);
+      }
     }
 
-    // 武器：握在右手（畫面右側），劍尖朝上
+    // 武器：握在右手，劍尖朝上
     final weapon = equipped['weapon'];
     if (weapon != null) {
       final p = _palFor(weapon.id, weapon.tier);
       c.save();
-      c.translate(158, 228);
-      c.rotate(-0.62);
-      c.scale(1.35);
+      c.translate(156, 232);
+      c.rotate(-0.55);
+      c.scale(1.12);
       c.translate(-18, -86);
-      _drawItem(c, 'weapon', weapon.id, p, weapon.tier);
+      _drawItem(c, 'weapon', weapon.id, p, weapon.tier, sparkles: false);
       c.restore();
-      // 手指蓋在握把上
-      c.drawCircle(
-        const Offset(158, 230),
-        8,
-        Paint()
-          ..color = gloves != null
-              ? _palFor(gloves.id, gloves.tier).main
-              : _skin,
-      );
+      // 拳頭蓋在握把上
+      final fist = Path()..addOval(Rect.fromCenter(center: const Offset(156, 232), width: 20, height: 18));
+      if (gloves != null) {
+        final gp = _palFor(gloves.id, gloves.tier);
+        _gradFill(c, fist, gp.light, gp.dark);
+      } else {
+        _gradFill(c, fist, _skinLight, _skinDark);
+      }
+      _stroke(c, fist, w: 1.8);
     }
 
-    // 脖子與頭
-    c.drawRect(const Rect.fromLTWH(91, 98, 18, 18), Paint()..color = _skinDark);
+    // 脖子
+    final neck = Path()..addRect(const Rect.fromLTWH(91, 96, 18, 20));
+    _gradFill(c, neck, _skin, _skinDark);
     // 護身符項鍊
     final amulet = equipped['amulet'];
     if (amulet != null) {
-      final p = _palFor(amulet.id, amulet.tier);
       c.drawPath(
-        Path()
-          ..moveTo(88, 112)
-          ..quadraticBezierTo(100, 146, 112, 112),
-        Paint()
-          ..color = const Color(0xFFB4342C)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2,
-      );
-      _place(c, 'amulet', amulet.id, p, amulet.tier, 100, 146, 24);
+          Path()
+            ..moveTo(86, 112)
+            ..quadraticBezierTo(100, 150, 114, 112),
+          Paint()
+            ..color = const Color(0xFFB4342C)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
+      _place(c, 'amulet', amulet.id, amulet.tier, 100, 148, 26);
     }
 
-    const head = Offset(100, 72);
-    c.drawCircle(
-      head,
-      32,
-      Paint()..color = Colors.black.withValues(alpha: 0.3),
-    );
-    c.drawCircle(head, 30, Paint()..color = _skin);
-    // 耳朵
-    c.drawCircle(const Offset(70, 76), 6, Paint()..color = _skin);
-    c.drawCircle(const Offset(130, 76), 6, Paint()..color = _skin);
-    // 頭髮（沒戴頭盔時）
+    // 頭：後髮 → 臉 → 前髮 → 五官 → 頭盔
+    const head = Offset(100, 70);
     final helm = equipped['head'];
-    if (helm == null || helm.id.contains('cap')) {
-      final hair = Path()
-        ..moveTo(68, 70)
-        ..cubicTo(66, 34, 134, 34, 132, 70)
-        ..cubicTo(122, 56, 112, 54, 100, 52)
-        ..cubicTo(88, 56, 76, 58, 68, 70)
+    final showHair = helm == null || helm.id.contains('cap');
+    const hairLight = Color(0xFF7A4B2A);
+    const hairDark = Color(0xFF3A2212);
+    {
+      final back = Path()
+        ..moveTo(66, 70)
+        ..cubicTo(60, 30, 140, 30, 134, 70)
+        ..cubicTo(136, 88, 128, 96, 120, 92)
+        ..lineTo(80, 92)
+        ..cubicTo(72, 96, 64, 88, 66, 70)
         ..close();
-      c.drawPath(hair, Paint()..color = const Color(0xFF4A2F1B));
-      c.drawPath(
-        hair,
-        Paint()
-          ..color = const Color(0xFF2A1A0E)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5,
-      );
+      _gradFill(c, back, hairLight, hairDark);
+      _stroke(c, back, w: 2);
     }
-    // 臉
-    if (helm == null || helm.id.contains('cap')) {
-      for (final x in [88.0, 112.0]) {
-        c.drawOval(
-          Rect.fromCenter(center: Offset(x, 80), width: 7, height: 10),
-          Paint()..color = const Color(0xFF2A1A0E),
-        );
-        c.drawCircle(Offset(x - 1, 77), 1.6, Paint()..color = Colors.white);
-      }
-      c.drawArc(
-        const Rect.fromLTWH(92, 88, 16, 10),
-        0.2,
-        math.pi - 0.4,
-        false,
+    c.drawCircle(const Offset(68, 76), 7, Paint()..color = _skin);
+    c.drawCircle(const Offset(132, 76), 7, Paint()..color = _skin);
+    final face = Path()..addOval(Rect.fromCenter(center: head, width: 64, height: 68));
+    c.drawPath(
+        face,
         Paint()
-          ..color = const Color(0xFF8B4A3A)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..strokeCap = StrokeCap.round,
-      );
-      c.drawCircle(
-        const Offset(79, 90),
-        5,
-        Paint()..color = const Color(0x33FF6B6B),
-      );
-      c.drawCircle(
-        const Offset(121, 90),
-        5,
-        Paint()..color = const Color(0x33FF6B6B),
-      );
+          ..shader = const RadialGradient(center: Alignment(-0.3, -0.4), colors: [_skinLight, _skin, _skinDark], stops: [0, 0.6, 1])
+              .createShader(Rect.fromCenter(center: head, width: 64, height: 68)));
+    _stroke(c, face, w: 2.2);
+    if (showHair) {
+      // 前髮：幾撮尖角
+      final fringe = Path()
+        ..moveTo(66, 70)
+        ..cubicTo(62, 36, 138, 36, 134, 70)
+        ..lineTo(128, 62)
+        ..lineTo(122, 74)
+        ..lineTo(114, 56)
+        ..lineTo(106, 70)
+        ..lineTo(98, 52)
+        ..lineTo(90, 68)
+        ..lineTo(82, 56)
+        ..lineTo(76, 72)
+        ..close();
+      _gradFill(c, fringe, hairLight, hairDark);
+      _stroke(c, fringe, w: 2);
+      c.drawArc(Rect.fromCenter(center: const Offset(98, 46), width: 44, height: 22), math.pi * 1.1, math.pi * 0.6, false,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.22)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..strokeCap = StrokeCap.round);
+    }
+    if (showHair) {
+      for (final x in [86.0, 114.0]) {
+        // 眉毛
+        c.drawLine(Offset(x - 7, 72), Offset(x + 7, 70 + (x < 100 ? 1 : -1) * -1.0), Paint()
+          ..color = hairDark
+          ..strokeWidth = 2.2
+          ..strokeCap = StrokeCap.round);
+        // 眼白、虹膜、瞳孔、高光
+        c.drawOval(Rect.fromCenter(center: Offset(x, 82), width: 13, height: 15), Paint()..color = Colors.white);
+        c.drawOval(Rect.fromCenter(center: Offset(x, 83), width: 9, height: 12), Paint()..color = const Color(0xFF3F7FBF));
+        c.drawOval(Rect.fromCenter(center: Offset(x, 84), width: 5, height: 8), Paint()..color = const Color(0xFF14243A));
+        c.drawCircle(Offset(x - 1.5, 80), 2, Paint()..color = Colors.white);
+        c.drawOval(
+            Rect.fromCenter(center: Offset(x, 82), width: 13, height: 15),
+            Paint()
+              ..color = _outline
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.4);
+      }
+      c.drawLine(const Offset(100, 88), const Offset(98, 94), Paint()
+        ..color = _skinDark
+        ..strokeWidth = 1.8
+        ..strokeCap = StrokeCap.round);
+      c.drawArc(const Rect.fromLTWH(91, 94, 18, 10), 0.2, math.pi - 0.4, false,
+          Paint()
+            ..color = const Color(0xFF8B3A2E)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.2
+            ..strokeCap = StrokeCap.round);
+      c.drawCircle(const Offset(78, 94), 5.5, Paint()..color = const Color(0x44FF6B6B));
+      c.drawCircle(const Offset(122, 94), 5.5, Paint()..color = const Color(0x44FF6B6B));
     }
     if (helm != null) {
-      final p = _palFor(helm.id, helm.tier);
       if (helm.id.contains('cap')) {
-        _place(c, 'head', helm.id, p, helm.tier, 100, 56, 78);
+        _place(c, 'head', helm.id, helm.tier, 100, 52, 84);
       } else {
-        _place(c, 'head', helm.id, p, helm.tier, 100, 66, 84);
+        _place(c, 'head', helm.id, helm.tier, 100, 64, 92);
+        // 頭盔下露出下半臉（嘴）
+        c.drawArc(const Rect.fromLTWH(92, 92, 16, 9), 0.2, math.pi - 0.4, false,
+            Paint()
+              ..color = const Color(0xFF8B3A2E)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..strokeCap = StrokeCap.round);
       }
     }
 
-    // 戒指：戴在左手（畫面左側）手上，閃一下光
+    // 戒指：戴在左手（畫面左側）
     for (final key in ['ring1', 'ring2']) {
       final r = equipped[key];
       if (r == null) continue;
       final p = _palFor(r.id, r.tier);
-      final dx = key == 'ring1' ? -4.0 : 6.0;
-      c.drawCircle(
-        Offset(44 + dx, 236),
-        3.6,
-        Paint()
-          ..color = p.main
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4,
-      );
-      c.drawCircle(Offset(44 + dx, 232.5), 2, Paint()..color = p.light);
+      final dy = key == 'ring1' ? 0.0 : 8.0;
+      c.drawCircle(Offset(44, 238 + dy), 3.8, Paint()
+        ..color = p.main
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.6);
+      c.drawCircle(Offset(44, 234.5 + dy), 2.2, Paint()..color = _gemColors[r.tier.clamp(0, 5)]);
     }
   }
 
   @override
-  bool shouldRepaint(covariant HeroPaperDoll old) =>
-      old.equipped.toString() != equipped.toString();
+  bool shouldRepaint(covariant HeroPaperDoll old) => old.equipped.toString() != equipped.toString();
 }

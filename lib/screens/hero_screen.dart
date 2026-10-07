@@ -484,16 +484,28 @@ class _HeroScreenState extends State<HeroScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Column(children: [for (final k in left) _slotCell(k)]),
+                    SizedBox(
+                      height: 480,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [for (final k in left) _slotCell(k)],
+                      ),
+                    ),
                     Expanded(
                       child: SizedBox(
-                        height: 5 * 72.0,
+                        height: 480,
                         child: CustomPaint(
                           painter: HeroPaperDoll(_equippedMap()),
                         ),
                       ),
                     ),
-                    Column(children: [for (final k in right) _slotCell(k)]),
+                    SizedBox(
+                      height: 480,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [for (final k in right) _slotCell(k)],
+                      ),
+                    ),
                   ],
                 ),
               ),
