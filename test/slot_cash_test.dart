@@ -37,14 +37,16 @@ void main() {
         'jackpot': {'pool': 3000000.0, 'min_bet': 5000, 'recent': []},
       };
       final client = MockClient((req) async {
-        if (req.url.path == '/api/slot/info')
+        if (req.url.path == '/api/slot/info') {
           return http.Response(
             jsonEncode(info),
             200,
             headers: {'content-type': 'application/json'},
           );
-        if (req.url.path == '/api/slot/jackpot')
+        }
+        if (req.url.path == '/api/slot/jackpot') {
           return http.Response(jsonEncode(info['jackpot']), 200);
+        }
         if (req.url.path == '/api/slot/spin') {
           return http.Response(
             jsonEncode({

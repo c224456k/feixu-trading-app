@@ -252,6 +252,9 @@ class ApiClient {
         withAuth: true,
       );
 
+  Future<Map<String, dynamic>> fetchHeroEquipment() =>
+      _get('/api/hero/equipment', (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> fetchSlotInfo() =>
       _get('/api/slot/info', (j) => j as Map<String, dynamic>, withAuth: true);
 
