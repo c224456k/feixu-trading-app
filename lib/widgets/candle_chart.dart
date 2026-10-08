@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -19,7 +21,8 @@ class CandleLine {
 }
 
 /// K 線圖：自己用 CustomPainter 畫（fl_chart 沒有 K 線）。
-/// 滑鼠移動 / 手指按住拖曳會顯示十字線與該根的開高低收。
+/// 滑鼠移動 / 手指按住拖曳會顯示十字線與該根的開高低收；
+/// 滑鼠滾輪（或雙指開合）縮放、橫向捲動 / 雙指拖曳平移，右下「還原」回到全部。
 class CandleChart extends StatefulWidget {
   final List<Candle> candles;
   final bool daily;
@@ -40,12 +43,90 @@ class _CandleChartState extends State<CandleChart> {
 
   int? _hover;
 
+  // 縮放狀態：_count = 畫面上顯示幾根；_right = 右邊被藏起來幾根（0 = 貼著最新一根，新 K 棒進來會自動跟著走）
+  double? _count;
+  double _right = 0;
+  double _startCount = 0, _startFirst = 0, _startFrac = 0;
+
+  static const int _minCount = 8;
+
+  int get _n => widget.candles.length;
+  double get _cnt => (_count ?? _n.toDouble()).clamp(math.min(_minCount, _n).toDouble(), _n.toDouble());
+  double get _first => (_n - _right - _cnt).clamp(0, _n - _cnt);
+  bool get _zoomed => _count != null && _cnt < _n - 0.5;
+
+  void _clampView() {
+    if (_count == null) return;
+    final c = _cnt;
+    if (c >= _n - 0.5) {
+      _count = null;
+      _right = 0;
+      return;
+    }
+    _count = c;
+    _right = _right.clamp(0, _n - c);
+  }
+
+  /// 讓 [idx]（浮點的 K 棒位置）停在 plot 內水平比例 [frac]，並把顯示根數設成 [count]。
+  void _applyView(double count, double idx, double frac) {
+    final c = count.clamp(math.min(_minCount, _n).toDouble(), _n.toDouble());
+    final first = (idx - frac * c).clamp(0.0, _n - c);
+    setState(() {
+      _count = c;
+      _right = _n - first - c;
+      _clampView();
+      _hover = null;
+    });
+  }
+
+  double _frac(double dx, double width) =>
+      ((dx - _leftPad) / (width - _leftPad - _rightPad)).clamp(0.0, 1.0);
+
+  void _onWheel(PointerSignalEvent e, double width) {
+    if (e is! PointerScrollEvent || _n < 2) return;
+    // 註冊搶下這個滾輪事件，外層頁面就不會跟著捲動
+    GestureBinding.instance.pointerSignalResolver.register(e, (ev) => _doWheel(ev as PointerScrollEvent, width));
+  }
+
+  void _doWheel(PointerScrollEvent e, double width) {
+    final frac = _frac(e.localPosition.dx, width);
+    final dx = e.scrollDelta.dx, dy = e.scrollDelta.dy;
+    if (dx.abs() > dy.abs()) {
+      // 橫向捲動（觸控板 / shift+滾輪）= 左右平移
+      final shift = dx / (width - _leftPad - _rightPad) * _cnt;
+      _applyView(_cnt, _first + shift, 0);
+      return;
+    }
+    final idx = _first + frac * _cnt;
+    _applyView(_cnt * math.exp(dy * 0.0015), idx, frac);
+  }
+
   void _setHover(double dx, double width) {
-    final n = widget.candles.length;
+    final n = _visible().length;
     if (n == 0) return;
     final plotW = width - _leftPad - _rightPad;
     final i = ((dx - _leftPad) / plotW * n).floor().clamp(0, n - 1);
     if (i != _hover) setState(() => _hover = i);
+  }
+
+  List<Candle> _visible() {
+    if (!_zoomed) return widget.candles;
+    final f = _first.round().clamp(0, _n - 1);
+    final e = (f + _cnt.round()).clamp(f + 1, _n);
+    return widget.candles.sublist(f, e);
+  }
+
+  @override
+  void didUpdateWidget(covariant CandleChart old) {
+    super.didUpdateWidget(old);
+    // 換了週期 / 標的（根數大幅改變）就還原；一次多一根是即時更新，保留縮放
+    if (old.daily != widget.daily || (old.candles.length - widget.candles.length).abs() > 1) {
+      _count = null;
+      _right = 0;
+      _hover = null;
+    } else {
+      _clampView();
+    }
   }
 
   @override
@@ -56,32 +137,69 @@ class _CandleChartState extends State<CandleChart> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final hover = (_hover != null && _hover! < widget.candles.length) ? _hover : null;
-        return MouseRegion(
-          onHover: (e) => _setHover(e.localPosition.dx, width),
-          onExit: (_) => setState(() => _hover = null),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapDown: (d) => _setHover(d.localPosition.dx, width),
-            onHorizontalDragUpdate: (d) => _setHover(d.localPosition.dx, width),
-            onHorizontalDragEnd: (_) => setState(() => _hover = null),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _CandlePainter(
-                      candles: widget.candles,
-                      daily: widget.daily,
-                      decimals: widget.decimals,
-                      lines: widget.lines,
-                      hover: hover,
-                      textColor: Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey,
-                      gridColor: Colors.grey.withValues(alpha: 0.25),
+        final vis = _visible();
+        final hover = (_hover != null && _hover! < vis.length) ? _hover : null;
+        return Listener(
+          onPointerSignal: (e) => _onWheel(e, width),
+          child: MouseRegion(
+            onHover: (e) => _setHover(e.localPosition.dx, width),
+            onExit: (_) => setState(() => _hover = null),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (d) => _setHover(d.localPosition.dx, width),
+              onScaleStart: (d) {
+                _startCount = _cnt;
+                _startFirst = _first;
+                _startFrac = _frac(d.localFocalPoint.dx, width);
+              },
+              onScaleUpdate: (d) {
+                if (d.pointerCount >= 2 && _n >= 2) {
+                  // 雙指：縮放 + 平移（focal 點下的那根 K 棒會跟著手指走）
+                  final scale = d.horizontalScale > 0.01 ? d.horizontalScale : d.scale;
+                  final idx = _startFirst + _startFrac * _startCount;
+                  _applyView(_startCount / scale, idx, _frac(d.localFocalPoint.dx, width));
+                } else {
+                  _setHover(d.localFocalPoint.dx, width);
+                }
+              },
+              onScaleEnd: (_) => setState(() => _hover = null),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _CandlePainter(
+                        candles: vis,
+                        daily: widget.daily,
+                        decimals: widget.decimals,
+                        lines: widget.lines,
+                        hover: hover,
+                        textColor: Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey,
+                        gridColor: Colors.grey.withValues(alpha: 0.25),
+                      ),
                     ),
                   ),
-                ),
-                if (hover != null) _buildInfo(widget.candles[hover], hover < widget.candles.length / 2),
-              ],
+                  if (hover != null) _buildInfo(vis[hover], hover < vis.length / 2),
+                  if (_zoomed)
+                    Positioned(
+                      right: _rightPad + 2,
+                      bottom: _bottomPad + 2,
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _count = null;
+                          _right = 0;
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text('還原', style: TextStyle(color: Colors.white, fontSize: 11)),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -184,7 +302,7 @@ class _CandlePainter extends CustomPainter {
 
     final n = candles.length;
     final slot = plot.width / n;
-    final bodyW = (slot * 0.7).clamp(1.0, 24.0);
+    final bodyW = (slot * 0.7).clamp(1.0, 40.0);
     final fmt = daily ? DateFormat('MM/dd') : DateFormat('HH:mm');
     final labelEvery = (n / 5).ceil().clamp(1, 999);
 
