@@ -907,7 +907,9 @@ class CasinoChip extends StatelessWidget {
     if (v >= 100000) return const Color(0xFF212121);
     if (v >= 50000) return const Color(0xFF2E7D32);
     if (v >= 10000) return const Color(0xFFC62828);
-    return const Color(0xFF546E7A);
+    if (v >= 5000) return const Color(0xFF1565C0);
+    if (v >= 1000) return const Color(0xFF546E7A);
+    return const Color(0xFF8D6E63);
   }
 
   static String label(int v) => v >= 1000 ? '${v ~/ 1000}K' : '$v';

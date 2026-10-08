@@ -61,6 +61,8 @@ class _SlotScreenState extends State<SlotScreen>
   int _bet = 10000;
   bool _spinning = false; // 從按下旋轉到最後一個轉輪停下
   bool _auto = false;
+  int? _autoLeft; // 自動模式還剩幾局（null = 無限）
+  static const _slotChips = [500, 1000, 5000, 10000, 50000, 100000, 500000];
   double _cash = 0;
   double _shownCash = 0;
   Map<String, dynamic>? _result;
@@ -233,6 +235,7 @@ class _SlotScreenState extends State<SlotScreen>
       if (res['big'] == true) {
         setState(() => _auto = false);
       } else {
+        if (!_autoContinue()) return;
         Future.delayed(Duration(milliseconds: payout > 0 ? 2200 : 900), () {
           if (mounted && _auto && !_spinning) _spin();
         });
@@ -337,6 +340,7 @@ class _SlotScreenState extends State<SlotScreen>
       if (jp > 0 || res['big'] == true) {
         setState(() => _auto = false);
       } else {
+        if (!_autoContinue()) return;
         Future.delayed(const Duration(milliseconds: 900), () {
           if (mounted && _auto && !_spinning) _spin();
         });
@@ -428,6 +432,72 @@ class _SlotScreenState extends State<SlotScreen>
       ..clear()
       ..addAll(List.generate(n, (_) => _Coin(rnd)));
     _coinStart = _now;
+  }
+
+  // 自動模式：還有剩局就繼續，沒有就關掉
+  bool _autoContinue() {
+    final left = _autoLeft;
+    if (left == null) return true;
+    if (left <= 0) {
+      setState(() => _auto = false);
+      return false;
+    }
+    setState(() => _autoLeft = left - 1);
+    return true;
+  }
+
+  Future<void> _pickAuto() async {
+    if (_auto) {
+      setState(() => _auto = false);
+      return;
+    }
+    final custom = TextEditingController();
+    final n = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('自動旋轉'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final c in [10, 50, 100, 500])
+                  OutlinedButton(onPressed: () => Navigator.pop(ctx, c), child: Text('$c 局')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, 0), child: const Text('無限')),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: custom,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: '自己填局數', suffixText: '局'),
+              onSubmitted: (v) {
+                final x = int.tryParse(v.trim());
+                if (x != null && x > 0) Navigator.pop(ctx, x);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              final x = int.tryParse(custom.text.trim());
+              if (x != null && x > 0) Navigator.pop(ctx, x);
+            },
+            child: const Text('開始'),
+          ),
+        ],
+      ),
+    );
+    if (n == null || !mounted) return;
+    setState(() {
+      _auto = true;
+      _autoLeft = n == 0 ? null : n - 1;
+    });
+    if (!_spinning) _spin();
   }
 
   Future<void> _spin() async {
@@ -1266,6 +1336,8 @@ class _SlotScreenState extends State<SlotScreen>
           child: IgnorePointer(
             ignoring: busy,
             child: ChipSelector(
+              chips: _slotChips,
+              size: 46,
               selected: _bet,
               onSelect: (c) => setState(() => _bet = c),
             ),
@@ -1378,13 +1450,10 @@ class _SlotScreenState extends State<SlotScreen>
             ),
             const SizedBox(width: 18),
             FilterChip(
-              label: const Text('自動'),
+              label: Text(!_auto ? '自動' : _autoLeft == null ? '自動 ∞' : '自動 剩${_autoLeft! + 1}'),
               selected: _auto,
               avatar: const Icon(Icons.autorenew, size: 16),
-              onSelected: (v) {
-                setState(() => _auto = v);
-                if (v && !_spinning) _spin();
-              },
+              onSelected: (_) => _pickAuto(),
             ),
           ],
         ),
