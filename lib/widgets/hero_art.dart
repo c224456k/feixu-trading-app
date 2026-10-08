@@ -1107,44 +1107,137 @@ class HeroPaperDoll extends CustomPainter {
       }
     }
 
-    // 腿（褲子）
+    // ===== 腿 =====
     const pantsL = Color(0xFF5B6B94);
-    const pantsD = Color(0xFF2F3A58);
-    _limb(c, const Offset(87, 252), const Offset(85, 346), 25, 17, pantsL, pantsD);
-    _limb(c, const Offset(113, 252), const Offset(115, 346), 25, 17, pantsL, pantsD);
-    for (final x in [85.0, 115.0]) {
-      c.drawLine(Offset(x - 5, 298), Offset(x + 5, 300),
-          Paint()
-            ..color = Colors.black.withValues(alpha: 0.25)
-            ..strokeWidth = 1.6);
-    }
-    // 腳 / 鞋
+    const pantsD = Color(0xFF2A3452);
     final boots = equipped['boots'];
-    if (boots == null) {
-      for (final x in [72.0, 128.0]) {
-        final foot = Path()..addOval(Rect.fromCenter(center: Offset(x, 354), width: 32, height: 16));
+    final armor = equipped['armor'];
+    final plate = armor != null && !armor.id.contains('cloth');
+    for (final x in [87.0, 113.0]) {
+      final o = x < 100 ? -1.0 : 1.0;
+      _limb(c, Offset(x, 250), Offset(x + o * 0.5, 300), 28, 22, pantsL, pantsD);
+      _limb(c, Offset(x + o * 0.5, 298), Offset(x + o * 1.5, 340), 22, 16, pantsL, pantsD);
+      // 膝蓋皺褶
+      c.drawArc(Rect.fromCenter(center: Offset(x + o * 0.5, 300), width: 18, height: 8), 0.2, math.pi - 0.4, false,
+          Paint()
+            ..color = Colors.black.withValues(alpha: 0.28)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6);
+      if (boots != null) {
+        final bp = _palFor(boots.id, boots.tier);
+        // 脛甲
+        final sx = x + o * 1.0;
+        final greave = _poly([Offset(sx - 11, 306), Offset(sx + 11, 306), Offset(sx + 8, 340), Offset(sx - 8, 340)]);
+        _gradFill(c, greave, bp.light, bp.dark);
+        _stroke(c, greave, w: 2);
+        c.drawLine(Offset(sx - 2, 310), Offset(sx - 1, 338), Paint()
+          ..color = Colors.white.withValues(alpha: 0.35)
+          ..strokeWidth = 2.4
+          ..strokeCap = StrokeCap.round);
+        if (boots.tier >= 1) {
+          final cop = Path()..addOval(Rect.fromCenter(center: Offset(x + o * 0.5, 299), width: 26, height: 17));
+          _gradFill(c, cop, bp.light, bp.dark);
+          _stroke(c, cop, w: 2);
+          c.drawCircle(Offset(x + o * 0.5, 299), 2.6, Paint()..color = bp.light);
+          if (boots.tier >= 3) {
+            final sp = _poly([Offset(x + o * 8, 296), Offset(x + o * 20, 290), Offset(x + o * 10, 304)]);
+            c.drawPath(sp, Paint()..color = bp.main);
+            _stroke(c, sp, w: 1.5);
+          }
+        }
+      }
+    }
+    // ===== 腳 / 鞋 =====
+    for (final side in [-1.0, 1.0]) {
+      final cx = 100 + side * 15;
+      c.save();
+      c.translate(cx, 0);
+      c.scale(side, 1); // 右腳朝右，左腳鏡像
+      final bp = boots == null ? _leather : _palFor(boots.id, boots.tier);
+      final t = boots?.tier ?? 0;
+      if (boots != null && boots.id.contains('straw')) {
+        // 草鞋：露出腳背的涼鞋
+        final foot = Path()
+          ..moveTo(-9, 336)
+          ..lineTo(10, 336)
+          ..lineTo(11, 350)
+          ..cubicTo(26, 350, 32, 356, 32, 360)
+          ..lineTo(-11, 362)
+          ..close();
         _gradFill(c, foot, _skinLight, _skinDark);
         _stroke(c, foot, w: 1.8);
+        c.drawLine(const Offset(-9, 342), const Offset(10, 348), Paint()
+          ..color = _cloth.dark
+          ..strokeWidth = 3);
+        c.drawLine(const Offset(-10, 358), const Offset(32, 358), Paint()
+          ..color = _cloth.main
+          ..strokeWidth = 4);
+      } else {
+        final shoe = Path()
+          ..moveTo(-11, 330)
+          ..lineTo(11, 330)
+          ..lineTo(12, 346)
+          ..cubicTo(28, 346, 36, 353, 36, 359)
+          ..lineTo(36, 363)
+          ..lineTo(-12, 363)
+          ..quadraticBezierTo(-15, 346, -11, 330)
+          ..close();
+        _gradFill(c, shoe, bp.light, bp.dark);
+        _shine(c, shoe, bp);
+        _stroke(c, shoe, w: 2.2);
+        // 鞋底與鞋口
+        c.drawRect(const Rect.fromLTWH(-13, 359, 50, 5), Paint()..color = const Color(0xFF2A1D12));
+        c.drawRect(const Rect.fromLTWH(-12, 330, 24, 7), Paint()..color = bp.light.withValues(alpha: 0.9));
+        c.drawLine(const Offset(-12, 337), const Offset(12, 337), Paint()
+          ..color = bp.dark
+          ..strokeWidth = 1.6);
+        c.drawArc(const Rect.fromLTWH(10, 344, 24, 12), math.pi, math.pi * 0.8, false, Paint()
+          ..color = Colors.white.withValues(alpha: 0.4)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..strokeCap = StrokeCap.round);
+        if (t >= 2) {
+          for (final y in [344.0, 351.0]) {
+            c.drawLine(Offset(-11, y), Offset(12, y), Paint()
+              ..color = _gold.main
+              ..strokeWidth = 2);
+          }
+        }
+        if (t >= 3) {
+          final cap = _poly(const [Offset(26, 347), Offset(36, 354), Offset(36, 360), Offset(22, 360)]);
+          c.drawPath(cap, Paint()..color = bp.light);
+          _stroke(c, cap, w: 1.4);
+        }
+        if (boots != null && gearCatalog[boots.id] != null) {
+          c.drawCircle(const Offset(0, 337), 2.6, Paint()..color = _mobStyles[gearCatalog[boots.id]!.$2]?.acc ?? _gold.main);
+        }
       }
-    } else {
-      _place(c, 'boots', boots.id, boots.tier, 80, 342, 56, flip: true);
-      _place(c, 'boots', boots.id, boots.tier, 120, 342, 56);
+      c.restore();
     }
 
-    // 軀幹
-    final armor = equipped['armor'];
-    final torso = Path()
+    // ===== 軀幹 =====
+    final shirt = Path()
       ..moveTo(66, 118)
       ..quadraticBezierTo(100, 104, 134, 118)
-      ..lineTo(128, 190)
-      ..lineTo(126, 258)
-      ..quadraticBezierTo(100, 270, 74, 258)
-      ..lineTo(72, 190)
+      ..cubicTo(138, 150, 130, 196, 126, 232)
+      ..lineTo(130, 262)
+      ..quadraticBezierTo(100, 274, 70, 262)
+      ..lineTo(74, 232)
+      ..cubicTo(70, 196, 62, 150, 66, 118)
       ..close();
-    if (armor == null) {
-      _gradFill(c, torso, const Color(0xFFFFF3DC), const Color(0xFFD9C9A4));
-      _stroke(c, torso, w: 2.4);
-      // 領口與綁帶
+    if (armor == null || armor.id.contains('cloth')) {
+      final p = armor == null ? null : _palFor(armor.id, armor.tier);
+      _gradFill(c, shirt, p?.light ?? const Color(0xFFFFF3DC), p?.dark ?? const Color(0xFFD2C09A));
+      // 兩側暗部讓身體有圓柱感
+      c.save();
+      c.clipPath(shirt);
+      for (final side in [-1.0, 1.0]) {
+        c.drawRect(Rect.fromLTWH(side < 0 ? 62 : 118, 112, 20, 170), Paint()
+          ..shader = LinearGradient(begin: side < 0 ? Alignment.centerLeft : Alignment.centerRight, end: side < 0 ? Alignment.centerRight : Alignment.centerLeft, colors: [Colors.black.withValues(alpha: 0.22), Colors.transparent])
+              .createShader(Rect.fromLTWH(side < 0 ? 62 : 118, 112, 20, 170)));
+      }
+      c.restore();
+      _stroke(c, shirt, w: 2.4);
       final v = Path()
         ..moveTo(86, 110)
         ..lineTo(100, 138)
@@ -1152,94 +1245,236 @@ class HeroPaperDoll extends CustomPainter {
         ..close();
       c.drawPath(v, Paint()..color = _skin);
       _stroke(c, v, w: 1.6);
-      for (final y in [120.0, 128.0, 136.0]) {
-        c.drawLine(Offset(95, y), Offset(105, y + 3), Paint()
+      for (final y in [118.0, 126.0, 134.0]) {
+        c.drawLine(Offset(94, y), Offset(106, y + 3), Paint()
           ..color = const Color(0xFF8B7E5E)
           ..strokeWidth = 1.4);
       }
+      // 衣服的皺褶
+      for (final l in [
+        [const Offset(84, 190), const Offset(92, 214)],
+        [const Offset(118, 186), const Offset(110, 212)],
+        [const Offset(100, 200), const Offset(100, 230)],
+      ]) {
+        c.drawLine(l[0], l[1], Paint()
+          ..color = Colors.black.withValues(alpha: 0.12)
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round);
+      }
+      // 預設的皮帶
+      if (equipped['belt'] == null) {
+        final b = Path()..addRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(72, 240, 56, 11), const Radius.circular(3)));
+        _gradFill(c, b, _leather.light, _leather.dark);
+        _stroke(c, b, w: 1.6);
+        c.drawRect(const Rect.fromLTWH(94, 239, 12, 13), Paint()..color = _gold.main);
+        c.drawRect(const Rect.fromLTWH(97, 242, 6, 7), Paint()..color = _gold.dark);
+      }
     } else {
       final p = _palFor(armor.id, armor.tier);
-      _gradFill(c, torso, p.light, p.dark);
-      _shine(c, torso, p);
-      _stroke(c, torso, w: 2.6);
-      if (armor.id.contains('cloth')) {
-        for (var y = 146.0; y < 252; y += 12) {
-          c.drawLine(Offset(100, y), Offset(100, y + 6), Paint()
-            ..color = p.dark
-            ..strokeWidth = 1.6);
-        }
-        final v = Path()
-          ..moveTo(88, 110)
-          ..lineTo(100, 134)
-          ..lineTo(112, 110)
+      // 底層：鎖子衣風格的內襯
+      _gradFill(c, shirt, Color.lerp(p.dark, Colors.black, 0.25)!, Color.lerp(p.dark, Colors.black, 0.5)!);
+      _stroke(c, shirt, w: 2.4);
+      // 腰甲：三片疊起來的橫甲
+      for (var i = 2; i >= 0; i--) {
+        final y0 = 214.0 + i * 15;
+        final w0 = 25.0 + i * 3;
+        final w1 = 27.0 + i * 3;
+        final band = Path()
+          ..moveTo(100 - w0, y0)
+          ..lineTo(100 + w0, y0)
+          ..lineTo(100 + w1, y0 + 20)
+          ..quadraticBezierTo(100, y0 + 26, 100 - w1, y0 + 20)
           ..close();
-        c.drawPath(v, Paint()..color = _skin);
-        _stroke(c, v, w: 1.5);
-      } else {
-        c.drawLine(const Offset(100, 122), const Offset(100, 258), Paint()
-          ..color = p.dark
-          ..strokeWidth = 2.5);
-        for (final dy in [0.0, 22.0, 44.0]) {
-          c.drawArc(Rect.fromLTWH(78, 136 + dy, 44, 34), 0.15, math.pi - 0.3, false,
+        _gradFill(c, band, p.light, p.dark);
+        _stroke(c, band, w: 2);
+        c.drawLine(Offset(100 - w0 + 3, y0 + 3), Offset(100 + w0 - 3, y0 + 3), Paint()
+          ..color = Colors.white.withValues(alpha: 0.4)
+          ..strokeWidth = 1.6);
+      }
+      // 胸甲
+      final chest = Path()
+        ..moveTo(66, 120)
+        ..quadraticBezierTo(100, 106, 134, 120)
+        ..cubicTo(138, 150, 130, 190, 124, 220)
+        ..quadraticBezierTo(100, 232, 76, 220)
+        ..cubicTo(70, 190, 62, 150, 66, 120)
+        ..close();
+      _gradFill(c, chest, p.light, p.dark);
+      _shine(c, chest, p);
+      _stroke(c, chest, w: 2.6);
+      // 胸肌曲線、中線與肋甲
+      c.drawLine(const Offset(100, 124), const Offset(100, 226), Paint()
+        ..color = p.dark
+        ..strokeWidth = 2.4);
+      c.drawLine(const Offset(102, 126), const Offset(102, 220), Paint()
+        ..color = p.light.withValues(alpha: 0.8)
+        ..strokeWidth = 1.2);
+      for (final side in [-1.0, 1.0]) {
+        final pec = Path()
+          ..moveTo(100, 150)
+          ..quadraticBezierTo(100 + side * 20, 160, 100 + side * 30, 140);
+        c.drawPath(pec, Paint()
+          ..color = p.dark.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2
+          ..strokeCap = StrokeCap.round);
+        for (final dy in [172.0, 192.0]) {
+          c.drawArc(Rect.fromCenter(center: Offset(100 + side * 14, dy), width: 28, height: 16), side < 0 ? 0.3 : 0.3, math.pi - 0.6, false,
               Paint()
-                ..color = p.dark.withValues(alpha: 0.8)
+                ..color = p.dark.withValues(alpha: 0.6)
                 ..style = PaintingStyle.stroke
-                ..strokeWidth = 2.2);
-        }
-        if (armor.tier >= 2) {
-          c.drawPath(
-              Path()
-                ..moveTo(70, 252)
-                ..quadraticBezierTo(100, 266, 130, 252),
-              Paint()
-                ..color = _gold.main
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 3);
-        }
-        if (armor.tier >= 3) {
-          final g = _gemColors[armor.tier.clamp(0, 5)];
-          final gp = _poly(const [Offset(100, 156), Offset(108, 168), Offset(100, 180), Offset(92, 168)]);
-          c.drawPath(gp, Paint()..color = g);
-          _stroke(c, gp, w: 1.5);
+                ..strokeWidth = 1.8);
         }
       }
+      if (armor.tier >= 2) {
+        c.drawPath(
+            Path()
+              ..moveTo(76, 220)
+              ..quadraticBezierTo(100, 232, 124, 220),
+            Paint()
+              ..color = _gold.main
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 3);
+        c.drawPath(Path()..moveTo(70, 124)..quadraticBezierTo(100, 110, 130, 124), Paint()
+          ..color = _gold.main
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4);
+      }
+      if (armor.tier >= 3) {
+        final g = armor.tier >= 3 ? (_mobStyles[gearCatalog[armor.id]?.$2 ?? '']?.acc ?? _gemColors[armor.tier.clamp(0, 5)]) : _gemColors[3];
+        final gp = _poly(const [Offset(100, 146), Offset(108, 158), Offset(100, 172), Offset(92, 158)]);
+        c.drawPath(gp, Paint()..color = g);
+        _stroke(c, gp, w: 1.6);
+        c.drawPath(_poly(const [Offset(100, 146), Offset(104, 156), Offset(100, 158), Offset(96, 156)]), Paint()..color = Colors.white.withValues(alpha: 0.7));
+      }
+      // 領甲
+      final gorget = Path()
+        ..moveTo(84, 112)
+        ..quadraticBezierTo(100, 124, 116, 112)
+        ..lineTo(118, 122)
+        ..quadraticBezierTo(100, 134, 82, 122)
+        ..close();
+      _gradFill(c, gorget, p.light, p.dark);
+      _stroke(c, gorget, w: 1.8);
     }
-    // 肩甲
-    if (armor != null && !armor.id.contains('cloth')) {
+
+    // ===== 腰帶 =====
+    final belt = equipped['belt'];
+    if (belt != null) {
+      _place(c, 'belt', belt.id, belt.tier, 100, 244, 78);
+    }
+
+    // ===== 護腿裙甲（板甲才有）=====
+    if (plate) {
       final p = _palFor(armor.id, armor.tier);
-      for (final x in [62.0, 138.0]) {
-        final sp = Path()..addOval(Rect.fromCenter(center: Offset(x, 124), width: 34, height: 28));
-        _gradFill(c, sp, p.light, p.dark);
-        _stroke(c, sp, w: 2.4);
-        c.drawCircle(Offset(x, 124), 3, Paint()..color = p.light);
+      for (final side in [-1.0, 1.0]) {
+        final tp = Path()
+          ..moveTo(100 + side * 4, 258)
+          ..lineTo(100 + side * 30, 258)
+          ..lineTo(100 + side * 29, 284)
+          ..lineTo(100 + side * 17, 300)
+          ..lineTo(100 + side * 5, 284)
+          ..close();
+        _gradFill(c, tp, p.light, p.dark);
+        _stroke(c, tp, w: 2);
+        c.drawLine(Offset(100 + side * 17, 262), Offset(100 + side * 17, 292), Paint()
+          ..color = p.dark
+          ..strokeWidth = 1.6);
+        c.drawCircle(Offset(100 + side * 17, 268), 2, Paint()..color = p.light);
+      }
+    }
+
+    // ===== 肩甲（板甲才有；在手臂之前畫，手臂接在下面）=====
+    final gloves = equipped['gloves'];
+    final armorPal = armor != null ? _palFor(armor.id, armor.tier) : null;
+    for (final side in [-1.0, 1.0]) {
+      final sx = 100 + side * 38;
+      final armTop = Offset(sx + side * 2, 128);
+      final elbow = Offset(100 + side * 52, 196);
+      final wrist = Offset(100 + side * 56, 226);
+      if (plate) {
+        // 上臂內襯
+        _limb(c, armTop, elbow, 22, 17, Color.lerp(armorPal!.dark, Colors.black, 0.2)!, Color.lerp(armorPal.dark, Colors.black, 0.5)!);
+      } else {
+        _limb(c, armTop, elbow, 22, 17, armorPal?.light ?? const Color(0xFFFFF3DC), armorPal?.dark ?? const Color(0xFFD2C09A));
+      }
+      _limb(c, Offset(elbow.dx, elbow.dy - 2), wrist, 16, 13, _skinLight, _skinDark);
+      if (gloves != null) {
+        // 護腕：手套的袖口往前臂延伸
+        final gp = _palFor(gloves.id, gloves.tier);
+        final n = Offset(side * 1.0, 0);
+        final br = _poly([
+          Offset(elbow.dx - 8 + n.dx, 206),
+          Offset(elbow.dx + 8, 206),
+          Offset(wrist.dx + 7, 232),
+          Offset(wrist.dx - 7, 232),
+        ]);
+        _gradFill(c, br, gp.light, gp.dark);
+        _stroke(c, br, w: 1.8);
+        c.drawLine(Offset(elbow.dx - 7, 214), Offset(elbow.dx + 7, 214), Paint()
+          ..color = gp.dark
+          ..strokeWidth = 1.6);
+        c.drawLine(Offset(elbow.dx - 7, 222), Offset(elbow.dx + 7, 222), Paint()
+          ..color = gp.light.withValues(alpha: 0.6)
+          ..strokeWidth = 1.4);
+      }
+      if (plate) {
+        // 手肘護具
+        final cop = Path()..addOval(Rect.fromCenter(center: elbow.translate(0, 2), width: 20, height: 18));
+        _gradFill(c, cop, armorPal!.light, armorPal.dark);
+        _stroke(c, cop, w: 2);
+        c.drawCircle(elbow.translate(-1, 0), 2.4, Paint()..color = armorPal.light);
+        // 層疊肩甲
+        final ps = armorPal;
+        for (var i = 2; i >= 0; i--) {
+          final lame = Path()..addOval(Rect.fromCenter(center: Offset(sx, 126 + i * 7.0), width: 38 - i * 2.0, height: 22 - i * 1.0));
+          _gradFill(c, lame, ps.light, ps.dark);
+          _stroke(c, lame, w: 2);
+        }
+        final dome = Path()..addOval(Rect.fromCenter(center: Offset(sx, 120), width: 38, height: 26));
+        _gradFill(c, dome, ps.light, ps.dark);
+        _shine(c, dome, ps);
+        _stroke(c, dome, w: 2.4);
+        c.drawArc(Rect.fromCenter(center: Offset(sx - side * 2, 118), width: 24, height: 14), math.pi * 1.1, math.pi * 0.7, false, Paint()
+          ..color = Colors.white.withValues(alpha: 0.5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4
+          ..strokeCap = StrokeCap.round);
+        if (armor.tier >= 2) {
+          c.drawArc(Rect.fromCenter(center: Offset(sx, 120), width: 38, height: 26), 0, math.pi, false, Paint()
+            ..color = _gold.main
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.4);
+        }
         if (armor.tier >= 4) {
-          final spike = _poly([Offset(x + (x < 100 ? -14 : 14), 118), Offset(x + (x < 100 ? -26 : 26), 104), Offset(x + (x < 100 ? -6 : 6), 112)]);
-          c.drawPath(spike, Paint()..color = p.main);
+          final spike = _poly([Offset(sx + side * 12, 114), Offset(sx + side * 26, 98), Offset(sx + side * 6, 108)]);
+          c.drawPath(spike, Paint()..color = ps.main);
           _stroke(c, spike, w: 1.6);
         }
       }
     }
 
-    // 腰帶
-    final belt = equipped['belt'];
-    if (belt != null) {
-      _place(c, 'belt', belt.id, belt.tier, 100, 246, 70);
-    }
-
-    // 手臂（袖子 + 前臂）
-    final sleeveL = armor != null ? _palFor(armor.id, armor.tier).light : const Color(0xFFFFF3DC);
-    final sleeveD = armor != null ? _palFor(armor.id, armor.tier).dark : const Color(0xFFD9C9A4);
-    for (final side in [-1.0, 1.0]) {
-      final sx = 100 + side * 38;
-      _limb(c, Offset(sx + side * 2, 128), Offset(100 + side * 52, 196), 22, 17, sleeveL, sleeveD);
-      _limb(c, Offset(100 + side * 52, 194), Offset(100 + side * 56, 226), 16, 13, _skinLight, _skinDark);
-    }
-    final gloves = equipped['gloves'];
+    // ===== 手 =====
     for (final side in [-1.0, 1.0]) {
       final hx = 100 + side * 56;
       if (gloves != null) {
-        // 手套：袖口在上、手指朝下（圖示本身是手指朝上，所以轉 180 度）
-        _place(c, 'gloves', gloves.id, gloves.tier, hx, 236, 40, rot: math.pi, flip: side < 0);
+        final gp = _palFor(gloves.id, gloves.tier);
+        final hand = Path()..addRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(hx, 238), width: 20, height: 24), const Radius.circular(8)));
+        _gradFill(c, hand, gp.light, gp.dark);
+        _shine(c, hand, gp);
+        _stroke(c, hand, w: 2);
+        for (final dx in [-4.0, 0.0, 4.0]) {
+          c.drawLine(Offset(hx + dx, 242), Offset(hx + dx, 250), Paint()
+            ..color = gp.dark
+            ..strokeWidth = 1.2);
+        }
+        c.drawArc(Rect.fromCenter(center: Offset(hx, 233), width: 16, height: 8), math.pi, math.pi, false, Paint()
+          ..color = Colors.white.withValues(alpha: 0.45)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2);
+        if (gloves.tier >= 2) {
+          c.drawCircle(Offset(hx, 233), 2.4, Paint()..color = _gemColors[gloves.tier.clamp(0, 5)]);
+        }
       } else {
         final hand = Path()..addOval(Rect.fromCenter(center: Offset(hx, 234), width: 18, height: 22));
         _gradFill(c, hand, _skinLight, _skinDark);
