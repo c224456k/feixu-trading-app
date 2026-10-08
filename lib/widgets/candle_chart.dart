@@ -14,15 +14,16 @@ const _down = Color(0xFF2ECC71);
 class CandleChart extends StatefulWidget {
   final List<Candle> candles;
   final bool daily;
+  final int decimals; // 價格小數位數（外匯 3 位，股票 2 位）
 
-  const CandleChart({super.key, required this.candles, required this.daily});
+  const CandleChart({super.key, required this.candles, required this.daily, this.decimals = 2});
 
   @override
   State<CandleChart> createState() => _CandleChartState();
 }
 
 class _CandleChartState extends State<CandleChart> {
-  static const double _leftPad = 48;
+  static const double _leftPad = 52;
   static const double _bottomPad = 22;
   static const double _topPad = 8;
   static const double _rightPad = 8;
@@ -61,6 +62,7 @@ class _CandleChartState extends State<CandleChart> {
                     painter: _CandlePainter(
                       candles: widget.candles,
                       daily: widget.daily,
+                      decimals: widget.decimals,
                       hover: hover,
                       textColor: Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey,
                       gridColor: Colors.grey.withValues(alpha: 0.25),
@@ -93,8 +95,8 @@ class _CandleChartState extends State<CandleChart> {
           ),
           child: Text(
             '${fmt.format(c.time.toLocal())}\n'
-            '開 ${c.open.toStringAsFixed(2)}　高 ${c.high.toStringAsFixed(2)}\n'
-            '低 ${c.low.toStringAsFixed(2)}　收 ${c.close.toStringAsFixed(2)}\n'
+            '開 ${c.open.toStringAsFixed(widget.decimals)}　高 ${c.high.toStringAsFixed(widget.decimals)}\n'
+            '低 ${c.low.toStringAsFixed(widget.decimals)}　收 ${c.close.toStringAsFixed(widget.decimals)}\n'
             '${change >= 0 ? '+' : ''}${change.toStringAsFixed(2)}%',
             style: TextStyle(color: color, fontSize: 11, height: 1.35),
           ),
@@ -107,6 +109,7 @@ class _CandleChartState extends State<CandleChart> {
 class _CandlePainter extends CustomPainter {
   final List<Candle> candles;
   final bool daily;
+  final int decimals;
   final int? hover;
   final Color textColor;
   final Color gridColor;
@@ -114,6 +117,7 @@ class _CandlePainter extends CustomPainter {
   _CandlePainter({
     required this.candles,
     required this.daily,
+    this.decimals = 2,
     required this.hover,
     required this.textColor,
     required this.gridColor,
@@ -156,7 +160,7 @@ class _CandlePainter extends CustomPainter {
       final v = lo + (hi - lo) * k / 4;
       final yy = y(v);
       canvas.drawLine(Offset(plot.left, yy), Offset(plot.right, yy), grid);
-      _text(canvas, v.toStringAsFixed(2), Offset(plot.left - 4, yy), rightAlign: true);
+      _text(canvas, v.toStringAsFixed(decimals), Offset(plot.left - 4, yy), rightAlign: true);
     }
 
     final n = candles.length;
@@ -195,5 +199,5 @@ class _CandlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CandlePainter old) =>
-      old.candles != candles || old.hover != hover || old.daily != daily;
+      old.candles != candles || old.hover != hover || old.daily != daily || old.decimals != decimals;
 }

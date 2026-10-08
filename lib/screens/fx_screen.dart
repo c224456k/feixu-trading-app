@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../api_client.dart';
 import '../models.dart';
+import '../widgets/candle_chart.dart';
 
 // 台股習慣：紅漲綠跌。
 const _upColor = Color(0xFFFF5A5F);
@@ -43,11 +43,11 @@ class _FxPanelState extends State<FxPanel> {
 
   FxQuote? _quote;
   FxAccount? _account;
-  List<ChartPoint> _chart = [];
+  List<Candle> _chart = []; // 1 分鐘 K 棒
+  int _rangeMinutes = 60;
   String? _error;
   bool _busy = false;
   Timer? _timer;
-  int _tick = 0;
 
   @override
   void initState() {
@@ -66,14 +66,12 @@ class _FxPanelState extends State<FxPanel> {
   Future<void> _refresh() async {
     try {
       // 三支 API 同時送出（之前是一支等一支，經過 Cloudflare 隧道每支 0.4~0.9 秒，疊起來就很慢）
-      final needChart = _tick % 4 == 0 || _chart.isEmpty;
       final quoteF = _api.fetchFxQuote();
       final accountF = _api.fetchFxAccount();
-      final chartF = needChart ? _api.fetchFxChart() : null;
+      final chartF = _api.fetchFxCandles(minutes: _rangeMinutes); // 每次刷新（約 3 秒）都抓 K 棒，目前這一根會跟著動
       final quote = await quoteF;
       final account = await accountF;
-      final chart = chartF != null ? await chartF : _chart;
-      _tick++;
+      final chart = await chartF;
       if (!mounted) return;
       setState(() {
         _quote = quote;
@@ -87,12 +85,22 @@ class _FxPanelState extends State<FxPanel> {
     }
   }
 
-  /// 伺服器的走勢點是每分鐘一點，最後一點會落後現價；
-  /// 這裡在尾端補上「目前報價」，線圖尖端就會跟著每次刷新（約 3 秒）即時移動。
-  List<ChartPoint> get _points {
+  /// 伺服器的 K 棒已包含目前這一分鐘；這裡再用最新報價把最後一根的收盤/高低點補到最新，
+  /// 兩次抓 K 棒之間（報價比較新時）最後一根也會跟著動。
+  List<Candle> get _points {
     final q = _quote;
     if (q == null || _chart.isEmpty) return _chart;
-    return [..._chart, ChartPoint(time: q.quoteTime, price: q.mid)];
+    final last = _chart.last;
+    if (!q.quoteTime.isAfter(last.time)) return _chart;
+    final px = q.mid;
+    final patched = Candle(
+      time: last.time,
+      open: last.open,
+      high: px > last.high ? px : last.high,
+      low: px < last.low ? px : last.low,
+      close: px,
+    );
+    return [..._chart.sublist(0, _chart.length - 1), patched];
   }
 
   int get _lots => int.tryParse(_lotsController.text) ?? 0;
@@ -206,70 +214,47 @@ class _FxPanelState extends State<FxPanel> {
 
   Widget _buildChart() {
     final pts = _points;
-    final spots = <FlSpot>[
-      for (var i = 0; i < pts.length; i++) FlSpot(i.toDouble(), pts[i].price),
-    ];
-    final lo = pts.map((p) => p.price).reduce((a, b) => a < b ? a : b);
-    final hi = pts.map((p) => p.price).reduce((a, b) => a > b ? a : b);
-    final pad = (hi - lo) * 0.1 + 0.001;
-    return SizedBox(
-      height: 340,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 16, 16, 8),
-          child: LineChart(
-            LineChartData(
-              minY: lo - pad,
-              maxY: hi + pad,
-              gridData: const FlGridData(show: true, drawVerticalLine: false),
-              borderData: FlBorderData(show: false),
-              titlesData: FlTitlesData(
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 44,
-                    getTitlesWidget: (v, meta) =>
-                        Text(v.toStringAsFixed(3), style: const TextStyle(fontSize: 10)),
+    final last = pts.last;
+    final up = last.close >= last.open;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 12, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(width: 8),
+                Text('1 分鐘 K 線', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[300])),
+                const SizedBox(width: 8),
+                Text(
+                  '本根 ${up ? '▲' : '▼'} ${((last.close - last.open) / last.open * 100).toStringAsFixed(2)}%',
+                  style: TextStyle(fontSize: 12, color: up ? _upColor : _downColor, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                for (final m in const [30, 60, 180])
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: ChoiceChip(
+                      label: Text(m < 60 ? '$m分' : '${m ~/ 60}時', style: const TextStyle(fontSize: 11)),
+                      visualDensity: VisualDensity.compact,
+                      selected: _rangeMinutes == m,
+                      onSelected: (_) {
+                        setState(() => _rangeMinutes = m);
+                        _refresh();
+                      },
+                    ),
                   ),
-                ),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 22,
-                    interval: (pts.length / 4).clamp(1, 9999),
-                    getTitlesWidget: (v, meta) {
-                      final i = v.toInt();
-                      if (i < 0 || i >= pts.length) return const SizedBox.shrink();
-                      return Text(DateFormat('HH:mm').format(pts[i].time.toLocal()),
-                          style: const TextStyle(fontSize: 10));
-                    },
-                  ),
-                ),
-              ),
-              lineTouchData: LineTouchData(
-                touchTooltipData: LineTouchTooltipData(
-                  getTooltipItems: (spots) => spots.map((s) {
-                    final i = s.x.toInt().clamp(0, pts.length - 1);
-                    return LineTooltipItem(
-                      '${DateFormat('HH:mm').format(pts[i].time.toLocal())}\n${s.y.toStringAsFixed(4)}',
-                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    );
-                  }).toList(),
-                ),
-              ),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: spots,
-                  isCurved: false,
-                  color: Colors.lightBlueAccent,
-                  barWidth: 2,
-                  dotData: const FlDotData(show: false),
-                ),
               ],
             ),
-          ),
+            const SizedBox(height: 8),
+            SizedBox(height: 320, child: CandleChart(candles: pts, daily: false, decimals: 3)),
+            Padding(
+              padding: const EdgeInsets.only(left: 8, top: 4),
+              child: Text('紅 K = 這一分鐘收盤高於開盤（漲），綠 K = 收盤低於開盤（跌）；最右邊那根是正在走的這一分鐘。',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            ),
+          ],
         ),
       ),
     );

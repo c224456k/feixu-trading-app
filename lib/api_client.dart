@@ -338,6 +338,13 @@ class ApiClient {
             .toList(),
       );
 
+  Future<List<Candle>> fetchFxCandles({int minutes = 60}) => _get(
+        '/api/fx/candles?minutes=$minutes',
+        (j) => ((j as Map<String, dynamic>)['candles'] as List)
+            .map((e) => Candle.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
   Future<FxAccount> fetchFxAccount() => _get(
         '/api/fx/account',
         (j) => FxAccount.fromJson(j as Map<String, dynamic>),
