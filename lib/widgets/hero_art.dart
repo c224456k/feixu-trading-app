@@ -2,6 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'gear_catalog.dart';
+
+part 'gear_art.dart';
+
 // 勇者紙娃娃的手繪素材：每個裝備欄一種圖示、依材質上色，勇者本人會穿上裝備顯示出來。
 // 全部用 CustomPainter 畫（不用圖檔），座標統一用 0~100 的方框，再縮放到實際大小。
 
@@ -33,6 +37,8 @@ const _shadow = _Pal(Color(0xFF7A5BC0), Color(0xFF38245F), Color(0xFFC8B2F5));
 const _star = _Pal(Color(0xFFFFE9A0), Color(0xFF9C7A22), Color(0xFFFFFFFF));
 
 _Pal _palFor(String id, int tier) {
+  final mob = _mobPal(id);
+  if (mob != null) return mob;
   if (id.startsWith('bronze')) return _copper;
   if (id.startsWith('iron')) return _iron;
   if (id.startsWith('steel')) return _steel;
@@ -67,6 +73,17 @@ Path _poly(List<Offset> pts) {
 
 void _fillStroke(Canvas c, Path p, Color fill, Color edge, {double w = 2}) {
   c.drawPath(p, Paint()..color = fill);
+  // 內緣高光：把輪廓往右下平移再裁進本體，左上緣就會多一圈亮邊，看起來有厚度
+  c.save();
+  c.clipPath(p);
+  c.drawPath(
+    p.shift(const Offset(1.8, 1.8)),
+    Paint()
+      ..color = Colors.white.withValues(alpha: 0.28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4,
+  );
+  c.restore();
   c.drawPath(
     p,
     Paint()
@@ -173,11 +190,59 @@ class ItemIconPainter extends CustomPainter {
 /// 在 0~100 方框內畫一件裝備（紙娃娃也會重複用，畫在人物身上）
 void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier, {bool sparkles = true}) {
   final s = slot.startsWith('ring') ? 'ring' : slot;
+  final g = gearCatalog[id];
+  final shape = g?.$1;
+  final style = g == null ? null : _mobStyles[g.$2];
+  _acc = style?.acc ?? _gemColors[tier.clamp(0, 5)];
+  if (sparkles && tier >= 3 && id != 'empty') _tierGlow(c, tier);
   switch (s) {
     case 'weapon':
-      id.contains('club') ? _club(c, pal) : _sword(c, pal);
+      switch (shape) {
+        case 'greatsword':
+          _greatsword(c, pal);
+        case 'dagger':
+          _dagger(c, pal);
+        case 'axe':
+          _axe(c, pal);
+        case 'hammer':
+          _hammer(c, pal);
+        case 'spear':
+          _spear(c, pal);
+        case 'staff':
+          _staff(c, pal);
+        case 'scythe':
+          _scythe(c, pal);
+        default:
+          id.contains('club') ? _club(c, pal) : _sword(c, pal);
+      }
     case 'head':
-      id.contains('cap') ? _cap(c, pal) : _helm(c, pal);
+      final hk = _headKind(id);
+      switch (hk) {
+        case 'horned':
+          _horns(c, pal);
+          _helm(c, pal);
+        case 'skullhelm':
+          _helm(c, pal);
+        case 'crown':
+          _crown(c, pal);
+        case 'skullcrown':
+          _crown(c, pal, skull: true);
+        case 'bandana':
+          _bandana(c, pal);
+        case 'hood':
+          _hood(c, pal);
+        case 'wolfcap':
+          _earCap(c, pal, fur: true);
+        case 'batcap':
+          _earCap(c, pal, bat: true);
+        case 'slimecap':
+          _slimeCap(c, pal);
+        case 'cap':
+          _cap(c, pal);
+        default:
+          _helm(c, pal);
+      }
+      if (id != 'empty' && hk != 'hood') _helmFlair(c, tier, pal, wings: hk != 'horned');
     case 'armor':
       id.contains('cloth') ? _tunic(c, pal) : _plate(c, pal);
     case 'boots':
@@ -185,7 +250,7 @@ void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier, {bool spark
     case 'gloves':
       _gloves(c, pal);
     case 'cloak':
-      _cloak(c, pal);
+      shape == 'wingcloak' ? _wingCloak(c, pal) : _cloak(c, pal);
     case 'belt':
       id.contains('rope') ? _ropeBelt(c, pal) : _belt(c, pal);
     case 'ring':
@@ -193,7 +258,18 @@ void _drawItem(Canvas c, String slot, String id, _Pal pal, int tier, {bool spark
     case 'amulet':
       _amulet(c, pal);
   }
-  if (id != 'empty') _ornament(c, s, tier, sparkles: sparkles);
+  if (style != null && s != 'weapon' && shape != 'hood') _motif(c, s, style.motif, pal);
+  if (id != 'empty' && !(style != null && (s == 'belt' || s == 'amulet'))) _ornament(c, s, tier, sparkles: sparkles);
+  if (id != 'empty' && style != null && !(s == 'belt' || s == 'amulet')) {
+    // 怪物裝備一律有星芒，讓人一眼分得出是專屬戰利品
+    if (sparkles && tier < 4) _sparkle(c, const Offset(88, 14), 5, _acc.withValues(alpha: 0.9));
+  }
+}
+
+String _headKind(String id) {
+  final sh = gearCatalog[id]?.$1;
+  if (sh != null) return sh;
+  return id.contains('cap') ? 'cap' : 'helm';
 }
 
 const _gemColors = [
@@ -984,7 +1060,9 @@ class HeroPaperDoll extends CustomPainter {
     c.drawOval(const Rect.fromLTWH(52, 378, 96, 10), Paint()..color = const Color(0x66000000));
 
     final cloak = equipped['cloak'];
-    if (cloak != null) {
+    if (cloak != null && gearCatalog[cloak.id]?.$1 == 'wingcloak') {
+      _place(c, 'cloak', cloak.id, cloak.tier, 100, 204, 206);
+    } else if (cloak != null) {
       final p = _palFor(cloak.id, cloak.tier);
       final path = Path()
         ..moveTo(64, 112)
@@ -1209,22 +1287,38 @@ class HeroPaperDoll extends CustomPainter {
       _place(c, 'amulet', amulet.id, amulet.tier, 100, 148, 26);
     }
 
-    // 頭：後髮 → 臉 → 前髮 → 五官 → 頭盔
+    // 頭：後髮 → 臉 → 前髮 → 五官 → 髮帶 → 頭飾
     const head = Offset(100, 70);
     final helm = equipped['head'];
-    final showHair = helm == null || helm.id.contains('cap');
-    const hairLight = Color(0xFF7A4B2A);
-    const hairDark = Color(0xFF3A2212);
-    {
-      final back = Path()
-        ..moveTo(66, 70)
-        ..cubicTo(60, 30, 140, 30, 134, 70)
-        ..cubicTo(136, 88, 128, 96, 120, 92)
-        ..lineTo(80, 92)
-        ..cubicTo(72, 96, 64, 88, 66, 70)
-        ..close();
-      _gradFill(c, back, hairLight, hairDark);
-      _stroke(c, back, w: 2);
+    final kind = helm == null ? '' : _headKind(helm.id);
+    final coversFace = const {'helm', 'horned', 'skullhelm'}.contains(kind);
+    final showHair = helm == null || const {'cap', 'bandana', 'wolfcap', 'batcap', 'crown', 'skullcrown', 'slimecap'}.contains(kind);
+    final showFace = !coversFace;
+    const hairLight = Color(0xFFA6602F);
+    const hairMid = Color(0xFF6E3C1C);
+    const hairDark = Color(0xFF331C0D);
+    if (kind != 'hood') {
+      // 後髮：蓬鬆又帶尖角的大髮量，從頭頂一路蓋到耳後
+      final back = _poly(const [
+        Offset(66, 94), Offset(56, 78), Offset(61, 70), Offset(50, 56), Offset(63, 52), Offset(54, 34),
+        Offset(74, 40), Offset(72, 18), Offset(90, 30), Offset(98, 8), Offset(108, 28), Offset(124, 14),
+        Offset(126, 36), Offset(146, 30), Offset(138, 52), Offset(152, 58), Offset(139, 71), Offset(145, 80),
+        Offset(134, 94), Offset(120, 86), Offset(80, 86),
+      ]);
+      c.drawPath(back, Paint()
+        ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [hairLight, hairMid, hairDark])
+            .createShader(back.getBounds()));
+      _stroke(c, back, w: 2.2);
+      for (final l in [
+        [const Offset(98, 12), const Offset(96, 36)], [const Offset(76, 24), const Offset(80, 42)],
+        [const Offset(122, 20), const Offset(118, 40)], [const Offset(58, 40), const Offset(68, 56)],
+        [const Offset(142, 36), const Offset(132, 54)],
+      ]) {
+        c.drawLine(l[0], l[1], Paint()
+          ..color = hairDark.withValues(alpha: 0.5)
+          ..strokeWidth = 1.6
+          ..strokeCap = StrokeCap.round);
+      }
     }
     c.drawCircle(const Offset(68, 76), 7, Paint()..color = _skin);
     c.drawCircle(const Offset(132, 76), 7, Paint()..color = _skin);
@@ -1235,47 +1329,38 @@ class HeroPaperDoll extends CustomPainter {
           ..shader = const RadialGradient(center: Alignment(-0.3, -0.4), colors: [_skinLight, _skin, _skinDark], stops: [0, 0.6, 1])
               .createShader(Rect.fromCenter(center: head, width: 64, height: 68)));
     _stroke(c, face, w: 2.2);
-    if (showHair) {
-      // 前髮：幾撮尖角
-      final fringe = Path()
-        ..moveTo(66, 70)
-        ..cubicTo(62, 36, 138, 36, 134, 70)
-        ..lineTo(128, 62)
-        ..lineTo(122, 74)
-        ..lineTo(114, 56)
-        ..lineTo(106, 70)
-        ..lineTo(98, 52)
-        ..lineTo(90, 68)
-        ..lineTo(82, 56)
-        ..lineTo(76, 72)
-        ..close();
-      _gradFill(c, fringe, hairLight, hairDark);
-      _stroke(c, fringe, w: 2);
-      c.drawArc(Rect.fromCenter(center: const Offset(98, 46), width: 44, height: 22), math.pi * 1.1, math.pi * 0.6, false,
-          Paint()
-            ..color = Colors.white.withValues(alpha: 0.22)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 3
-            ..strokeCap = StrokeCap.round);
-    }
-    if (showHair) {
+    if (showFace) {
       for (final x in [86.0, 114.0]) {
         // 眉毛
-        c.drawLine(Offset(x - 7, 72), Offset(x + 7, 70 + (x < 100 ? 1 : -1) * -1.0), Paint()
+        c.drawLine(Offset(x - 8, 72), Offset(x + 8, 69.5 + (x < 100 ? 0 : 0.0)), Paint()
           ..color = hairDark
-          ..strokeWidth = 2.2
+          ..strokeWidth = 2.6
           ..strokeCap = StrokeCap.round);
         // 眼白、虹膜、瞳孔、高光
-        c.drawOval(Rect.fromCenter(center: Offset(x, 82), width: 13, height: 15), Paint()..color = Colors.white);
-        c.drawOval(Rect.fromCenter(center: Offset(x, 83), width: 9, height: 12), Paint()..color = const Color(0xFF3F7FBF));
+        c.drawOval(Rect.fromCenter(center: Offset(x, 82), width: 14, height: 16), Paint()..color = Colors.white);
+        c.drawOval(Rect.fromCenter(center: Offset(x, 83), width: 10, height: 13), Paint()
+          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B5E9E), Color(0xFF63B4F0)])
+              .createShader(Rect.fromCenter(center: Offset(x, 83), width: 10, height: 13)));
         c.drawOval(Rect.fromCenter(center: Offset(x, 84), width: 5, height: 8), Paint()..color = const Color(0xFF14243A));
-        c.drawCircle(Offset(x - 1.5, 80), 2, Paint()..color = Colors.white);
+        c.drawCircle(Offset(x - 1.8, 79.8), 2.2, Paint()..color = Colors.white);
+        c.drawCircle(Offset(x + 2, 86), 1.1, Paint()..color = Colors.white.withValues(alpha: 0.8));
         c.drawOval(
-            Rect.fromCenter(center: Offset(x, 82), width: 13, height: 15),
+            Rect.fromCenter(center: Offset(x, 82), width: 14, height: 16),
             Paint()
               ..color = _outline
               ..style = PaintingStyle.stroke
               ..strokeWidth = 1.4);
+        // 上眼線與睫毛
+        c.drawArc(Rect.fromCenter(center: Offset(x, 82), width: 14.5, height: 16.5), math.pi * 1.05, math.pi * 0.9, false, Paint()
+          ..color = _outline
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6
+          ..strokeCap = StrokeCap.round);
+        final out = x < 100 ? -1.0 : 1.0;
+        c.drawLine(Offset(x + out * 7, 79), Offset(x + out * 10, 76.5), Paint()
+          ..color = _outline
+          ..strokeWidth = 1.8
+          ..strokeCap = StrokeCap.round);
       }
       c.drawLine(const Offset(100, 88), const Offset(98, 94), Paint()
         ..color = _skinDark
@@ -1290,11 +1375,105 @@ class HeroPaperDoll extends CustomPainter {
       c.drawCircle(const Offset(78, 94), 5.5, Paint()..color = const Color(0x44FF6B6B));
       c.drawCircle(const Offset(122, 94), 5.5, Paint()..color = const Color(0x44FF6B6B));
     }
+    if (showHair) {
+      // 鬢角
+      for (final side in [-1.0, 1.0]) {
+        final x = 100 + side * 34;
+        final lock = _poly([Offset(x - side * 3, 52), Offset(x + side * 4, 70), Offset(x + side * 0.5, 96), Offset(x - side * 7, 74)]);
+        _gradFill(c, lock, hairLight, hairDark);
+        _stroke(c, lock, w: 1.8);
+      }
+      // 前髮：往右斜梳的瀏海，蓋住整個額頭（不再露出大額頭）
+      final fringe = Path()
+        ..moveTo(64, 74)
+        ..cubicTo(54, 40, 72, 22, 100, 22)
+        ..cubicTo(130, 22, 148, 42, 136, 74)
+        ..lineTo(132, 66)
+        ..lineTo(128, 78)
+        ..lineTo(121, 58)
+        ..lineTo(115, 70)
+        ..lineTo(106, 50)
+        ..lineTo(98, 66)
+        ..lineTo(88, 48)
+        ..lineTo(82, 64)
+        ..lineTo(74, 54)
+        ..lineTo(72, 72)
+        ..close();
+      c.drawPath(fringe, Paint()
+        ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [hairLight, hairMid, hairDark])
+            .createShader(fringe.getBounds()));
+      _stroke(c, fringe, w: 2.2);
+      // 髮絲與高光
+      for (final l in [
+        [const Offset(84, 30), const Offset(88, 50)], [const Offset(104, 25), const Offset(106, 48)],
+        [const Offset(122, 30), const Offset(120, 54)],
+      ]) {
+        c.drawLine(l[0], l[1], Paint()
+          ..color = hairDark.withValues(alpha: 0.45)
+          ..strokeWidth = 1.6
+          ..strokeCap = StrokeCap.round);
+      }
+      c.drawArc(Rect.fromCenter(center: const Offset(98, 42), width: 56, height: 28), math.pi * 1.08, math.pi * 0.62, false,
+          Paint()
+            ..color = const Color(0xFFFFD9A0).withValues(alpha: 0.5)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 4
+            ..strokeCap = StrokeCap.round);
+      // 一撮呆毛
+      c.drawPath(
+          Path()
+            ..moveTo(98, 24)
+            ..quadraticBezierTo(92, 6, 108, 2)
+            ..quadraticBezierTo(98, 10, 106, 24)
+            ..close(),
+          Paint()..color = hairMid);
+      _stroke(c, Path()..moveTo(98, 24)..quadraticBezierTo(92, 6, 108, 2)..quadraticBezierTo(98, 10, 106, 24), w: 1.6);
+      // 紅髮帶（戴頭飾時不畫）
+      if (helm == null) {
+        final band = Path()
+          ..moveTo(64, 56)
+          ..quadraticBezierTo(100, 44, 136, 56)
+          ..lineTo(136, 64)
+          ..quadraticBezierTo(100, 52, 64, 64)
+          ..close();
+        c.drawPath(band, Paint()..color = const Color(0xFFD7342B));
+        c.drawPath(band, Paint()
+          ..color = const Color(0xFF7A1410)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6);
+        c.drawPath(Path()..moveTo(70, 56)..quadraticBezierTo(100, 47, 130, 56), Paint()
+          ..color = const Color(0xFFFF8A80)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4);
+        for (final tail in [
+          [const Offset(134, 58), const Offset(160, 56), const Offset(150, 66), const Offset(172, 74), const Offset(136, 64)],
+          [const Offset(134, 60), const Offset(158, 74), const Offset(148, 80), const Offset(162, 96), const Offset(136, 66)],
+        ]) {
+          final t = Path()
+            ..moveTo(tail[0].dx, tail[0].dy)
+            ..quadraticBezierTo(tail[1].dx, tail[1].dy, tail[2].dx, tail[2].dy)
+            ..quadraticBezierTo(tail[3].dx, tail[3].dy, tail[4].dx, tail[4].dy)
+            ..close();
+          c.drawPath(t, Paint()..color = const Color(0xFFC12A22));
+          c.drawPath(t, Paint()
+            ..color = const Color(0xFF7A1410)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.4);
+        }
+      }
+    }
     if (helm != null) {
-      if (helm.id.contains('cap')) {
-        _place(c, 'head', helm.id, helm.tier, 100, 52, 84);
-      } else {
-        _place(c, 'head', helm.id, helm.tier, 100, 64, 92);
+      switch (kind) {
+        case 'cap' || 'bandana' || 'wolfcap' || 'batcap' || 'slimecap':
+          _place(c, 'head', helm.id, helm.tier, 100, 52, 84);
+        case 'crown' || 'skullcrown':
+          _place(c, 'head', helm.id, helm.tier, 100, 48, 88);
+        case 'hood':
+          _place(c, 'head', helm.id, helm.tier, 100, 58, 112);
+        default:
+          _place(c, 'head', helm.id, helm.tier, 100, 64, 92);
+      }
+      if (coversFace) {
         // 頭盔下露出下半臉（嘴）
         c.drawArc(const Rect.fromLTWH(92, 92, 16, 9), 0.2, math.pi - 0.4, false,
             Paint()
