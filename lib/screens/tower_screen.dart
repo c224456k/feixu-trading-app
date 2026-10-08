@@ -28,13 +28,44 @@ class _Mon {
   int hp;
   double flash = 0;
   double dying = 0; // 0 活著，>0 淡出中
+  double shown; // 血條顯示值（平滑追上 hp）
+  double ghost; // 殘影血條（被打掉的那一段，延遲後慢慢縮）
+  double ghostHold = 0;
+  double knock = 0; // 被打到的後仰 0~1
   _Mon(Map<String, dynamic> m)
       : name = m['name'] as String,
         kind = (m['kind'] as num).toInt(),
         band = (m['band'] as num).toInt(),
         boss = m['boss'] == true,
         maxHp = (m['max_hp'] as num).toInt(),
-        hp = (m['hp'] as num).toInt();
+        hp = (m['hp'] as num).toInt(),
+        shown = (m['hp'] as num).toDouble(),
+        ghost = (m['hp'] as num).toDouble();
+}
+
+// 打擊特效：劈砍 / 爪擊 + 擴散環；火花粒子另外一個 list
+class _Fx {
+  final double x;
+  final double y;
+  final double size;
+  final bool claw;
+  final bool crit;
+  final bool flip; // 勇者打怪物 = 由左上劈向右下；怪物打勇者反向
+  double age = 0;
+  static const dur = 0.38;
+  _Fx(this.x, this.y, this.size, {this.claw = false, this.crit = false, this.flip = false});
+}
+
+class _Spark {
+  double x;
+  double y;
+  double vx;
+  double vy;
+  final Color color;
+  final double size;
+  double age = 0;
+  final double life;
+  _Spark(this.x, this.y, this.vx, this.vy, this.color, this.size, this.life);
 }
 
 class _Float {
@@ -118,6 +149,14 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   bool _heroDown = false;
   double _heroFlash = 0;
   final List<_Float> _floats = [];
+  final List<_Fx> _fx = [];
+  final List<_Spark> _sparks = [];
+  final math.Random _rnd = math.Random();
+  double _shake = 0;
+  double _heroShown = 1;
+  double _heroGhost = 1;
+  double _heroGhostHold = 0;
+  double _heroKnock = 0;
   String _banner = '';
   double _bannerT = 0;
   DateTime? _deadUntil;
@@ -305,12 +344,33 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     }
     _t += dt;
     for (final m in _mons) {
+      m.shown += (m.hp - m.shown) * math.min(1.0, dt * 14);
+      m.ghost = _stepGhost(m.ghost, m.hp.toDouble(), m.maxHp.toDouble(), m.ghostHold, dt);
+      m.ghostHold = math.max(0, m.ghostHold - dt);
+      m.knock = math.max(0, m.knock - dt * 4.5);
       m.flash = math.max(0, m.flash - dt * 4);
       if (m.dying > 0) {
         m.dying = math.min(1, m.dying + dt * 2.2);
       }
     }
     _heroFlash = math.max(0, _heroFlash - dt * 4);
+    _heroShown += (_heroHp - _heroShown) * math.min(1.0, dt * 14);
+    _heroGhost = _stepGhost(_heroGhost, _heroHp.toDouble(), _heroMax.toDouble(), _heroGhostHold, dt);
+    _heroGhostHold = math.max(0, _heroGhostHold - dt);
+    _heroKnock = math.max(0, _heroKnock - dt * 4.5);
+    _shake = math.max(0, _shake - dt * 40);
+    for (final f in _fx) {
+      f.age += dt;
+    }
+    _fx.removeWhere((f) => f.age > _Fx.dur);
+    for (final sp in _sparks) {
+      sp.age += dt;
+      sp.x += sp.vx * dt;
+      sp.y += sp.vy * dt;
+      sp.vy += 700 * dt;
+      sp.vx *= 1 - dt * 1.5;
+    }
+    _sparks.removeWhere((sp) => sp.age > sp.life);
     for (final f in _floats) {
       f.age += dt;
     }
@@ -357,6 +417,21 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     setState(() {});
   }
 
+  // 殘影血條：回血時直接跟上；扣血時先停一下再往下滑
+  double _stepGhost(double ghost, double hp, double max, double hold, double dt) {
+    if (hp >= ghost) return hp;
+    if (hold > 0) return ghost;
+    return math.max(hp, ghost - (max * 0.5 + (ghost - hp) * 3) * dt);
+  }
+
+  void _burst(double x, double y, int n, List<Color> colors, {double speed = 260, double size = 3.5}) {
+    for (var i = 0; i < n; i++) {
+      final a = _rnd.nextDouble() * math.pi * 2;
+      final v = speed * (0.35 + _rnd.nextDouble() * 0.65);
+      _sparks.add(_Spark(x, y, math.cos(a) * v, math.sin(a) * v - 90, colors[_rnd.nextInt(colors.length)], size * (0.6 + _rnd.nextDouble() * 0.8), 0.35 + _rnd.nextDouble() * 0.3));
+    }
+  }
+
   static const _actionDur = 0.6;
   static const _hitAt = 0.25;
 
@@ -389,6 +464,12 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _floats.add(_Float(miss ? 'MISS' : '-$dmg', _heroX, _groundY - 150, miss ? Colors.white70 : const Color(0xFFFF6B6B), crit ? 26 : 20));
       if (!miss) {
         _heroFlash = 1;
+        _heroKnock = 1;
+        _heroGhostHold = 0.45;
+        final hy = _groundY - 90;
+        _fx.add(_Fx(_heroX, hy, 70, claw: true, crit: crit, flip: true));
+        _burst(_heroX, hy, crit ? 18 : 10, const [Color(0xFFFF5252), Color(0xFFFFB199), Colors.white]);
+        _shake = math.max(_shake, crit ? 9 : 5);
       }
       _heroHp = hp;
       if (hp <= 0) {
@@ -403,10 +484,19 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
             miss ? Colors.white70 : (crit ? const Color(0xFFFFD93D) : Colors.white), crit ? 28 : 20));
         if (!miss) {
           m.flash = 1;
+          m.knock = 1;
+          m.ghostHold = 0.45;
+          final cy = pos.dy - _monSize(m) * 0.5;
+          _fx.add(_Fx(pos.dx, cy, _monSize(m) * 0.62, crit: crit));
+          _burst(pos.dx, cy, crit ? 22 : 11,
+              crit ? const [Color(0xFFFFD93D), Colors.white, Color(0xFFFF9F1C)] : const [Colors.white, Color(0xFFBFE6FF), Color(0xFFFFE9A8)],
+              speed: crit ? 340 : 250);
+          _shake = math.max(_shake, crit ? 9 : (m.boss ? 4 : 3));
         }
         m.hp = hp;
         if (hp <= 0) {
           m.dying = 0.01;
+          _burst(pos.dx, pos.dy - _monSize(m) * 0.45, 22, const [Color(0xFFEEEEEE), Color(0xFFB0BEC5), Color(0xFFFFE082)], speed: 200, size: 5);
         }
       }
     }
@@ -642,14 +732,29 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   }
 
   Widget _hpBar() {
-    final ratio = _heroMax == 0 ? 0.0 : (_heroHp / _heroMax).clamp(0.0, 1.0);
+    final ratio = _heroMax == 0 ? 0.0 : (_heroShown / _heroMax).clamp(0.0, 1.0);
+    final ghostRatio = _heroMax == 0 ? 0.0 : (_heroGhost / _heroMax).clamp(0.0, 1.0);
     final color = ratio > 0.5 ? const Color(0xFF4CD964) : ratio > 0.25 ? const Color(0xFFFFC107) : const Color(0xFFFF5252);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('勇者 HP  $_heroHp / $_heroMax', style: const TextStyle(color: Colors.white70, fontSize: 12)),
       const SizedBox(height: 4),
-      ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: LinearProgressIndicator(value: ratio, minHeight: 12, backgroundColor: Colors.white12, valueColor: AlwaysStoppedAnimation(color)),
+      Container(
+        height: 14,
+        decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(7), border: Border.all(color: Colors.white24)),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LayoutBuilder(builder: (context, c) {
+            return Stack(children: [
+              Container(width: c.maxWidth * ghostRatio, color: const Color(0xFFFFE9A8)),
+              Container(
+                width: c.maxWidth * ratio,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color.lerp(color, Colors.white, 0.35)!, color, Color.lerp(color, Colors.black, 0.25)!]),
+                ),
+              ),
+            ]);
+          }),
+        ),
       ),
     ]);
   }
@@ -767,6 +872,10 @@ class _StagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final band = (((s._phase == _Phase.idle || s._phase == _Phase.dead && s._encounters.isEmpty ? s._floor : s._runFloor) - 1) ~/ 10).clamp(0, 9);
+    canvas.save();
+    if (s._shake > 0) {
+      canvas.translate(math.sin(s._t * 130) * s._shake, math.cos(s._t * 110) * s._shake * 0.6);
+    }
     _background(canvas, size, band);
     final gy = s._groundY;
 
@@ -784,37 +893,122 @@ class _StagePainter extends CustomPainter {
       final pos = s._monPos(i, n);
       final sz = s._monSize(m);
       var lunge = 0.0;
+      var attacking = false;
       if (s._phase == _Phase.battle && s._logIdx < s._log.length && s._log[s._logIdx]['a'] == i) {
         lunge = -_lungeCurve(s._actionT) * 60;
+        attacking = true;
       }
       if (m.dying >= 1) {
         continue;
       }
+      // 影子（死亡時跟著縮小）
+      canvas.drawOval(Rect.fromCenter(center: Offset(pos.dx, pos.dy + 2), width: sz * 0.62 * (1 - m.dying * 0.5), height: 9), Paint()..color = Color.fromRGBO(0, 0, 0, 0.28 * (1 - m.dying)));
+      // 被打：往後仰＋壓扁；出招：蓄力時前傾、撞到時拉長；死亡：縮小並往上飄
+      final k = Curves.easeOut.transform(m.knock);
+      final lean = attacking ? _lungeCurve(s._actionT).clamp(-1.0, 1.0) : 0.0;
       canvas.save();
-      canvas.translate(pos.dx + lunge, pos.dy);
+      canvas.translate(pos.dx + lunge + k * 16, pos.dy - m.dying * 18);
+      canvas.rotate(k * 0.12 - lean * 0.08);
+      canvas.scale((1 + k * -0.10 + (attacking ? lean.abs() * 0.06 : 0)) * (1 - m.dying * 0.3), (1 + k * 0.10 - (attacking ? lean.abs() * 0.04 : 0)) * (1 - m.dying * 0.3));
       canvas.translate(-sz / 2, -sz);
       MonsterPainter(kind: m.kind, band: m.band, boss: m.boss, flash: m.flash, opacity: 1 - m.dying, t: s._t + i)
           .paint(canvas, Size(sz, sz));
       canvas.restore();
       if (m.dying == 0 && (s._phase == _Phase.battle || s._phase == _Phase.after)) {
-        _hpBar(canvas, Offset(pos.dx, pos.dy - sz - 4), 64, m.hp / m.maxHp, m.name, m.boss);
+        _hpBar(canvas, Offset(pos.dx, pos.dy - sz - 4), m.boss ? 96 : 66, m, attacking);
       } else if (m.dying == 0 && (s._phase == _Phase.walking || s._phase == _Phase.waiting)) {
         _label(canvas, Offset(pos.dx, pos.dy - sz - 2), m.name, 10, Colors.white70);
       }
     }
 
+    // 打擊特效與火花
+    for (final f in s._fx) {
+      _drawFx(canvas, f);
+    }
+    for (final sp in s._sparks) {
+      final a = (1 - sp.age / sp.life).clamp(0.0, 1.0);
+      canvas.drawCircle(Offset(sp.x, sp.y), sp.size * (0.4 + 0.6 * a), Paint()..color = sp.color.withValues(alpha: a));
+    }
+
     // 浮動數字
     for (final f in s._floats) {
       final a = (1 - f.age).clamp(0.0, 1.0);
-      _label(canvas, Offset(f.x, f.y - f.age * 36), f.text, f.size, f.color.withValues(alpha: a), bold: true, outline: true);
+      final pop = f.age < 0.12 ? 1 + (1 - f.age / 0.12) * 0.6 : 1.0; // 數字彈出放大再縮回
+      _label(canvas, Offset(f.x, f.y - Curves.easeOut.transform(f.age.clamp(0.0, 1.0)) * 40), f.text, f.size * pop, f.color.withValues(alpha: a), bold: true, outline: true);
     }
+    canvas.restore();
   }
 
+  // 出招曲線：先往後蓄力一下（-0.18），再快速衝出（到 1 時正好命中），之後緩緩收回
   double _lungeCurve(double t) {
-    if (t < 0.25) {
-      return t / 0.25;
+    if (t < 0.1) {
+      return -0.18 * Curves.easeOut.transform(t / 0.1);
     }
-    return math.max(0, 1 - (t - 0.25) / 0.35);
+    if (t < 0.25) {
+      return -0.18 + 1.18 * Curves.easeIn.transform((t - 0.1) / 0.15);
+    }
+    return math.max(0, 1 - Curves.easeOut.transform((t - 0.25) / 0.35));
+  }
+
+  void _drawFx(Canvas canvas, _Fx f) {
+    final p = (f.age / _Fx.dur).clamp(0.0, 1.0);
+    final grow = Curves.easeOut.transform(math.min(1.0, p * 2.2));
+    final alpha = (1 - Curves.easeIn.transform(p)).clamp(0.0, 1.0);
+    final glow = f.crit ? const Color(0xFFFFD93D) : (f.claw ? const Color(0xFFFF5252) : const Color(0xFF8FD3FF));
+    // 擴散環
+    canvas.drawCircle(
+        Offset(f.x, f.y),
+        f.size * (0.3 + 0.9 * grow),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = (f.crit ? 5 : 3) * (1 - p)
+          ..color = glow.withValues(alpha: alpha * 0.8));
+    if (f.crit) {
+      // 暴擊：放射線
+      final rp = Paint()
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0xFFFFF3B0).withValues(alpha: alpha);
+      for (var i = 0; i < 10; i++) {
+        final a = i * math.pi / 5 + 0.3;
+        canvas.drawLine(Offset(f.x + math.cos(a) * f.size * 0.45 * grow, f.y + math.sin(a) * f.size * 0.45 * grow),
+            Offset(f.x + math.cos(a) * f.size * (0.6 + 0.5 * grow), f.y + math.sin(a) * f.size * (0.6 + 0.5 * grow)), rp);
+      }
+    }
+    final slashes = f.claw ? 3 : (f.crit ? 2 : 1);
+    for (var i = 0; i < slashes; i++) {
+      final off = (i - (slashes - 1) / 2) * (f.claw ? 14.0 : 16.0);
+      final dir = f.flip ? -1.0 : 1.0;
+      final L = f.size * (f.crit ? 1.0 : 0.8);
+      final a = Offset(f.x - L * 0.7 * dir + off, f.y - L * 0.85);
+      final b = Offset(f.x + L * 0.7 * dir + off, f.y + L * 0.85);
+      final ctrl = Offset(f.x + off + 14 * dir, f.y);
+      final path = Path()
+        ..moveTo(a.dx, a.dy)
+        ..quadraticBezierTo(ctrl.dx, ctrl.dy, b.dx, b.dy);
+      for (final m in path.computeMetrics()) {
+        // 前半段把線「劃出去」，後半段從尾巴開始收掉，形成劃過去的殘影
+        final head = m.length * grow;
+        final tail = m.length * Curves.easeIn.transform(math.max(0.0, (p - 0.35) / 0.65));
+        if (head <= tail) continue;
+        final seg = m.extractPath(tail, head);
+        canvas.drawPath(
+            seg,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round
+              ..strokeWidth = (f.crit ? 14 : 10)
+              ..color = glow.withValues(alpha: 0.45 * alpha)
+              ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4));
+        canvas.drawPath(
+            seg,
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeCap = StrokeCap.round
+              ..strokeWidth = f.crit ? 5 : 3.5
+              ..color = Colors.white.withValues(alpha: alpha));
+      }
+    }
   }
 
   void _drawHero(Canvas canvas, double gy) {
@@ -830,8 +1024,13 @@ class _StagePainter extends CustomPainter {
       final tx = tIdx is int && tIdx < s._mons.length ? s._monPos(tIdx, s._mons.length).dx : s._stageW * 0.6;
       x += _lungeCurve(s._actionT) * math.max(30.0, (tx - x) - 70);
     }
+    final hk = Curves.easeOut.transform(s._heroKnock);
+    x -= hk * 14;
     canvas.save();
     canvas.translate(x, y);
+    if (hk > 0 && !s._heroDown) {
+      canvas.rotate(-hk * 0.1);
+    }
     if (s._heroDown) {
       canvas.rotate(math.pi / 2 * 0.9);
       canvas.translate(0, -hh * 0.2);
@@ -852,12 +1051,32 @@ class _StagePainter extends CustomPainter {
     canvas.drawOval(Rect.fromCenter(center: Offset(x, gy + 8), width: 56, height: 10), Paint()..color = const Color(0x44000000));
   }
 
-  void _hpBar(Canvas canvas, Offset bottomCenter, double w, double ratio, String name, bool boss) {
-    final r = Rect.fromLTWH(bottomCenter.dx - w / 2, bottomCenter.dy - 8, w, 7);
-    canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), Paint()..color = Colors.black87);
-    final fill = Rect.fromLTWH(r.left + 1, r.top + 1, (w - 2) * ratio.clamp(0.0, 1.0), 5);
-    canvas.drawRRect(RRect.fromRectAndRadius(fill, const Radius.circular(2)), Paint()..color = boss ? const Color(0xFFFF5252) : const Color(0xFF4CD964));
-    _label(canvas, Offset(bottomCenter.dx, r.top - 2), name, 10, Colors.white);
+  void _hpBar(Canvas canvas, Offset bottomCenter, double w, _Mon m, bool active) {
+    final h = m.boss ? 10.0 : 8.0;
+    final r = Rect.fromLTWH(bottomCenter.dx - w / 2, bottomCenter.dy - h - 1, w, h);
+    final rr = RRect.fromRectAndRadius(r, Radius.circular(h / 2));
+    final ratio = (m.shown / m.maxHp).clamp(0.0, 1.0);
+    final ghostRatio = (m.ghost / m.maxHp).clamp(0.0, 1.0);
+    canvas.drawRRect(rr.inflate(1.5), Paint()..color = active ? const Color(0xFFFFD93D) : Colors.black87);
+    canvas.drawRRect(rr, Paint()..color = const Color(0xFF1A1A1A));
+    canvas.save();
+    canvas.clipRRect(rr);
+    // 殘影（剛被打掉的那一段）
+    canvas.drawRect(Rect.fromLTWH(r.left, r.top, w * ghostRatio, h), Paint()..color = const Color(0xFFFFE9A8));
+    final base = m.boss ? const Color(0xFFFF5252) : (ratio > 0.5 ? const Color(0xFF4CD964) : ratio > 0.25 ? const Color(0xFFFFC107) : const Color(0xFFFF5252));
+    final fillRect = Rect.fromLTWH(r.left, r.top, w * ratio, h);
+    canvas.drawRect(
+        fillRect,
+        Paint()
+          ..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color.lerp(base, Colors.white, 0.35)!, base, Color.lerp(base, Colors.black, 0.25)!])
+              .createShader(r));
+    // 上緣高光
+    canvas.drawRect(Rect.fromLTWH(r.left, r.top + 1, w * ratio, h * 0.28), Paint()..color = Colors.white.withValues(alpha: 0.25));
+    canvas.restore();
+    _label(canvas, Offset(bottomCenter.dx, r.top - 2), m.boss ? '👑 ${m.name}' : m.name, m.boss ? 12 : 10, Colors.white);
+    if (m.boss) {
+      _label(canvas, Offset(bottomCenter.dx, r.bottom + 12), '${m.hp} / ${m.maxHp}', 9, Colors.white70);
+    }
   }
 
   void _label(Canvas canvas, Offset bottomCenter, String text, double size, Color color, {bool bold = false, bool outline = false}) {
