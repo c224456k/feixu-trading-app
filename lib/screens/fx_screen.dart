@@ -212,6 +212,17 @@ class _FxPanelState extends State<FxPanel> {
     );
   }
 
+  /// 圖上的參考線：黃色粗虛線 = 強制平倉線（加碼、利息累積後會自己移動），青色細虛線 = 進場價。
+  List<CandleLine> get _lines {
+    final p = _account?.position;
+    if (p == null) return const [];
+    final liq = p.liquidationMid;
+    return [
+      CandleLine(p.entry, p.side == 'long' ? '多單進場' : '空單進場', const Color(0xFF4DD0E1)),
+      if (liq != null) CandleLine(liq, '強制平倉', const Color(0xFFFFD600), bold: true),
+    ];
+  }
+
   Widget _buildChart() {
     final pts = _points;
     final last = pts.last;
@@ -248,10 +259,10 @@ class _FxPanelState extends State<FxPanel> {
               ],
             ),
             const SizedBox(height: 8),
-            SizedBox(height: 320, child: CandleChart(candles: pts, daily: false, decimals: 3)),
+            SizedBox(height: 320, child: CandleChart(candles: pts, daily: false, decimals: 3, lines: _lines)),
             Padding(
               padding: const EdgeInsets.only(left: 8, top: 4),
-              child: Text('紅 K = 這一分鐘收盤高於開盤（漲），綠 K = 收盤低於開盤（跌）；最右邊那根是正在走的這一分鐘。',
+              child: Text('紅 K = 這一分鐘收盤高於開盤（漲），綠 K = 收盤低於開盤（跌）；最右邊那根是正在走的這一分鐘。有持倉時，黃色虛線是強制平倉線，價格碰到就會被強平。',
                   style: TextStyle(fontSize: 11, color: Colors.grey[600])),
             ),
           ],

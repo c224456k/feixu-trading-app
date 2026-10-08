@@ -342,6 +342,7 @@ class FxPosition {
   final double equity;
   final double marginLevel;
   final double? liquidationPrice;
+  final double? liquidationMid; // 換算成中間價（走勢圖畫線用）
 
   FxPosition({
     required this.side,
@@ -355,6 +356,7 @@ class FxPosition {
     required this.equity,
     required this.marginLevel,
     required this.liquidationPrice,
+    this.liquidationMid,
   });
 
   factory FxPosition.fromJson(Map<String, dynamic> j) => FxPosition(
@@ -369,6 +371,7 @@ class FxPosition {
         equity: (j['equity'] as num).toDouble(),
         marginLevel: (j['margin_level'] as num).toDouble(),
         liquidationPrice: (j['liquidation_price'] as num?)?.toDouble(),
+        liquidationMid: (j['liquidation_mid'] as num?)?.toDouble(),
       );
 }
 

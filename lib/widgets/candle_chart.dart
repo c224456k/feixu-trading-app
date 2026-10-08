@@ -9,14 +9,24 @@ import '../models.dart';
 const _up = Color(0xFFFF5A5F);
 const _down = Color(0xFF2ECC71);
 
+/// 圖上的水平參考線（例如強制平倉線、進場價）。
+class CandleLine {
+  final double price;
+  final String label;
+  final Color color;
+  final bool bold;
+  const CandleLine(this.price, this.label, this.color, {this.bold = false});
+}
+
 /// K 線圖：自己用 CustomPainter 畫（fl_chart 沒有 K 線）。
 /// 滑鼠移動 / 手指按住拖曳會顯示十字線與該根的開高低收。
 class CandleChart extends StatefulWidget {
   final List<Candle> candles;
   final bool daily;
   final int decimals; // 價格小數位數（外匯 3 位，股票 2 位）
+  final List<CandleLine> lines;
 
-  const CandleChart({super.key, required this.candles, required this.daily, this.decimals = 2});
+  const CandleChart({super.key, required this.candles, required this.daily, this.decimals = 2, this.lines = const []});
 
   @override
   State<CandleChart> createState() => _CandleChartState();
@@ -63,6 +73,7 @@ class _CandleChartState extends State<CandleChart> {
                       candles: widget.candles,
                       daily: widget.daily,
                       decimals: widget.decimals,
+                      lines: widget.lines,
                       hover: hover,
                       textColor: Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey,
                       gridColor: Colors.grey.withValues(alpha: 0.25),
@@ -110,6 +121,7 @@ class _CandlePainter extends CustomPainter {
   final List<Candle> candles;
   final bool daily;
   final int decimals;
+  final List<CandleLine> lines;
   final int? hover;
   final Color textColor;
   final Color gridColor;
@@ -118,6 +130,7 @@ class _CandlePainter extends CustomPainter {
     required this.candles,
     required this.daily,
     this.decimals = 2,
+    this.lines = const [],
     required this.hover,
     required this.textColor,
     required this.gridColor,
@@ -147,6 +160,12 @@ class _CandlePainter extends CustomPainter {
     if (hi - lo < 0.02) {
       hi += 0.01;
       lo -= 0.01;
+    }
+    // 參考線離得不太遠就一起納入範圍（強平線要看得到）；太遠的話改在圖邊緣標示方向，避免 K 棒被壓扁
+    final span = hi - lo;
+    for (final l in lines) {
+      if (l.price > hi && l.price - lo < span * 4) hi = l.price;
+      if (l.price < lo && hi - l.price < span * 4) lo = l.price;
     }
     final pad = (hi - lo) * 0.06;
     lo -= pad;
@@ -186,6 +205,32 @@ class _CandlePainter extends CustomPainter {
       }
     }
 
+    for (final l in lines) {
+      final inside = l.price >= lo && l.price <= hi;
+      final yy = inside ? y(l.price) : (l.price > hi ? plot.top + 8 : plot.bottom - 8);
+      final paint = Paint()
+        ..color = l.color
+        ..strokeWidth = l.bold ? 2.2 : 1.2
+        ..style = PaintingStyle.stroke;
+      if (inside) {
+        // 虛線
+        const dash = 7.0, gap = 5.0;
+        for (var x = plot.left; x < plot.right; x += dash + gap) {
+          canvas.drawLine(Offset(x, yy), Offset((x + dash).clamp(plot.left, plot.right), yy), paint);
+        }
+      }
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '${inside ? '' : (l.price > hi ? '▲ ' : '▼ ')}${l.label} ${l.price.toStringAsFixed(decimals)}',
+          style: TextStyle(color: Colors.black, fontSize: 10.5, fontWeight: FontWeight.bold),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      final chip = Rect.fromLTWH(plot.left + 4, yy - tp.height - 3, tp.width + 8, tp.height + 2);
+      canvas.drawRRect(RRect.fromRectAndRadius(chip, const Radius.circular(3)), Paint()..color = l.color);
+      tp.paint(canvas, Offset(chip.left + 4, chip.top + 1));
+    }
+
     if (hover != null) {
       final c = candles[hover!];
       final cx = plot.left + slot * (hover! + 0.5);
@@ -199,5 +244,5 @@ class _CandlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CandlePainter old) =>
-      old.candles != candles || old.hover != hover || old.daily != daily || old.decimals != decimals;
+      old.candles != candles || old.hover != hover || old.daily != daily || old.decimals != decimals || old.lines != lines;
 }
