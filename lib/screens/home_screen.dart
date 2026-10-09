@@ -9,11 +9,7 @@ import '../models.dart';
 import '../settings_store.dart';
 import '../update_checker.dart';
 import 'boss_screen.dart';
-import 'baccarat_screen.dart';
-import 'poker_screen.dart';
-import 'horse_screen.dart';
-import 'sicbo_screen.dart';
-import 'slot_screen.dart';
+import 'casino_screen.dart';
 import 'hero_screen.dart';
 import 'leaderboard_screen.dart';
 import 'fx_screen.dart';
@@ -137,38 +133,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const PokerScreen()),
+              MaterialPageRoute(builder: (_) => const CasinoScreen()),
             ),
-            icon: const Icon(Icons.filter_vintage),
-            tooltip: '德州撲克',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HorseScreen()),
-            ),
-            icon: const Icon(Icons.emoji_events),
-            tooltip: '賭馬',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const BaccaratScreen()),
-            ),
-            icon: const Icon(Icons.style),
-            tooltip: '百家樂',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SicBoScreen()),
-            ),
-            icon: const Icon(Icons.casino),
-            tooltip: '骰寶',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SlotScreen()),
-            ),
-            icon: const Icon(Icons.stars),
-            tooltip: '老虎機',
+            icon: const Icon(Icons.diamond),
+            tooltip: '娛樂城',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
