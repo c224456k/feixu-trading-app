@@ -523,6 +523,10 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _bannerT = 1.4;
       for (final d in (r['drops'] as List)) {
         final it = (d['item'] as Map).cast<String, dynamic>();
+        if (d['scroll'] != null) {
+          _toast('📜 獲得 ${it['name']}（在勇者裝備頁使用）');
+          continue;
+        }
         _toast('🎁 獲得 ${it['name']}${it['quality'] != null ? '（品質 ${it['quality']}%）' : ''}（已放進物品欄）');
       }
       _phase = _Phase.after;

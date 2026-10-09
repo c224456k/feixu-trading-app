@@ -283,6 +283,12 @@ class ApiClient {
   Future<Map<String, dynamic>> heroAckDrops() =>
       _post('/api/hero/drops/ack', {}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> heroEnhance(String scroll, {int? invId, String? slot}) => _post(
+      '/api/hero/enhance',
+      {'scroll': scroll, if (invId != null) 'inv_id': invId, if (slot != null) 'slot': slot},
+      (j) => j as Map<String, dynamic>,
+      withAuth: true);
+
   Future<Map<String, dynamic>> heroUnequip(String slot) =>
       _post('/api/hero/unequip', {'slot': slot}, (j) => j as Map<String, dynamic>, withAuth: true);
 

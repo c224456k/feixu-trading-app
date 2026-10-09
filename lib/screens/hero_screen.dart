@@ -90,7 +90,24 @@ class _HeroScreenState extends State<HeroScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final d in drops)
-                ListTile(
+                if (d['scroll'] != null)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Text('📜', style: TextStyle(fontSize: 34)),
+                    title: Text(
+                      '${d['scroll_name']}',
+                      style: const TextStyle(
+                        color: Color(0xFFFFD36B),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    subtitle: Text(
+                      reasons[d['reason']] ?? '',
+                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  )
+                else
+                  ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: _SlotBox(
                     slot: (d['item'] as Map)['slot'] as String,
@@ -114,7 +131,7 @@ class _HeroScreenState extends State<HeroScreen> {
                 ),
               const SizedBox(height: 4),
               const Text(
-                '已放進物品欄',
+                '裝備已放進物品欄，卷軸在物品欄上方',
                 style: TextStyle(color: Colors.white38, fontSize: 12),
               ),
             ],
@@ -204,6 +221,7 @@ class _HeroScreenState extends State<HeroScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _itemDetail(slot['key'] as String, slot['name'] as String, item),
+            _enhanceButton(item, slot: slot['key'] as String),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -302,6 +320,7 @@ class _HeroScreenState extends State<HeroScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _itemDetail(target, '${_slot(target)?['name']}', item),
+          _enhanceButton(item, invId: (entry['inv_id'] as num).toInt()),
           const SizedBox(height: 12),
           if (current != null) ...[
             Text(
@@ -356,6 +375,116 @@ class _HeroScreenState extends State<HeroScreen> {
     );
   }
 
+  String _plusPrefix(Map<String, dynamic> item) {
+    final p = (item['plus'] as num?)?.toInt() ?? 0;
+    return p > 0 ? '+$p ' : '';
+  }
+
+  // 強化按鈕：武器吃武器卷軸、防具吃防具卷軸；超過安定值會有爆裝風險，先跳確認
+  Widget _enhanceButton(Map<String, dynamic> item, {int? invId, String? slot}) {
+    final kind = item['enhance_kind'] as String?;
+    if (kind == null) return const SizedBox.shrink();
+    final info = (_data!['scroll_info'] as Map)[kind] as Map;
+    final have = ((_data!['scrolls'] as Map)[kind] as num?)?.toInt() ?? 0;
+    final plus = (item['plus'] as num?)?.toInt() ?? 0;
+    final safe = (item['safe'] as num).toInt();
+    final risky = plus >= safe;
+    final statName = _statLabels[info['stat']]!;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '強化 +$plus ・安定值 +$safe ・每 +1 $statName+${info['per_plus']}'
+            '${risky ? '\n⚠ 已超過安定值：每次有 1/3 機率爆裝（裝備消失）' : ''}',
+            style: TextStyle(
+              color: risky ? const Color(0xFFFF8A80) : Colors.white54,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: have <= 0
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      _doEnhance(kind, item, invId: invId, slot: slot);
+                    },
+              icon: const Text('📜'),
+              label: Text('使用${info['name']}（持有 $have）'),
+              style: FilledButton.styleFrom(
+                backgroundColor: risky ? const Color(0xFFB03A2E) : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _doEnhance(String kind, Map<String, dynamic> item, {int? invId, String? slot}) async {
+    final plus = (item['plus'] as num?)?.toInt() ?? 0;
+    final safe = (item['safe'] as num).toInt();
+    if (plus >= safe) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('確定要強化？'),
+          content: Text('「${_plusPrefix(item)}${item['name']}」已超過安定值，這次有 1/3 機率爆裝，裝備會直接消失。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('賭了')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    try {
+      final r = await _api.heroEnhance(kind, invId: invId, slot: slot);
+      if (!mounted) return;
+      final boom = r['result'] == 'exploded';
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1B1710),
+          title: Text(
+            boom ? '💥 爆裝' : '✨ 強化成功',
+            style: TextStyle(color: boom ? const Color(0xFFFF8A80) : const Color(0xFFFFD36B)),
+          ),
+          content: Text('${r['message'] ?? ''}', style: const TextStyle(color: Colors.white70)),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('好'))],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+    if (mounted) await _load();
+  }
+
+  Widget _scrollRow() {
+    final sc = (_data!['scrolls'] as Map?) ?? const {};
+    final info = (_data!['scroll_info'] as Map?) ?? const {};
+    if (info.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 4,
+        children: [
+          for (final k in info.keys)
+            Text(
+              '📜 ${info[k]['name']} × ${sc[k] ?? 0}',
+              style: const TextStyle(color: Color(0xFFFFD36B), fontSize: 13),
+            ),
+        ],
+      ),
+    );
+  }
+
   String _statLine(Map<String, dynamic> item) =>
       [
         for (final k in _statOrder)
@@ -386,7 +515,7 @@ class _HeroScreenState extends State<HeroScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${item['name']}',
+                    '${_plusPrefix(item)}${item['name']}',
                     style: TextStyle(
                       color: color,
                       fontSize: 18,
@@ -629,6 +758,7 @@ class _HeroScreenState extends State<HeroScreen> {
             ],
           ),
           const SizedBox(height: 10),
+          _scrollRow(),
           if (inv.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
@@ -652,7 +782,7 @@ class _HeroScreenState extends State<HeroScreen> {
             ),
           const SizedBox(height: 8),
           const Text(
-            '點裝備欄可以脫下，點物品欄裡的裝備可以換上。',
+            '點裝備欄可以脫下，點物品欄裡的裝備可以換上。強化卷軸從 Boss 與百層塔掉落，點裝備即可使用。',
             style: TextStyle(color: Colors.white30, fontSize: 11),
           ),
         ],
@@ -786,11 +916,34 @@ class _SlotBox extends StatelessWidget {
             ? [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 8)]
             : null,
       ),
-      child: ItemIcon(
-        slot: slot,
-        itemId: filled ? item!['id'] as String : null,
-        tier: tier,
-        size: size * 0.8,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Center(
+            child: ItemIcon(
+              slot: slot,
+              itemId: filled ? item!['id'] as String : null,
+              tier: tier,
+              size: size * 0.8,
+            ),
+          ),
+          if (filled && ((item!['plus'] as num?)?.toInt() ?? 0) > 0)
+            Positioned(
+              right: -size * 0.08,
+              top: -size * 0.1,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB03A2E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '+${item!['plus']}',
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
