@@ -8,7 +8,7 @@ import 'tower_screen.dart';
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
 // 裝備資料全由伺服器（hero_game.py）提供，這裡只負責顯示。
 
-const _tierNames = ['破舊', '普通', '精良', '稀有', '史詩', '傳說'];
+const _tierNames = ['破舊', '普通', '精良', '稀有', '史詩', '傳說', '神話', '天啟', '混沌', '終焉'];
 const _tierColors = [
   Color(0xFF8D8D8D),
   Color(0xFFE8E8E8),
@@ -16,6 +16,10 @@ const _tierColors = [
   Color(0xFF3FA9FF),
   Color(0xFFB36BFF),
   Color(0xFFFFB02E),
+  Color(0xFFFF5C5C),
+  Color(0xFF2EE6D6),
+  Color(0xFFFF4FD8),
+  Color(0xFFFFF3B0),
 ];
 const _statLabels = {
   'atk': '攻擊',
@@ -120,12 +124,12 @@ class _HeroScreenState extends State<HeroScreen> {
                       color:
                           _tierColors[((d['item'] as Map)['tier'] as num)
                               .toInt()
-                              .clamp(0, 5)],
+                              .clamp(0, 9)],
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   subtitle: Text(
-                    '${_tierNames[((d['item'] as Map)['tier'] as num).toInt().clamp(0, 5)]}・${reasons[d['reason']] ?? ''}\n${_statLine(d['item'] as Map<String, dynamic>)}',
+                    '${_tierNames[((d['item'] as Map)['tier'] as num).toInt().clamp(0, 9)]}・${reasons[d['reason']] ?? ''}\n${_statLine(d['item'] as Map<String, dynamic>)}',
                     style: const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                 ),
@@ -222,6 +226,7 @@ class _HeroScreenState extends State<HeroScreen> {
           children: [
             _itemDetail(slot['key'] as String, slot['name'] as String, item),
             _enhanceButton(item, slot: slot['key'] as String),
+            _socketSection(item, slot: slot['key'] as String),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -321,6 +326,7 @@ class _HeroScreenState extends State<HeroScreen> {
         children: [
           _itemDetail(target, '${_slot(target)?['name']}', item),
           _enhanceButton(item, invId: (entry['inv_id'] as num).toInt()),
+          _socketSection(item, invId: (entry['inv_id'] as num).toInt()),
           const SizedBox(height: 12),
           if (current != null) ...[
             Text(
@@ -465,6 +471,107 @@ class _HeroScreenState extends State<HeroScreen> {
     if (mounted) await _load();
   }
 
+  // 卡片洞：T6 以上的裝備有 1~2 個洞，可以插怪物卡片（卡片從百層塔掉落，取出不會壞）
+  Widget _socketSection(Map<String, dynamic> item, {int? invId, String? slot}) {
+    final sockets = (item['sockets'] as num?)?.toInt() ?? 0;
+    if (sockets <= 0) return const SizedBox.shrink();
+    final cards = ((item['cards'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('🃏 卡片洞 ${cards.length}/$sockets', style: const TextStyle(color: Color(0xFFFFD36B), fontSize: 13, fontWeight: FontWeight.bold)),
+          for (var i = 0; i < sockets; i++)
+            if (i < cards.length)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(children: [
+                  Expanded(
+                    child: Text('${cards[i]['name']}：${cards[i]['desc']}', style: const TextStyle(color: Color(0xFF7DFFA0), fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _act(() => _api.heroUnsocket(i, invId: invId, slot: slot));
+                    },
+                    child: const Text('取出'),
+                  ),
+                ]),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _pickCard(invId: invId, slot: slot);
+                    },
+                    child: const Text('◇ 空洞：插入卡片'),
+                  ),
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+
+  void _pickCard({int? invId, String? slot}) {
+    final cards = ((_data!['cards'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    _sheet(
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('選一張卡片插進去', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          if (cards.isEmpty) const Text('你還沒有卡片，到百層塔打怪物會掉。', style: TextStyle(color: Colors.white54)),
+          for (final c in cards)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('${c['name']} × ${c['n']}', style: TextStyle(color: c['boss'] == true ? const Color(0xFFFFB02E) : Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('${c['desc']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(context);
+                _act(() => _api.heroSocket(c['id'] as String, invId: invId, slot: slot));
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cardRow() {
+    final cards = ((_data!['cards'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    if (cards.isEmpty) return const SizedBox.shrink();
+    final total = cards.fold<int>(0, (a, c) => a + (c['n'] as num).toInt());
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: () => _sheet(
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('我的卡片', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text('插在 T6 以上裝備的洞裡；同種效果有上限，不會無限疊加。', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              for (final c in cards)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${c['name']} × ${c['n']}', style: TextStyle(color: c['boss'] == true ? const Color(0xFFFFB02E) : Colors.white, fontWeight: FontWeight.bold)),
+                  subtitle: Text('${c['desc']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                ),
+            ],
+          ),
+        ),
+        child: Text('🃏 卡片 $total 張（點開查看）', style: const TextStyle(color: Color(0xFFFFD36B), fontSize: 13)),
+      ),
+    );
+  }
+
   Widget _scrollRow() {
     final sc = (_data!['scrolls'] as Map?) ?? const {};
     final info = (_data!['scroll_info'] as Map?) ?? const {};
@@ -500,7 +607,7 @@ class _HeroScreenState extends State<HeroScreen> {
     String slotName,
     Map<String, dynamic> item,
   ) {
-    final tier = (item['tier'] as num).toInt().clamp(0, 5);
+    final tier = (item['tier'] as num).toInt().clamp(0, 9);
     final color = _tierColors[tier];
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -759,6 +866,7 @@ class _HeroScreenState extends State<HeroScreen> {
           ),
           const SizedBox(height: 10),
           _scrollRow(),
+          _cardRow(),
           if (inv.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 12),
@@ -889,7 +997,7 @@ class _SlotBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final filled = item != null;
-    final tier = filled ? (item!['tier'] as num).toInt().clamp(0, 5) : 0;
+    final tier = filled ? (item!['tier'] as num).toInt().clamp(0, 9) : 0;
     final color = _tierColors[tier];
     return Container(
       width: size,

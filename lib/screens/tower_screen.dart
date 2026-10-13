@@ -13,7 +13,10 @@ import '../widgets/monster_art.dart';
 
 enum _Phase { loading, idle, entering, walking, waiting, battle, after, cleared, dead }
 
-const _bandNames = ['草原', '洞窟', '墓地', '森林', '沼澤', '礦坑', '熔岩', '冰霜', '天空', '魔界'];
+const _bandNames = [
+  '草原', '洞窟', '墓地', '森林', '沼澤', '礦坑', '熔岩', '冰霜', '天空', '魔界',
+  '深淵之門', '虛空裂隙', '血色荒原', '枯骨王都', '雷鳴高地', '毒瘴沼淵', '時間迴廊', '鏡之迷宮', '星辰神殿', '混沌王座',
+];
 const _skyTop = [0xFF8FD3F4, 0xFF1B1626, 0xFF1D2340, 0xFF2E5E3A, 0xFF4B5A2A, 0xFF2A2A30, 0xFF4A1208, 0xFF9ED8F5, 0xFF5BA8F0, 0xFF1A0510];
 const _skyBottom = [0xFFDFF3D0, 0xFF3A2E4A, 0xFF4A4F7A, 0xFF9CCB7A, 0xFFA6B86B, 0xFF5A5A66, 0xFFFF7A2E, 0xFFEAF8FF, 0xFFFFE4B8, 0xFF7A1630];
 const _groundCol = [0xFF4C8C3A, 0xFF4A3B33, 0xFF3A3D4A, 0xFF3B6B2E, 0xFF4A5A2F, 0xFF5A5148, 0xFF3A2018, 0xFFDCEEF7, 0xFFEFE2C8, 0xFF2A1018];
@@ -98,8 +101,11 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   int get _maxSelectable => math.min(_maxFloor, _bestFloor + 1); // 要先通關才能挑更高的樓層
   int _bestFloor = 0;
   int _dropsLeft = 20;
-  int _goldLeft = 0;
-  int _goldCap = 0;
+  // 1~100 層與 101 層以上的每日獎金額度分開算
+  int _goldLeftLo = 0, _goldCapLo = 0, _goldLeftHi = 0, _goldCapHi = 0;
+  int _cardsLeft = 30;
+  int get _goldLeft => _floor > 100 ? _goldLeftHi : _goldLeftLo;
+  int get _goldCap => _floor > 100 ? _goldCapHi : _goldCapLo;
   // 肉（體力）：每場戰鬥消耗 10，每分鐘恢復 1，上限 60（以伺服器回報為準，本機只做倒數顯示）
   double _meatBase = 60;
   DateTime _meatStamp = DateTime.now();
@@ -205,8 +211,11 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     _setMeat(st);
     _bestFloor = (st['best_floor'] as num).toInt();
     _dropsLeft = (st['drops_left'] as num?)?.toInt() ?? 0;
-    _goldLeft = (st['gold_left'] as num?)?.toInt() ?? 0;
-    _goldCap = (st['gold_cap'] as num?)?.toInt() ?? 0;
+    _goldLeftLo = (st['gold_left_lo'] as num?)?.toInt() ?? (st['gold_left'] as num?)?.toInt() ?? 0;
+    _goldCapLo = (st['gold_cap_lo'] as num?)?.toInt() ?? (st['gold_cap'] as num?)?.toInt() ?? 0;
+    _goldLeftHi = (st['gold_left_hi'] as num?)?.toInt() ?? 0;
+    _goldCapHi = (st['gold_cap_hi'] as num?)?.toInt() ?? 0;
+    _cardsLeft = (st['cards_left'] as num?)?.toInt() ?? 0;
     _floor = (st['selected_floor'] as num).toInt().clamp(1, _maxSelectable);
     final dead = (st['dead_seconds'] as num?)?.toInt() ?? 0;
     final run = st['run'] as Map<String, dynamic>?;
@@ -514,7 +523,14 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _heroHp = after;
       _bestFloor = (r['best_floor'] as num).toInt();
       _dropsLeft = (r['drops_left'] as num?)?.toInt() ?? _dropsLeft;
-      _goldLeft = (r['gold_left'] as num?)?.toInt() ?? _goldLeft;
+      if (r['gold_left'] != null) {
+        if (_runFloor > 100) {
+          _goldLeftHi = (r['gold_left'] as num).toInt();
+        } else {
+          _goldLeftLo = (r['gold_left'] as num).toInt();
+        }
+      }
+      _cardsLeft = (r['cards_left'] as num?)?.toInt() ?? _cardsLeft;
       final gold = (r['gold'] as num?)?.toInt() ?? 0;
       if (gold > 0) {
         _floats.add(_Float('+${_fmtGold(gold)}', _heroX, _groundY - 190, const Color(0xFFFFD93D), 22));
@@ -523,6 +539,10 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       _bannerT = 1.4;
       for (final d in (r['drops'] as List)) {
         final it = (d['item'] as Map).cast<String, dynamic>();
+        if (d['card'] != null) {
+          _toast('🃏 獲得 ${it['name']}（插在 T6 以上裝備的洞）');
+          continue;
+        }
         if (d['scroll'] != null) {
           _toast('📜 獲得 ${it['name']}（在勇者裝備頁使用）');
           continue;
@@ -617,8 +637,10 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
             '・樓層越高怪物越強；裝備越好的勇者才能爬得越高。\n'
             '・每挑戰一層（出發或上樓）消耗 10 塊肉🍖，肉每分鐘恢復 1 塊、上限 60（約 60 分鐘回滿）；層內的戰鬥不另外扣，肉不夠就不能出發。\n'
             '・勇者戰敗要等 5 分鐘才能復活。\n'
-            '・每場戰鬥勝利給現金：10 層約 625 元，越高越多，100 層約 2,500 元，頭目那場加倍；每天最多從塔領 125,000 元。\n'
-            '・裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的。\n'
+            '・每場戰鬥勝利給現金：10 層約 625 元，越高越多，100 層約 2,500 元，200 層約 5,000 元，頭目那場加倍；1~100 層每天最多領 125,000 元，101 層以上另外算，每天最多 500,000 元。\n'
+            '・101 層以上：每層有固定詞綴（狂暴/堅殼/迅捷/穿甲/巨壯/連擊），怪物會無視一部分防禦，每 5 層多一場精英怪，勝利回血降到 10%。\n'
+            '・裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的；101 層以上開始掉 T6~T9 裝備。\n'
+            '・每隻被打倒的怪物都可能掉自己的卡片（頭目掉頭目卡），每天最多 30 張；T6 以上裝備有 1~2 個洞，可以插卡片。\n'
             '・結果由伺服器決定，中途離開頁面也算數。',
           ),
         ),
@@ -641,7 +663,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
               Positioned(
                 left: 10,
                 top: 8,
-                child: _chip('第 ${running ? _runFloor : _floor} 層・${_bandNames[(((running ? _runFloor : _floor) - 1) ~/ 10).clamp(0, 9)]}'),
+                child: _chip('第 ${running ? _runFloor : _floor} 層・${_bandNames[(((running ? _runFloor : _floor) - 1) ~/ 10).clamp(0, 19)]}'),
               ),
               if (running)
                 Positioned(
@@ -765,7 +787,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
 
   Widget _floorSelector(bool running) {
     void set(int v) => setState(() => _floor = v.clamp(1, _maxSelectable));
-    final band = _bandNames[((_floor - 1) ~/ 10).clamp(0, 9)];
+    final band = _bandNames[((_floor - 1) ~/ 10).clamp(0, 19)];
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
       decoration: BoxDecoration(color: const Color(0xFF1B1710), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF3D3320))),
@@ -773,7 +795,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         Row(children: [
           Text('樓層  $_floor', style: const TextStyle(color: Color(0xFFFFD36B), fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(width: 8),
-          Text('$band${_floor % 10 == 0 ? '・頭目層' : ''}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text('$band${_floor % 10 == 0 ? '・頭目層' : (_floor > 100 && _floor % 5 == 0 ? '・精英層' : '')}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
           const Spacer(),
           Text('最高通關 $_bestFloor 層・可選到 $_maxSelectable 層', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         ]),
@@ -861,7 +883,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         const SizedBox(height: 6),
         Text('💰 今日還能領 ${_fmtGold(_goldLeft)} / ${_fmtGold(_goldCap)} 元獎金（每場勝利給錢）', style: const TextStyle(color: Color(0xFFFFD36B), fontSize: 12)),
         const SizedBox(height: 2),
-        Text('今日還能掉落 $_dropsLeft 件裝備（每天上限 20 件）', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        Text('今日還能掉落 $_dropsLeft 件裝備（每天上限 20 件）・卡片 $_cardsLeft 張', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         const Text('想爬更高：用 Boss 掉的裝備把勇者練強。', style: TextStyle(color: Colors.white30, fontSize: 11)),
       ]),
     );
@@ -875,7 +897,7 @@ class _StagePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final band = (((s._phase == _Phase.idle || s._phase == _Phase.dead && s._encounters.isEmpty ? s._floor : s._runFloor) - 1) ~/ 10).clamp(0, 9);
+    final band = (((s._phase == _Phase.idle || s._phase == _Phase.dead && s._encounters.isEmpty ? s._floor : s._runFloor) - 1) ~/ 10) % 10;
     canvas.save();
     if (s._shake > 0) {
       canvas.translate(math.sin(s._t * 130) * s._shake, math.cos(s._t * 110) * s._shake * 0.6);

@@ -289,6 +289,18 @@ class ApiClient {
       (j) => j as Map<String, dynamic>,
       withAuth: true);
 
+  Future<Map<String, dynamic>> heroSocket(String cardId, {int? invId, String? slot}) => _post(
+      '/api/hero/socket',
+      {'card_id': cardId, if (invId != null) 'inv_id': invId, if (slot != null) 'slot': slot},
+      (j) => j as Map<String, dynamic>,
+      withAuth: true);
+
+  Future<Map<String, dynamic>> heroUnsocket(int index, {int? invId, String? slot}) => _post(
+      '/api/hero/unsocket',
+      {'index': index, if (invId != null) 'inv_id': invId, if (slot != null) 'slot': slot},
+      (j) => j as Map<String, dynamic>,
+      withAuth: true);
+
   Future<Map<String, dynamic>> heroUnequip(String slot) =>
       _post('/api/hero/unequip', {'slot': slot}, (j) => j as Map<String, dynamic>, withAuth: true);
 
