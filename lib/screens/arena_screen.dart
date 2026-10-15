@@ -136,10 +136,9 @@ class _ArenaScreenState extends State<ArenaScreen>
         ).showSnackBar(SnackBar(content: Text('${r['message'] ?? ''}')));
       }
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
     }
     if (mounted) setState(() => _busy = false);
     await _refresh();
