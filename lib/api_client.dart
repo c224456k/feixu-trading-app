@@ -292,6 +292,21 @@ class ApiClient {
   Future<Map<String, dynamic>> heroDiscardCard(String cardId, {int n = 1}) =>
       _post('/api/hero/discard_card', {'card_id': cardId, 'n': n}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> arenaState() =>
+      _get('/api/arena/state', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> arenaPlayers(String q) =>
+      _get('/api/arena/players?q=${Uri.encodeQueryComponent(q)}', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> arenaChallenge(String targetId) =>
+      _post('/api/arena/challenge', {'target_id': targetId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> arenaRespond(int duelId, bool accept) =>
+      _post('/api/arena/respond', {'duel_id': duelId, 'accept': accept}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> arenaCancel(int duelId) =>
+      _post('/api/arena/cancel', {'duel_id': duelId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> heroSocket(String cardId, {int? invId, String? slot}) => _post(
       '/api/hero/socket',
       {'card_id': cardId, if (invId != null) 'inv_id': invId, if (slot != null) 'slot': slot},

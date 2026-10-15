@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api_client.dart';
 import '../widgets/hero_art.dart';
 import 'hero_shop_screen.dart';
+import 'arena_screen.dart';
 import 'tower_screen.dart';
 
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
@@ -727,6 +728,13 @@ class _HeroScreenState extends State<HeroScreen> {
             },
             icon: const Icon(Icons.fort, color: Color(0xFFFFD36B)),
             label: const Text('百層塔', style: TextStyle(color: Color(0xFFFFD36B))),
+          ),
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ArenaScreen()),
+            ),
+            icon: const Icon(Icons.sports_kabaddi, color: Color(0xFFFFD36B)),
+            label: const Text('競技場', style: TextStyle(color: Color(0xFFFFD36B))),
           ),
         ],
       ),
