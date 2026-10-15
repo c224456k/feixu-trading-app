@@ -563,6 +563,36 @@ class _HeroScreenState extends State<HeroScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text('${c['name']} × ${c['n']}', style: TextStyle(color: c['boss'] == true ? const Color(0xFFFFB02E) : Colors.white, fontWeight: FontWeight.bold)),
                   subtitle: Text('${c['desc']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _act(() => _api.heroDiscardCard(c['id'] as String, n: 1));
+                      },
+                      child: const Text('丟1張'),
+                    ),
+                    if ((c['n'] as num).toInt() > 1)
+                      TextButton(
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text('丟掉全部 ${c['name']}？'),
+                              content: Text('共 ${c['n']} 張，丟掉後無法找回。'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                                TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('全丟')),
+                              ],
+                            ),
+                          );
+                          if (ok == true && mounted) {
+                            Navigator.pop(context);
+                            _act(() => _api.heroDiscardCard(c['id'] as String, n: 0));
+                          }
+                        },
+                        child: const Text('全丟'),
+                      ),
+                  ]),
                 ),
             ],
           ),

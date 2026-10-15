@@ -289,6 +289,9 @@ class ApiClient {
       (j) => j as Map<String, dynamic>,
       withAuth: true);
 
+  Future<Map<String, dynamic>> heroDiscardCard(String cardId, {int n = 1}) =>
+      _post('/api/hero/discard_card', {'card_id': cardId, 'n': n}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> heroSocket(String cardId, {int? invId, String? slot}) => _post(
       '/api/hero/socket',
       {'card_id': cardId, if (invId != null) 'inv_id': invId, if (slot != null) 'slot': slot},
