@@ -286,11 +286,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
         Expanded(
           child: Stack(
             children: [
-              Row(children: [
+              Positioned.fill(child: Row(children: [
                 Expanded(
                   child: Transform.translate(
                     offset: Offset(offA, 0),
-                    child: CustomPaint(painter: HeroPaperDoll(_equipped(a))),
+                    child: SizedBox.expand(child: CustomPaint(painter: HeroPaperDoll(_equipped(a)))),
                   ),
                 ),
                 Expanded(
@@ -299,11 +299,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
                     child: Transform(
                       alignment: Alignment.center,
                       transform: Matrix4.diagonal3Values(-1, 1, 1),
-                      child: CustomPaint(painter: HeroPaperDoll(_equipped(b))),
+                      child: SizedBox.expand(child: CustomPaint(painter: HeroPaperDoll(_equipped(b)))),
                     ),
                   ),
                 ),
-              ]),
+              ])),
               if (e != null && !finished && (e['miss'] == true || (e['dmg'] as num) > 0))
                 Align(
                   alignment: Alignment(defIsA ? -0.55 : 0.55, -0.5 - frac * 0.3),
