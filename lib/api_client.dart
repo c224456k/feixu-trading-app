@@ -277,6 +277,8 @@ class ApiClient {
   Future<Map<String, dynamic>> towerLeave() =>
       _post('/api/tower/leave', {}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> heroDismantle(int invId) =>
+      _post('/api/hero/dismantle', {'inv_id': invId}, (j) => j as Map<String, dynamic>, withAuth: true);
   Future<Map<String, dynamic>> heroDiscard(int invId) =>
       _post('/api/hero/discard', {'inv_id': invId}, (j) => j as Map<String, dynamic>, withAuth: true);
 

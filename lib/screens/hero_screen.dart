@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
@@ -154,11 +155,14 @@ class _HeroScreenState extends State<HeroScreen> {
 
   Future<void> _confirmDiscard(Map<String, dynamic> entry) async {
     final item = entry['item'] as Map<String, dynamic>;
+    final gain = math.max(1, ((item['atk'] as num).toInt()) + ((item['def'] as num).toInt()));
+    final nCards = ((item['cards'] as List?) ?? const []).length;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('丟棄裝備？'),
-        content: Text('「${item['name']}」丟掉就拿不回來了，也沒有補償。'),
+        title: const Text('分解裝備？'),
+        content: Text('分解「${item['name']}」可獲得 $gain 水晶（攻擊 + 防禦）。分解後裝備就沒了。'
+            '${nCards > 0 ? '\n插在上面的 $nCards 張卡片會退回卡片背包。' : ''}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -166,13 +170,13 @@ class _HeroScreenState extends State<HeroScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('丟棄'),
+            child: const Text('分解'),
           ),
         ],
       ),
     );
     if (ok == true) {
-      await _act(() => _api.heroDiscard((entry['inv_id'] as num).toInt()));
+      await _act(() => _api.heroDismantle((entry['inv_id'] as num).toInt()));
     }
   }
 
@@ -372,8 +376,11 @@ class _HeroScreenState extends State<HeroScreen> {
                 Navigator.pop(context);
                 _confirmDiscard(entry);
               },
-              icon: const Icon(Icons.delete_outline, size: 18),
-              label: const Text('丟棄'),
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: Builder(builder: (_) {
+                final it = entry['item'] as Map<String, dynamic>;
+                return Text('分解（+${math.max(1, (it['atk'] as num).toInt() + (it['def'] as num).toInt())} 水晶）');
+              }),
               style: TextButton.styleFrom(foregroundColor: Colors.white38),
             ),
           ),
@@ -613,6 +620,7 @@ class _HeroScreenState extends State<HeroScreen> {
         spacing: 12,
         runSpacing: 4,
         children: [
+          Text('💎 水晶 × ${(_data!['crystals'] as num?)?.toInt() ?? 0}', style: const TextStyle(color: Color(0xFF8FD3FF), fontSize: 13)),
           for (final k in info.keys)
             Text(
               '📜 ${info[k]['name']} × ${sc[k] ?? 0}',
