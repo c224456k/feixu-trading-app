@@ -408,6 +408,18 @@ class ApiClient {
         (j) => (j as List).map((e) => LeaderboardEntry.fromJson(e as Map<String, dynamic>)).toList(),
       );
 
+  Future<Map<String, dynamic>> marketState({String card = ''}) =>
+      _get('/api/market/state?card=${Uri.encodeQueryComponent(card)}', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> marketSell(String cardId, int price) =>
+      _post('/api/market/sell', {'card_id': cardId, 'price': price}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> marketBuy(int listingId) =>
+      _post('/api/market/buy', {'listing_id': listingId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> marketCancel(int listingId) =>
+      _post('/api/market/cancel', {'listing_id': listingId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<bool> healthCheck() async {
     final base = await _baseUrl();
     try {

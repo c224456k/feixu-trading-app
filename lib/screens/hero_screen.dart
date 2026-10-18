@@ -5,6 +5,7 @@ import '../api_client.dart';
 import '../widgets/hero_art.dart';
 import 'hero_shop_screen.dart';
 import 'arena_screen.dart';
+import 'market_screen.dart';
 import 'tower_screen.dart';
 
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
@@ -743,6 +744,16 @@ class _HeroScreenState extends State<HeroScreen> {
             ),
             icon: const Icon(Icons.sports_kabaddi, color: Color(0xFFFFD36B)),
             label: const Text('競技場', style: TextStyle(color: Color(0xFFFFD36B))),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MarketScreen()),
+              );
+              if (mounted) _load();
+            },
+            icon: const Icon(Icons.storefront, color: Color(0xFF8FD3FF)),
+            label: const Text('拍賣場', style: TextStyle(color: Color(0xFF8FD3FF))),
           ),
         ],
       ),
