@@ -28,6 +28,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
   String? _error;
   String _build = 'arrow';
   (int, int)? _sel;
+  bool _moving = false; // 搬塔模式：下一次點空格子就把選中的塔搬過去
   bool _busy = false;
   // 播放
   late final Ticker _ticker;
@@ -120,6 +121,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
           _result = (r['result'] as Map).cast<String, dynamic>();
           _t = 0;
           _sel = null;
+          _moving = false;
           _aim.clear();
           _banner = '第 ${_data!['round']} 回合';
           _bannerT = 1.4;
@@ -130,6 +132,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
           _data = (r['state'] as Map).cast<String, dynamic>();
           final s = _sel;
           if (s != null && _towerAt(s.$1, s.$2) == null) _sel = null;
+          _moving = false;
         });
       }
     } catch (e) {
@@ -153,7 +156,19 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
     final spawn = (d['spawn'] as List).cast<int>(), goal = (d['goal'] as List).cast<int>();
     if ((x == spawn[0] && y == spawn[1]) || (x == goal[0] && y == goal[1])) return;
     if (_towerAt(x, y) != null) {
-      setState(() => _sel = (x, y));
+      setState(() {
+        _sel = (x, y);
+        _moving = false;
+      });
+      return;
+    }
+    final from = _sel;
+    if (_moving && from != null) {
+      _act(() async {
+        final r = await _api.tdMove(from.$1, from.$2, x, y);
+        if (r['ok'] == true) _sel = (x, y);
+        return r;
+      });
       return;
     }
     setState(() => _sel = null);
@@ -315,6 +330,12 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
         style: const TextStyle(color: Colors.white60, fontSize: 12),
       ),
       const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: _playing || _busy ? null : () => setState(() => _moving = !_moving),
+        icon: Icon(_moving ? Icons.close : Icons.open_with, size: 18),
+        label: Text(_moving ? '點空格子搬過去（再按取消）' : '搬移（免費）'),
+      ),
+      const SizedBox(height: 8),
       Row(children: [
         Expanded(
           child: FilledButton(
@@ -343,7 +364,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
             '• 怪物從左邊紅色入口出來，走到右邊藍色終點。每回合固定 20 隻，每 10 回合最後一隻是頭目。\n'
             '• 點下面的塔種類，再點地圖空格子蓋塔，花現金。塔會讓怪物繞路，把路擋成迷宮就能多打幾下。\n'
             '• 蓋塔要花現金（箭塔 50 萬、砲塔 100 萬、冰塔 200 萬）。升級塔的等級要花水晶（過關可得，也能在勇者頁分解裝備取得）。\n'
-            '• 點已蓋的塔可以升級或賣出（賣出拿回 70% 現金、50% 水晶）。\n'
+            '• 點已蓋的塔可以升級、免費搬到別格（蓋錯不用賣），或賣出（賣出拿回 70% 現金、50% 水晶）。\n'
             '• 路被完全堵死時，怪物會停下來打擋路的塔，塔被打爆就沒了；沒堵死就不會打塔。\n'
             '• 每漏掉一隻怪扣 1 生命。生命歸零＝回合失敗：塔不會爆掉，同一回合再來一次，但這次沒有水晶。\n'
             '• 過關後恢復 2 生命，並獲得水晶（頭目回合更多）。\n'

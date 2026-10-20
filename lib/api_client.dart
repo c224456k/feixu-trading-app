@@ -432,6 +432,9 @@ class ApiClient {
   Future<Map<String, dynamic>> tdSell(int x, int y) =>
       _post('/api/td/sell', {'x': x, 'y': y}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> tdMove(int x, int y, int nx, int ny) =>
+      _post('/api/td/move', {'x': x, 'y': y, 'nx': nx, 'ny': ny}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> tdStart() =>
       _post('/api/td/start', {}, (j) => j as Map<String, dynamic>, withAuth: true);
 
