@@ -420,6 +420,21 @@ class ApiClient {
   Future<Map<String, dynamic>> marketCancel(int listingId) =>
       _post('/api/market/cancel', {'listing_id': listingId}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  Future<Map<String, dynamic>> tdState() =>
+      _get('/api/td/state', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> tdBuild(String type, int x, int y) =>
+      _post('/api/td/build', {'type': type, 'x': x, 'y': y}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> tdUpgrade(int x, int y) =>
+      _post('/api/td/upgrade', {'x': x, 'y': y}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> tdSell(int x, int y) =>
+      _post('/api/td/sell', {'x': x, 'y': y}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> tdStart() =>
+      _post('/api/td/start', {}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<bool> healthCheck() async {
     final base = await _baseUrl();
     try {
