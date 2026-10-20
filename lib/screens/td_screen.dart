@@ -77,7 +77,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
     if (r != null && mounted) {
       final won = r['won'] == true;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(won ? '🎉 過關！擊殺 ${r['kills']} 隻、漏掉 ${r['leaks']} 隻，+${r['reward']} 金幣' : '💀 失敗，漏掉 ${r['leaks']} 隻。塔都還在，調整後再試'),
+        content: Text(won ? '🎉 過關！擊殺 ${r['kills']} 隻、漏掉 ${r['leaks']} 隻，+${r['reward']} 金幣、+${r['crystals']} 水晶' : '💀 失敗，漏掉 ${r['leaks']} 隻。塔都還在，調整後再試'),
       ));
     }
   }
@@ -186,6 +186,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
         _chip('❤️ ${d['lives']}/${d['max_lives']}', const Color(0xFFFF6B6B)),
         _chip('🪙 ${d['gold']}', const Color(0xFFFFE08A)),
         _chip('💎 ${d['crystals']}', const Color(0xFF8FD3FF)),
+        _chip('🍖 ${(d['meat'] as num).floor()}/${d['meat_max']}', const Color(0xFFFFA070)),
         _chip('最高 ${d['best_round']}', Colors.white54),
       ]),
     );
@@ -255,6 +256,9 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
           _towerPanel(tw, types),
         ],
         const Divider(height: 24),
+        Text('每回合消耗 ${d['meat_cost']} 塊肉（塔防自己的肉，每分鐘恢復 1 塊）。過關可得 ${d['crystal_reward']} 水晶。',
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 4),
         Text('下一回合：${nxt['band']}，${nxt['count']} 隻（每隻血量約 ${nxt['hp']}）${nxt['boss'] != null ? '，最後一隻頭目「${nxt['boss']}」' : ''}',
             style: const TextStyle(color: Colors.white70, fontSize: 13)),
         const SizedBox(height: 8),
@@ -321,7 +325,8 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
             '• 點已蓋的塔可以升級或賣出（賣出拿回 70% 金幣、50% 水晶）。\n'
             '• 路被完全堵死時，怪物會停下來打擋路的塔，塔被打爆就沒了；沒堵死就不會打塔。\n'
             '• 每漏掉一隻怪扣 1 生命。生命歸零＝回合失敗：塔不會爆掉，同一回合再來一次，但這次沒有金幣。\n'
-            '• 過關後恢復 2 生命。',
+            '• 過關後恢復 2 生命，並獲得水晶（頭目回合更多）。\n'
+            '• 每開始一回合消耗 10 塊肉，塔防有自己的肉（上限 60，每分鐘恢復 1 塊），跟百層塔的肉分開算。',
             style: TextStyle(fontSize: 13),
           ),
         ),
