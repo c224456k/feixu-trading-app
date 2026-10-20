@@ -86,7 +86,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
       _banner = won ? '🎉 過關！' : '💀 失敗';
       _bannerT = 2.2;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(won ? '🎉 過關！擊殺 ${r['kills']} 隻、漏掉 ${r['leaks']} 隻，+${r['reward']} 金幣、+${r['crystals']} 水晶' : '💀 失敗，漏掉 ${r['leaks']} 隻。塔都還在，調整後再試'),
+        content: Text(won ? '🎉 過關！擊殺 ${r['kills']} 隻、漏掉 ${r['leaks']} 隻，+${r['crystals']} 水晶' : '💀 失敗，漏掉 ${r['leaks']} 隻。塔都還在，調整後再試'),
       ));
     }
   }
@@ -184,6 +184,15 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
     );
   }
 
+  String _money(dynamic v) {
+    final n = (v as num).round();
+    if (n.abs() >= 10000) {
+      final w = n / 10000;
+      return '${w == w.roundToDouble() ? w.round() : w.toStringAsFixed(1)}萬';
+    }
+    return '$n';
+  }
+
   Widget _chip(String s, Color c) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(color: c.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(12), border: Border.all(color: c.withValues(alpha: 0.5))),
@@ -196,7 +205,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
       child: Wrap(spacing: 8, runSpacing: 6, children: [
         _chip('第 ${d['round']} 回合', const Color(0xFFFFD36B)),
         _chip('❤️ ${d['lives']}/${d['max_lives']}', const Color(0xFFFF6B6B)),
-        _chip('🪙 ${d['gold']}', const Color(0xFFFFE08A)),
+        _chip('💰 ${_money(d['cash'])}', const Color(0xFFFFE08A)),
         _chip('💎 ${d['crystals']}', const Color(0xFF8FD3FF)),
         _chip('🍖 ${(d['meat'] as num).floor()}/${d['meat_max']}', const Color(0xFFFFA070)),
         _chip('最高 ${d['best_round']}', Colors.white54),
@@ -255,7 +264,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
                   ),
                   child: Column(children: [
                     Text('${_towerIcons[k]} ${types[k]['name']}', style: const TextStyle(color: Colors.white, fontSize: 12)),
-                    Text('🪙 ${types[k]['cost']}', style: const TextStyle(color: Color(0xFFFFE08A), fontSize: 12)),
+                    Text('💰 ${_money(types[k]['cost'])}', style: const TextStyle(color: Color(0xFFFFE08A), fontSize: 12)),
                   ]),
                 ),
               ),
@@ -317,7 +326,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
         Expanded(
           child: OutlinedButton(
             onPressed: _playing || _busy ? null : () => _act(() => _api.tdSell(tw['x'] as int, tw['y'] as int)),
-            child: Text('賣出（🪙 ${tw['sell_gold']}${(tw['sell_crystals'] as int) > 0 ? '、💎 ${tw['sell_crystals']}' : ''}）'),
+            child: Text('賣出（💰 ${_money(tw['sell_gold'])}${(tw['sell_crystals'] as int) > 0 ? '、💎 ${tw['sell_crystals']}' : ''}）'),
           ),
         ),
       ]),
@@ -332,11 +341,11 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
         content: const SingleChildScrollView(
           child: Text(
             '• 怪物從左邊紅色入口出來，走到右邊藍色終點。每回合固定 20 隻，每 10 回合最後一隻是頭目。\n'
-            '• 點下面的塔種類，再點地圖空格子蓋塔，花金幣。塔會讓怪物繞路，把路擋成迷宮就能多打幾下。\n'
-            '• 金幣靠打怪和過關賺。升級塔的等級要花水晶（到勇者頁把用不到的裝備分解可得）。\n'
-            '• 點已蓋的塔可以升級或賣出（賣出拿回 70% 金幣、50% 水晶）。\n'
+            '• 點下面的塔種類，再點地圖空格子蓋塔，花現金。塔會讓怪物繞路，把路擋成迷宮就能多打幾下。\n'
+            '• 蓋塔要花現金（箭塔 50 萬、砲塔 100 萬、冰塔 200 萬）。升級塔的等級要花水晶（過關可得，也能在勇者頁分解裝備取得）。\n'
+            '• 點已蓋的塔可以升級或賣出（賣出拿回 70% 現金、50% 水晶）。\n'
             '• 路被完全堵死時，怪物會停下來打擋路的塔，塔被打爆就沒了；沒堵死就不會打塔。\n'
-            '• 每漏掉一隻怪扣 1 生命。生命歸零＝回合失敗：塔不會爆掉，同一回合再來一次，但這次沒有金幣。\n'
+            '• 每漏掉一隻怪扣 1 生命。生命歸零＝回合失敗：塔不會爆掉，同一回合再來一次，但這次沒有水晶。\n'
             '• 過關後恢復 2 生命，並獲得水晶（頭目回合更多）。\n'
             '• 每開始一回合消耗 10 塊肉，塔防有自己的肉（上限 60，每分鐘恢復 1 塊），跟百層塔的肉分開算。',
             style: TextStyle(fontSize: 13),
@@ -814,7 +823,6 @@ class _TdPainter extends CustomPainter {
                 final a2 = k * 0.9 + i;
                 canvas.drawCircle(pos + Offset(math.cos(a2), math.sin(a2) - e * 0.6) * cell * 0.5 * e, cell * 0.05 * (1 - e), Paint()..color = const Color(0xFFFFD54F).withValues(alpha: 1 - e));
               }
-              floats.add(_Float('+${mons[i]['gold']}', pos - Offset(0, cell * 0.4 + age * 36), age, const Color(0xFFFFE066), 13));
             } else if (m[0] == -2) {
               floats.add(_Float('-1 ❤️', Offset((d['goal'] as List)[0] * cell + cell * 0.5, ((d['goal'] as List)[1] as int) * cell - age * 30), age, const Color(0xFFFF5252), 14));
             }
