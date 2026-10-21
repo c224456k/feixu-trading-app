@@ -10,6 +10,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
 import '../widgets/monster_art.dart';
+import '../widgets/volley_audio.dart';
 
 // 怪物打排球：仿《皮卡丘打排球》的連線雙人對戰，角色是百層塔的原創怪物。
 // 物理全部在伺服器（25Hz），這裡只傳按鍵、把收到的位置補間畫出來。
@@ -66,6 +67,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   int _betNow = 0, _pointsNow = 11;
   Map<String, dynamic> _me = {}, _opp = {};
   List<int> _score = [0, 0];
+  List<int> _prevScore = [0, 0];
   int _server = 0;
   _Snap? _prev, _cur;
   Map<String, dynamic>? _endMsg;
@@ -92,6 +94,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
+    VolleyAudio.instance.enter();
     _connect();
     _inputTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (_phase == _Phase.playing) _sendInput(force: true);
@@ -104,6 +107,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   @override
   void dispose() {
     _closing = true;
+    VolleyAudio.instance.leave();
     _lobbyTimer?.cancel();
     _inputTimer?.cancel();
     _ticker.dispose();
@@ -179,6 +183,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           _phase = m['status'] == 'playing' ? _Phase.playing : _Phase.waiting;
         });
       case 'start':
+        VolleyAudio.instance.duck(true);
         setState(() {
           _phase = _Phase.playing;
           _side = m['side'] as int;
@@ -187,6 +192,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           _me = (m['me'] as Map).cast<String, dynamic>();
           _opp = (m['opp'] as Map).cast<String, dynamic>();
           _score = [0, 0];
+          _prevScore = [0, 0];
           _prev = _cur = null;
           _endMsg = null;
           _fx.clear();
@@ -197,6 +203,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
       case 's':
         _onFrame(m);
       case 'end':
+        VolleyAudio.instance.duck(false);
+        final ew = m['winner'] as int;
+        if (ew != -1) VolleyAudio.instance.play(ew == _side ? 'win' : 'lose', volume: 0.9);
         setState(() {
           _endMsg = m;
           _phase = _Phase.over;
@@ -230,13 +239,40 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     final hudChanged = scored || sv != _server;
     _score = sc;
     _server = sv;
+    final au = VolleyAudio.instance;
+    // 跳躍音：任一玩家從站立變成跳起
+    final pc = _cur?.p, pp = _prev?.p;
+    if (pc != null && pp != null) {
+      for (var i = 0; i < 2; i++) {
+        if (pp[i][2] == 0 && pc[i][2] == 1) au.play('jump', volume: i == _side ? 0.6 : 0.3);
+      }
+    }
     for (final e in ev) {
+      switch (e) {
+        case 1:
+          au.play('hit');
+        case 2:
+          au.play('spike');
+        case 3:
+          au.play('bounce', volume: 0.6);
+        case 4:
+          au.play('ground');
+        case 5:
+          au.play('whistle', volume: 0.7);
+        case 6:
+          au.play('dive', volume: 0.6);
+      }
       if (e == 1 || e == 2) _fx.add(_Fx(b[0], b[1], e));
       if (e == 2) _shake = 0.25;
       if (e == 4) _fx.add(_Fx(b[0], _floor - 6, 4));
       if (e == 5) _showBanner('開球！');
     }
-    if (scored) _showBanner('${sc[0]} : ${sc[1]}');
+    if (scored) {
+      _showBanner('${sc[0]} : ${sc[1]}');
+      final mineUp = sc[_side] > (_prevScore[_side]);
+      Future.delayed(const Duration(milliseconds: 250), () => au.play(mineUp ? 'point_win' : 'point_lose', volume: 0.8));
+    }
+    _prevScore = List<int>.from(sc);
     if (hudChanged && mounted) setState(() {});
   }
 
@@ -338,6 +374,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           title: const Text('🏐 怪物打排球'),
           backgroundColor: const Color(0xFF16263F),
           actions: [
+            const VolleyAudioButton(),
             if (_phase == _Phase.lobby || _phase == _Phase.waiting)
               Padding(padding: const EdgeInsets.only(right: 14), child: Center(child: Text('💰 ${_money.format(_cash)}', style: const TextStyle(fontWeight: FontWeight.bold)))),
           ],
