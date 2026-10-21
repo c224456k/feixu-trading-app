@@ -361,7 +361,7 @@ class _TdScreenState extends State<TdScreen> with SingleTickerProviderStateMixin
         title: const Text('塔防玩法'),
         content: const SingleChildScrollView(
           child: Text(
-            '• 怪物從左邊紅色入口出來，走到右邊藍色終點。每回合固定 20 隻，每 10 回合最後一隻是頭目。\n'
+            '• 怪物從左邊紅色入口出來，走到右邊藍色終點。每回合固定 40 隻，每 10 回合最後一隻是頭目。\n'
             '• 點下面的塔種類，再點地圖空格子蓋塔，花現金。塔會讓怪物繞路，把路擋成迷宮就能多打幾下。\n'
             '• 蓋塔要花現金（箭塔 50 萬、砲塔 100 萬、冰塔 200 萬）。升級塔的等級要花水晶（過關可得，也能在勇者頁分解裝備取得）。\n'
             '• 點已蓋的塔可以升級、免費搬到別格（蓋錯不用賣），或賣出（賣出拿回 70% 現金、50% 水晶）。\n'
@@ -419,6 +419,8 @@ class _TdPainter extends CustomPainter {
     final spawn = (d['spawn'] as List).cast<int>(), goal = (d['goal'] as List).cast<int>();
     _portal(canvas, spawn, clock);
     _castle(canvas, goal, clock);
+    _torch(canvas, Offset((spawn[0] + 0.1) * cell, (spawn[1] + 0.25) * cell), clock, 0);
+    _torch(canvas, Offset((spawn[0] + 0.1) * cell, (spawn[1] + 0.95) * cell), clock, 2);
 
     final sel = s._sel;
     final towers = (d['towers'] as List).cast<Map>();
@@ -472,6 +474,7 @@ class _TdPainter extends CustomPainter {
     if (frames != null && cur != null && nxt != null) {
       _monsters(canvas, d, towers, frames, fi, frac, cur, nxt);
     }
+    _vignette(canvas, size);
     // 橫幅
     if (s._bannerT > 0 && s._banner.isNotEmpty) {
       final a = (s._bannerT / 0.5).clamp(0.0, 1.0);
@@ -504,6 +507,19 @@ class _TdPainter extends CustomPainter {
         } else if (k < 0.55) {
           canvas.drawOval(Rect.fromCenter(center: Offset(ox, oy), width: cell * 0.16, height: cell * 0.1), Paint()..color = const Color(0xFF8E9A8A));
           canvas.drawOval(Rect.fromCenter(center: Offset(ox - 1, oy - 1), width: cell * 0.1, height: cell * 0.05), Paint()..color = const Color(0xFFB4BDB0));
+        } else if (k < 0.62) {
+          // 灌木叢
+          canvas.drawOval(Rect.fromCenter(center: Offset(ox, oy + cell * 0.03), width: cell * 0.26, height: cell * 0.07), Paint()..color = const Color(0x33000000));
+          for (final o in const [Offset(-0.07, 0), Offset(0.07, 0), Offset(0, -0.06)]) {
+            canvas.drawCircle(Offset(ox + o.dx * cell, oy + o.dy * cell), cell * 0.085, Paint()..color = const Color(0xFF2F6B2C));
+            canvas.drawCircle(Offset(ox + o.dx * cell - 1, oy + o.dy * cell - 2), cell * 0.05, Paint()..color = const Color(0xFF4E9446));
+          }
+        } else if (k < 0.66) {
+          // 蘑菇
+          canvas.drawRect(Rect.fromCenter(center: Offset(ox, oy + cell * 0.03), width: cell * 0.04, height: cell * 0.07), Paint()..color = const Color(0xFFF5E6CF));
+          canvas.drawArc(Rect.fromCenter(center: Offset(ox, oy), width: cell * 0.14, height: cell * 0.12), math.pi, math.pi, true, Paint()..color = const Color(0xFFE53935));
+          canvas.drawCircle(Offset(ox - cell * 0.025, oy - cell * 0.02), cell * 0.012, Paint()..color = Colors.white);
+          canvas.drawCircle(Offset(ox + cell * 0.03, oy - cell * 0.03), cell * 0.012, Paint()..color = Colors.white);
         }
       }
     }
@@ -515,6 +531,25 @@ class _TdPainter extends CustomPainter {
     for (var y = 1; y < rows; y++) {
       canvas.drawLine(Offset(0, y * cell), Offset(cols * cell, y * cell), gl);
     }
+  }
+
+  // 四周暈影，讓畫面更有層次
+  void _vignette(Canvas canvas, Size size) {
+    final r = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawRect(
+        r,
+        Paint()
+          ..shader = RadialGradient(radius: 0.85, colors: const [Color(0x00000000), Color(0x00000000), Color(0x55102010)], stops: const [0, 0.62, 1]).createShader(r));
+  }
+
+  // 火把（入口與終點兩側）
+  void _torch(Canvas canvas, Offset base, double clock, double seed) {
+    final flick = 0.85 + 0.15 * math.sin(clock * 12 + seed);
+    canvas.drawRect(Rect.fromCenter(center: base, width: cell * 0.05, height: cell * 0.22), Paint()..color = const Color(0xFF5D4037));
+    final fc = base - Offset(0, cell * 0.17);
+    canvas.drawCircle(fc, cell * 0.2 * flick, Paint()..shader = RadialGradient(colors: const [Color(0x55FFB74D), Color(0x00FFB74D)]).createShader(Rect.fromCircle(center: fc, radius: cell * 0.2 * flick)));
+    canvas.drawPath(Path()..moveTo(fc.dx - cell * 0.045, fc.dy + cell * 0.02)..quadraticBezierTo(fc.dx, fc.dy - cell * 0.15 * flick, fc.dx + cell * 0.045, fc.dy + cell * 0.02)..close(), Paint()..color = const Color(0xFFFF9800));
+    canvas.drawPath(Path()..moveTo(fc.dx - cell * 0.02, fc.dy + cell * 0.02)..quadraticBezierTo(fc.dx, fc.dy - cell * 0.07 * flick, fc.dx + cell * 0.02, fc.dy + cell * 0.02)..close(), Paint()..color = const Color(0xFFFFEE58));
   }
 
   // ---- 道路（目前最短路）----
@@ -529,6 +564,17 @@ class _TdPainter extends CustomPainter {
     canvas.drawPath(path, line(cell * 0.86, const Color(0xFF6E5233)));
     canvas.drawPath(path, line(cell * 0.74, const Color(0xFFB8955E)));
     canvas.drawPath(path, line(cell * 0.5, const Color(0xFFC9A66F)));
+    canvas.drawPath(path, line(cell * 0.06, const Color(0x22000000)));
+    // 路緣小草
+    for (var i = 0; i < pts.length; i++) {
+      final p = d['path'][i] as List;
+      for (var k = 0; k < 3; k++) {
+        final a = _hash(p[0] as int, p[1] as int, 40 + k) * math.pi * 2;
+        final c = pts[i] + Offset(math.cos(a), math.sin(a)) * cell * 0.4;
+        canvas.drawLine(c, c + Offset(0, -cell * 0.07), Paint()..color = const Color(0xFF6BAE55)..strokeWidth = 1.6..strokeCap = StrokeCap.round);
+        canvas.drawLine(c, c + Offset(cell * 0.03, -cell * 0.06), Paint()..color = const Color(0xFF5E9C4A)..strokeWidth = 1.4..strokeCap = StrokeCap.round);
+      }
+    }
     // 路面小石子
     for (var i = 0; i < pts.length; i++) {
       final p = d['path'][i] as List;
@@ -568,16 +614,37 @@ class _TdPainter extends CustomPainter {
 
   // ---- 終點：城堡 ----
   void _castle(Canvas canvas, List<int> p, double clock) {
+    final c = Offset((p[0] + 0.5) * cell, (p[1] + 0.55) * cell);
+    canvas.drawCircle(c, cell * 0.7, Paint()..shader = RadialGradient(colors: const [Color(0x3329B6F6), Color(0x0029B6F6)]).createShader(Rect.fromCircle(center: c, radius: cell * 0.7)));
     _unit(canvas, p[0].toDouble(), p[1].toDouble(), () {
-      canvas.drawRect(const Rect.fromLTWH(0.1, 0.35, 0.8, 0.6), Paint()..color = const Color(0xFF9AA3B0));
-      canvas.drawRect(const Rect.fromLTWH(0.1, 0.35, 0.8, 0.6), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.025..color = const Color(0xFF4A5260));
-      for (final x in [0.1, 0.32, 0.54, 0.76]) {
-        canvas.drawRect(Rect.fromLTWH(x, 0.27, 0.14, 0.1), Paint()..color = const Color(0xFFB5BDC9));
+      canvas.drawOval(const Rect.fromLTWH(0.0, 0.84, 1.0, 0.16), Paint()..color = const Color(0x55000000));
+      // 左右塔樓
+      for (final x in [0.06, 0.72]) {
+        canvas.drawRect(Rect.fromLTWH(x, 0.2, 0.22, 0.74), Paint()..color = const Color(0xFFA7B0BE));
+        canvas.drawRect(Rect.fromLTWH(x, 0.2, 0.22, 0.74), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.02..color = const Color(0xFF4A5260));
+        canvas.drawPath(Path()..moveTo(x - 0.03, 0.2)..lineTo(x + 0.11, -0.04)..lineTo(x + 0.25, 0.2)..close(), Paint()..color = const Color(0xFF1E88E5));
+        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x + 0.07, 0.34, 0.08, 0.14), const Radius.circular(0.04)), Paint()..color = const Color(0xFFFFE082));
       }
-      canvas.drawRRect(RRect.fromRectAndCorners(const Rect.fromLTWH(0.38, 0.58, 0.24, 0.37), topLeft: const Radius.circular(0.12), topRight: const Radius.circular(0.12)), Paint()..color = const Color(0xFF4E342E));
-      canvas.drawLine(const Offset(0.5, 0.27), const Offset(0.5, 0.04), Paint()..color = const Color(0xFF5D4037)..strokeWidth = 0.03);
+      // 城牆
+      canvas.drawRect(const Rect.fromLTWH(0.24, 0.4, 0.52, 0.54), Paint()..color = const Color(0xFF9AA3B0));
+      canvas.drawRect(const Rect.fromLTWH(0.24, 0.4, 0.52, 0.54), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.02..color = const Color(0xFF4A5260));
+      for (final x in [0.24, 0.38, 0.52, 0.66]) {
+        canvas.drawRect(Rect.fromLTWH(x, 0.33, 0.1, 0.09), Paint()..color = const Color(0xFFB5BDC9));
+      }
+      for (var r = 0; r < 4; r++) {
+        for (var q = 0; q < 3; q++) {
+          canvas.drawLine(Offset(0.26 + q * 0.17 + (r.isEven ? 0 : 0.08), 0.46 + r * 0.11), Offset(0.34 + q * 0.17 + (r.isEven ? 0 : 0.08), 0.46 + r * 0.11), Paint()..color = const Color(0x22000000)..strokeWidth = 0.012);
+        }
+      }
+      // 發光城門
+      final gate = RRect.fromRectAndCorners(const Rect.fromLTWH(0.4, 0.6, 0.2, 0.34), topLeft: const Radius.circular(0.1), topRight: const Radius.circular(0.1));
+      canvas.drawRRect(gate, Paint()..color = const Color(0xFF4E342E));
+      canvas.drawRRect(RRect.fromRectAndCorners(const Rect.fromLTWH(0.43, 0.64, 0.14, 0.3), topLeft: const Radius.circular(0.07), topRight: const Radius.circular(0.07)), Paint()..color = Color.fromRGBO(255, 214, 120, 0.55 + 0.2 * math.sin(clock * 3)));
+      // 旗幟
+      canvas.drawLine(const Offset(0.5, 0.33), const Offset(0.5, 0.02), Paint()..color = const Color(0xFF5D4037)..strokeWidth = 0.03);
       final wave = math.sin(clock * 5) * 0.03;
-      canvas.drawPath(Path()..moveTo(0.5, 0.04)..lineTo(0.78, 0.11 + wave)..lineTo(0.5, 0.18)..close(), Paint()..color = const Color(0xFF29B6F6));
+      canvas.drawPath(Path()..moveTo(0.5, 0.02)..quadraticBezierTo(0.64, 0.0 + wave, 0.8, 0.07 + wave)..quadraticBezierTo(0.64, 0.1 - wave, 0.5, 0.15)..close(), Paint()..color = const Color(0xFF29B6F6));
+      _star(canvas, const Offset(0.62, 0.075), 0.03, const Color(0xFFFFF59D));
     });
   }
 
@@ -596,6 +663,17 @@ class _TdPainter extends CustomPainter {
       }
       if (selected) {
         canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(0.06, 0.04, 0.88, 0.9), const Radius.circular(0.1)), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.04..color = const Color(0xFFFFD36B));
+      }
+      if (lv >= 5) {
+        final pulse = 0.5 + 0.5 * math.sin(clock * 3);
+        final auraC = lv >= 6 ? const Color(0xFFFFD54F) : const Color(0xFFB39DDB);
+        canvas.drawCircle(const Offset(0.5, 0.5), 0.5, Paint()..shader = RadialGradient(colors: [auraC.withValues(alpha: 0.18 + 0.16 * pulse), auraC.withValues(alpha: 0)]).createShader(Rect.fromCircle(center: const Offset(0.5, 0.5), radius: 0.5)));
+        if (lv >= 6) {
+          for (var i = 0; i < 4; i++) {
+            final a = clock * 1.5 + i * math.pi / 2;
+            canvas.drawCircle(Offset(0.5 + math.cos(a) * 0.4, 0.5 + math.sin(a) * 0.3), 0.018, Paint()..color = const Color(0xFFFFF59D));
+          }
+        }
       }
       switch (type) {
         case 'arrow':
@@ -638,11 +716,19 @@ class _TdPainter extends CustomPainter {
       c.drawLine(Offset(0.34 + i * 0.01, 0.66 - h * i / 3), Offset(0.66 - i * 0.01, 0.66 - h * i / 3), Paint()..color = dark..strokeWidth = 0.015);
     }
     final top = 0.66 - h;
+    for (var i = 0; i < 3; i++) {
+      c.drawLine(Offset(0.33 + i * 0.04, 0.66 - h * 0.1), Offset(0.4 + i * 0.03, 0.66 - h * 0.95), Paint()..color = const Color(0x22000000)..strokeWidth = 0.01);
+    }
     // 平台與屋頂
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0.3, top - 0.05, 0.4, 0.07), const Radius.circular(0.02)), Paint()..color = dark);
     final roof = lv >= 5 ? const Color(0xFFFFB300) : lv >= 3 ? const Color(0xFF2E7D32) : const Color(0xFFC62828);
     c.drawPath(Path()..moveTo(0.26, top - 0.05)..lineTo(0.5, top - 0.27)..lineTo(0.74, top - 0.05)..close(), Paint()..color = roof);
     c.drawPath(Path()..moveTo(0.26, top - 0.05)..lineTo(0.5, top - 0.27)..lineTo(0.74, top - 0.05)..close(), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.015..color = Colors.black54);
+    // 弓箭手
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0.44, top - 0.16, 0.12, 0.12), const Radius.circular(0.03)), Paint()..color = const Color(0xFF3949AB));
+    c.drawCircle(Offset(0.5, top - 0.2), 0.045, Paint()..color = const Color(0xFFFFCCBC));
+    c.drawPath(Path()..moveTo(0.44, top - 0.21)..lineTo(0.5, top - 0.3)..lineTo(0.56, top - 0.21)..close(), Paint()..color = const Color(0xFF2E7D32));
+    c.drawRect(Rect.fromLTWH(0.58, top - 0.16, 0.035, 0.1), Paint()..color = const Color(0xFF6D4C41));
     // 弓（朝向目標）
     c.save();
     c.translate(0.5, top - 0.09);
@@ -666,6 +752,18 @@ class _TdPainter extends CustomPainter {
     for (var i = 0; i < 3; i++) {
       c.drawRect(Rect.fromLTWH(0.24 + i * 0.2, 0.66 - bodyH - 0.05, 0.12, 0.06), Paint()..color = stone);
     }
+    for (final x in [0.3, 0.7]) {
+      c.drawCircle(Offset(x, 0.62), 0.07, Paint()..color = const Color(0xFF4E342E));
+      c.drawCircle(Offset(x, 0.62), 0.07, Paint()..style = PaintingStyle.stroke..strokeWidth = 0.015..color = Colors.black87);
+      for (var i = 0; i < 4; i++) {
+        final a = i * math.pi / 4;
+        c.drawLine(Offset(x - math.cos(a) * 0.06, 0.62 - math.sin(a) * 0.06), Offset(x + math.cos(a) * 0.06, 0.62 + math.sin(a) * 0.06), Paint()..color = const Color(0xFF8D6E63)..strokeWidth = 0.012);
+      }
+    }
+    for (final o in const [Offset(0.8, 0.84), Offset(0.88, 0.84), Offset(0.84, 0.78)]) {
+      c.drawCircle(o, 0.032, Paint()..color = const Color(0xFF212121));
+      c.drawCircle(o - const Offset(0.01, 0.01), 0.01, Paint()..color = const Color(0xFF757575));
+    }
     final pivot = Offset(0.5, 0.66 - bodyH - 0.01);
     c.save();
     c.translate(pivot.dx, pivot.dy);
@@ -673,7 +771,9 @@ class _TdPainter extends CustomPainter {
     final len = 0.22 + lv * 0.03 - fire * 0.04;
     final w = 0.09 + lv * 0.01;
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(-0.04, -w, len, w * 2), const Radius.circular(0.03)), Paint()..color = const Color(0xFF263238));
-    c.drawRect(Rect.fromLTWH(len - 0.1, -w - 0.015, 0.045, w * 2 + 0.03), Paint()..color = const Color(0xFF455A64));
+    c.drawRect(Rect.fromLTWH(len - 0.1, -w - 0.015, 0.045, w * 2 + 0.03), Paint()..color = lv >= 4 ? const Color(0xFFFFC107) : const Color(0xFF455A64));
+    c.drawRect(Rect.fromLTWH(len * 0.35, -w - 0.01, 0.035, w * 2 + 0.02), Paint()..color = lv >= 4 ? const Color(0xFFFFC107) : const Color(0xFF455A64));
+    c.drawRect(Rect.fromLTWH(0.02, -w * 0.55, len - 0.06, w * 0.3), Paint()..color = const Color(0x33FFFFFF));
     c.drawCircle(Offset.zero, w * 1.15, Paint()..color = const Color(0xFF37474F));
     if (fire > 0.4) {
       final f = (fire - 0.4) / 0.6;
@@ -689,6 +789,8 @@ class _TdPainter extends CustomPainter {
     final cc = const Offset(0.5, 0.5);
     c.drawCircle(cc, 0.34, Paint()..shader = RadialGradient(colors: [Color.fromRGBO(129, 212, 250, 0.35 + 0.25 * glow.clamp(0, 1)), const Color(0x0081D4FA)]).createShader(Rect.fromCircle(center: cc, radius: 0.34)));
     c.drawPath(Path()..moveTo(0.3, 0.66)..lineTo(0.7, 0.66)..lineTo(0.62, 0.55)..lineTo(0.38, 0.55)..close(), Paint()..color = const Color(0xFF90A4AE));
+    c.drawPath(Path()..moveTo(0.3, 0.66)..lineTo(0.7, 0.66)..lineTo(0.62, 0.55)..lineTo(0.38, 0.55)..close(), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.015..color = const Color(0xFF455A64));
+    c.drawLine(const Offset(0.36, 0.6), const Offset(0.64, 0.6), Paint()..color = const Color(0xFFB3E5FC)..strokeWidth = 0.012);
     // 水晶叢（等級越高越多越高）
     final shards = [
       (0.5, 0.18 + lv * 0.04, 0.09, 0.0),
@@ -697,6 +799,11 @@ class _TdPainter extends CustomPainter {
       (0.3, 0.08, 0.045, -0.5),
       (0.7, 0.08, 0.045, 0.5),
     ];
+    // 繞行的雪花
+    for (var i = 0; i < (lv >= 4 ? 3 : (lv >= 2 ? 2 : 1)); i++) {
+      final a = clock * 1.8 + i * math.pi * 2 / 3;
+      _snowflake(c, Offset(0.5 + math.cos(a) * 0.36, 0.34 + math.sin(a) * 0.1), 0.04, clock * 2 + i, const Color(0xCCE1F5FE));
+    }
     for (var i = 0; i < math.min(shards.length, 2 + lv); i++) {
       final (x, h, w, rot) = shards[i];
       c.save();
@@ -707,6 +814,14 @@ class _TdPainter extends CustomPainter {
       c.drawPath(p, Paint()..style = PaintingStyle.stroke..strokeWidth = 0.012..color = const Color(0xFF0277BD));
       c.drawLine(const Offset(0, 0), Offset(0, -h - 0.15), Paint()..color = Colors.white54..strokeWidth = 0.01);
       c.restore();
+    }
+  }
+
+  void _snowflake(Canvas c, Offset o, double r, double rot, Color col) {
+    final p = Paint()..color = col..strokeWidth = r * 0.28..strokeCap = StrokeCap.round;
+    for (var i = 0; i < 3; i++) {
+      final a = rot + i * math.pi / 3;
+      c.drawLine(o + Offset(math.cos(a), math.sin(a)) * r, o - Offset(math.cos(a), math.sin(a)) * r, p);
     }
   }
 
