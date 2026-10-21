@@ -438,6 +438,16 @@ class ApiClient {
   Future<Map<String, dynamic>> tdStart() =>
       _post('/api/td/start', {}, (j) => j as Map<String, dynamic>, withAuth: true);
 
+  /// 怪物打排球的 WebSocket 連線資訊：(wss 網址, API key, 登入 token)。
+  Future<(String, String, String)> volleyConnectInfo() async {
+    final base = await _baseUrl();
+    final key = await _settings.getApiKey() ?? '';
+    final token = await _settings.getToken() ?? '';
+    if (token.isEmpty) throw ApiException('登入已過期，請重新登入', isAuthError: true);
+    final ws = base.replaceFirst(RegExp(r'^http'), 'ws');
+    return ('$ws/ws/volley', key, token);
+  }
+
   Future<bool> healthCheck() async {
     final base = await _baseUrl();
     try {

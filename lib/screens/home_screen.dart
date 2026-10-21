@@ -13,6 +13,7 @@ import 'casino_screen.dart';
 import 'hero_screen.dart';
 import 'leaderboard_screen.dart';
 import 'td_screen.dart';
+import 'volley_screen.dart';
 import 'fx_screen.dart';
 
 // 台股習慣：紅漲、綠跌（跟美股相反），這個 App 是給台灣玩家用的，顏色要照這個規則，
@@ -152,6 +153,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.castle),
             tooltip: '塔防',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const VolleyScreen()),
+            ),
+            icon: const Icon(Icons.sports_volleyball),
+            tooltip: '怪物打排球',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
