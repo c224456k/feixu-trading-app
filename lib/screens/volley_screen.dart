@@ -342,6 +342,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   }
 
   // ---------------------------------------------------------------- 動作
+  void _createBot(int level) => _send({'t': 'create_bot', 'level': level, 'points': _points, 'kind': _myKind, 'band': _myBand});
   void _create() => _send({'t': 'create', 'bet': _bet, 'points': _points, 'kind': _myKind, 'band': _myBand});
   void _join(Map room) => _send({'t': 'join', 'room': room['id'], 'kind': _myKind, 'band': _myBand});
 
@@ -431,6 +432,26 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     return ListView(padding: const EdgeInsets.all(12), children: [
       if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))),
       _monsterPicker(),
+      const SizedBox(height: 8),
+      Card(
+        color: const Color(0xFF16263F),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('跟電腦對戰（練習用，不賭錢、不計戰績）', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, children: [
+              for (final p in const [7, 11, 15]) ChoiceChip(label: Text('先得 $p 分'), selected: _points == p, onSelected: (_) => setState(() => _points = p)),
+            ]),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, runSpacing: 4, children: [
+              OutlinedButton.icon(onPressed: () => _createBot(0), icon: const Icon(Icons.smart_toy_outlined), label: const Text('新手')),
+              OutlinedButton.icon(onPressed: () => _createBot(1), icon: const Icon(Icons.smart_toy_outlined), label: const Text('普通')),
+              FilledButton.icon(onPressed: () => _createBot(2), icon: const Icon(Icons.smart_toy), label: const Text('高手')),
+            ]),
+          ]),
+        ),
+      ),
       const SizedBox(height: 8),
       Card(
         color: const Color(0xFF16263F),
