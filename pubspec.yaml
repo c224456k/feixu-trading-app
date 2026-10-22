@@ -69,6 +69,18 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    - assets/audio/volley_theme.mp3
+    - assets/audio/volley_hit.mp3
+    - assets/audio/volley_spike.mp3
+    - assets/audio/volley_bounce.mp3
+    - assets/audio/volley_ground.mp3
+    - assets/audio/volley_whistle.mp3
+    - assets/audio/volley_dive.mp3
+    - assets/audio/volley_jump.mp3
+    - assets/audio/volley_point_win.mp3
+    - assets/audio/volley_point_lose.mp3
+    - assets/audio/volley_win.mp3
+    - assets/audio/volley_lose.mp3
     - assets/audio/casino_swing.mp3
     - assets/audio/chip.mp3
     - assets/audio/chipdrop.mp3

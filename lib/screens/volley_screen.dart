@@ -73,6 +73,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   Map<String, dynamic>? _endMsg;
   final List<_Fx> _fx = [];
   double _shake = 0;
+  double _netShake = 0;
   String _banner = '';
   double _bannerT = 0;
   double _ballAng = 0;
@@ -255,6 +256,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           au.play('spike');
         case 3:
           au.play('bounce', volume: 0.6);
+          if ((b[0] - _netX).abs() < 40) _netShake = 1;
         case 4:
           au.play('ground');
         case 5:
@@ -310,6 +312,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     _clock += dt;
     if (_bannerT > 0) _bannerT -= dt;
     if (_shake > 0) _shake -= dt;
+    if (_netShake > 0) _netShake = math.max(0, _netShake - dt * 1.6);
     for (final f in _fx) {
       f.age += dt;
     }
@@ -668,57 +671,180 @@ class _VolleyPainter extends CustomPainter {
     t.paint(canvas, Offset(center.dx - t.width / 2, center.dy - t.height / 2));
   }
 
+  Paint _fill(Color c) => Paint()..color = c;
+
   void _background(Canvas canvas) {
-    final sky = const Rect.fromLTWH(0, 0, _cw, _floor);
-    canvas.drawRect(sky, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF3FA9F5), Color(0xFF9BD8FF), Color(0xFFFFF0C9)]).createShader(sky));
-    // 太陽
-    canvas.drawCircle(const Offset(360, 56), 46, Paint()..shader = const RadialGradient(colors: [Color(0x99FFF59D), Color(0x00FFF59D)]).createShader(Rect.fromCircle(center: const Offset(360, 56), radius: 46)));
-    canvas.drawCircle(const Offset(360, 56), 17, Paint()..color = const Color(0xFFFFEB3B));
-    // 遠山
-    final hills = Path()..moveTo(0, 215);
-    for (var x = 0.0; x <= _cw; x += 12) {
-      hills.lineTo(x, 200 - 22 * math.sin(x / 70 + 1) - 12 * math.sin(x / 26));
+    final clock = s._clock;
+    // 天空
+    final sky = const Rect.fromLTWH(0, 0, _cw, 190);
+    canvas.drawRect(sky, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2F95E8), Color(0xFF7CCBFF), Color(0xFFFFF3D0)]).createShader(sky));
+    canvas.drawCircle(const Offset(352, 62), 60, Paint()..shader = const RadialGradient(colors: [Color(0xAAFFF59D), Color(0x00FFF59D)]).createShader(Rect.fromCircle(center: const Offset(352, 62), radius: 60)));
+    canvas.drawCircle(const Offset(352, 62), 18, _fill(const Color(0xFFFFEB3B)));
+    canvas.drawCircle(const Offset(352, 62), 14, _fill(const Color(0xFFFFF59D)));
+    // 雲
+    for (var i = 0; i < 5; i++) {
+      final x = ((_h(i, 1) * _cw + clock * (3 + i * 1.6)) % (_cw + 140)) - 70;
+      final y = 18 + _h(i, 2) * 80;
+      final sc = 0.7 + _h(i, 3) * 0.7;
+      final cp = _fill(Colors.white.withValues(alpha: 0.92));
+      final sh = _fill(const Color(0x1A4A7BB0));
+      canvas.drawOval(Rect.fromCenter(center: Offset(x, y + 5 * sc), width: 70 * sc, height: 14 * sc), sh);
+      canvas.drawOval(Rect.fromCenter(center: Offset(x, y), width: 66 * sc, height: 20 * sc), cp);
+      canvas.drawOval(Rect.fromCenter(center: Offset(x - 15 * sc, y - 7 * sc), width: 36 * sc, height: 24 * sc), cp);
+      canvas.drawOval(Rect.fromCenter(center: Offset(x + 12 * sc, y - 10 * sc), width: 32 * sc, height: 24 * sc), cp);
     }
-    hills..lineTo(_cw, _floor)..lineTo(0, _floor)..close();
-    canvas.drawPath(hills, Paint()..color = const Color(0xFF6FB48B));
-    final hills2 = Path()..moveTo(0, 230);
-    for (var x = 0.0; x <= _cw; x += 12) {
-      hills2.lineTo(x, 224 - 14 * math.sin(x / 55 + 3) - 8 * math.sin(x / 19));
+    // 海鷗
+    for (var i = 0; i < 3; i++) {
+      final x = ((i * 150 + clock * (14 + i * 4)) % (_cw + 60)) - 30;
+      final y = 60 + i * 22 + math.sin(clock * 1.5 + i) * 6;
+      final flap = math.sin(clock * 7 + i * 2) * 4;
+      canvas.drawPath(Path()..moveTo(x - 7, y + flap)..quadraticBezierTo(x - 3, y - 3, x, y)..quadraticBezierTo(x + 3, y - 3, x + 7, y + flap), Paint()..style = PaintingStyle.stroke..strokeWidth = 1.5..color = const Color(0xFF37474F)..strokeCap = StrokeCap.round);
     }
-    hills2..lineTo(_cw, _floor)..lineTo(0, _floor)..close();
-    canvas.drawPath(hills2, Paint()..color = const Color(0xFF4E9E6B));
-    // 雲（緩慢飄）
-    for (var i = 0; i < 4; i++) {
-      final x = ((_h(i, 1) * _cw + s._clock * (4 + i * 2)) % (_cw + 120)) - 60;
-      final y = 26 + _h(i, 2) * 70;
-      final cp = Paint()..color = Colors.white.withValues(alpha: 0.9);
-      canvas.drawOval(Rect.fromCenter(center: Offset(x, y), width: 62, height: 20), cp);
-      canvas.drawOval(Rect.fromCenter(center: Offset(x - 14, y - 7), width: 34, height: 22), cp);
-      canvas.drawOval(Rect.fromCenter(center: Offset(x + 12, y - 9), width: 30, height: 22), cp);
+    // 海（地平線 150 ~ 205）
+    final sea = const Rect.fromLTWH(0, 148, _cw, 62);
+    canvas.drawRect(sea, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1E88B8), Color(0xFF2FB5C9), Color(0xFF7BE0D8)]).createShader(sea));
+    // 太陽的反光
+    for (var i = 0; i < 9; i++) {
+      final y = 152 + i * 6.0;
+      final w = 18 + i * 3.5 + math.sin(clock * 3 + i) * 3;
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(352 + math.sin(clock * 2 + i * 1.7) * 4, y), width: w, height: 1.8), const Radius.circular(1)), _fill(Colors.white.withValues(alpha: 0.5 - i * 0.04)));
     }
+    // 浪紋
+    for (var i = 0; i < 26; i++) {
+      final x = (_h(i, 7) * _cw + clock * (3 + _h(i, 8) * 5)) % _cw;
+      final y = 156 + _h(i, 9) * 50;
+      canvas.drawLine(Offset(x, y), Offset(x + 6 + _h(i, 10) * 8, y), Paint()..color = Colors.white.withValues(alpha: 0.25 + 0.2 * math.sin(clock * 2 + i))..strokeWidth = 1.2..strokeCap = StrokeCap.round);
+    }
+    // 帆船
+    final bx = 90 + math.sin(clock * 0.15) * 20;
+    canvas.drawPath(Path()..moveTo(bx - 14, 162)..lineTo(bx + 14, 162)..lineTo(bx + 9, 168)..lineTo(bx - 9, 168)..close(), _fill(const Color(0xFF6D4C41)));
+    canvas.drawPath(Path()..moveTo(bx, 160)..lineTo(bx, 140)..lineTo(bx + 12, 158)..close(), _fill(Colors.white));
+    canvas.drawPath(Path()..moveTo(bx - 1, 160)..lineTo(bx - 1, 144)..lineTo(bx - 10, 158)..close(), _fill(const Color(0xFFFFCDD2)));
+    // 遠方小島
+    final isl = Path()..moveTo(250, 150)..quadraticBezierTo(272, 128, 296, 150)..close();
+    canvas.drawPath(isl, _fill(const Color(0xFF3F8F6B)));
+    canvas.drawPath(Path()..moveTo(262, 150)..quadraticBezierTo(272, 136, 282, 150)..close(), _fill(const Color(0xFF2F7A57)));
+    // 後方沙灘（較淺）
+    final back = const Rect.fromLTWH(0, 205, _cw, 65);
+    canvas.drawRect(back, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFFF0C4), Color(0xFFF2D89C)]).createShader(back));
+    canvas.drawPath(Path()..moveTo(0, 205)..quadraticBezierTo(60, 200, 130, 206)..quadraticBezierTo(250, 212, 330, 204)..quadraticBezierTo(390, 200, _cw, 205)..lineTo(_cw, 210)..lineTo(0, 210)..close(), _fill(Colors.white.withValues(alpha: 0.6)));
+    // 遮陽傘、救生椅
+    _parasol(canvas, 62, 232, const Color(0xFFE53935));
+    _parasol(canvas, 372, 236, const Color(0xFF1E88E5));
+    _lifeguard(canvas, 300, 232);
+    // 觀眾
+    for (var i = 0; i < 16; i++) {
+      final x = 118 + i * 14.0 + (_h(i, 21) - 0.5) * 6;
+      if ((x > 190 && x < 250) || (x > 285 && x < 318)) continue;
+      final bob = math.max(0.0, math.sin(clock * (4 + _h(i, 22) * 3) + i * 1.3)) * (s._cur != null ? 3 : 1);
+      const skin = [Color(0xFFFFCCBC), Color(0xFFD7A57C), Color(0xFFF1B98F)];
+      final cols = [const Color(0xFFEF5350), const Color(0xFF42A5F5), const Color(0xFFFFCA28), const Color(0xFF66BB6A), const Color(0xFFAB47BC)];
+      final y = 246 + (_h(i, 23) - 0.5) * 6 - bob;
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(x, y + 6), width: 8, height: 11), const Radius.circular(3)), _fill(cols[i % 5]));
+      canvas.drawCircle(Offset(x, y - 1), 4, _fill(skin[i % 3]));
+      if (i % 4 == 0) canvas.drawCircle(Offset(x + 2, y - 7), 2.2, _fill(const Color(0xFFFFCA28)));
+    }
+    // 棕櫚樹
+    _palm(canvas, 22, 245, 78, 1, clock);
+    _palm(canvas, 410, 248, 70, -1, clock + 1.3);
+  }
+
+  void _parasol(Canvas canvas, double x, double y, Color c) {
+    canvas.drawLine(Offset(x, y - 26), Offset(x + 1, y + 6), Paint()..color = const Color(0xFF8D6E63)..strokeWidth = 2);
+    final p = Path()..moveTo(x - 24, y - 24)..quadraticBezierTo(x, y - 52, x + 24, y - 24)..close();
+    canvas.drawPath(p, _fill(c));
+    canvas.save();
+    canvas.clipPath(p);
+    for (var i = -2; i <= 2; i++) {
+      canvas.drawLine(Offset(x + i * 9, y - 52), Offset(x + i * 5, y - 24), Paint()..color = Colors.white.withValues(alpha: 0.55)..strokeWidth = 5);
+    }
+    canvas.restore();
+    canvas.drawOval(Rect.fromCenter(center: Offset(x + 6, y + 7), width: 36, height: 6), _fill(const Color(0x22000000)));
+  }
+
+  void _lifeguard(Canvas canvas, double x, double y) {
+    canvas.drawRect(Rect.fromLTWH(x - 10, y - 14, 3, 18), _fill(const Color(0xFF8D6E63)));
+    canvas.drawRect(Rect.fromLTWH(x + 7, y - 14, 3, 18), _fill(const Color(0xFF8D6E63)));
+    canvas.drawRect(Rect.fromLTWH(x - 13, y - 18, 26, 5), _fill(const Color(0xFFFFFFFF)));
+    canvas.drawRect(Rect.fromLTWH(x - 13, y - 18, 26, 2), _fill(const Color(0xFFEF5350)));
+    canvas.drawRect(Rect.fromLTWH(x - 9, y - 32, 18, 14), _fill(const Color(0xFFFFF8E1)));
+    canvas.drawPath(Path()..moveTo(x - 12, y - 32)..lineTo(x, y - 41)..lineTo(x + 12, y - 32)..close(), _fill(const Color(0xFFEF5350)));
+    canvas.drawRect(Rect.fromLTWH(x - 5, y - 29, 10, 6), _fill(const Color(0xFF81D4FA)));
+  }
+
+  void _palm(Canvas canvas, double x, double y, double h, double dir, double clock) {
+    final sway = math.sin(clock * 1.2) * 3;
+    final top = Offset(x + dir * 14 + sway * 0.5, y - h);
+    final trunk = Path()..moveTo(x - 4, y)..quadraticBezierTo(x + dir * 2, y - h * 0.5, top.dx - 2, top.dy)..lineTo(top.dx + 2, top.dy)..quadraticBezierTo(x + dir * 6, y - h * 0.5, x + 4, y)..close();
+    canvas.drawPath(trunk, _fill(const Color(0xFF8D6E63)));
+    for (var i = 1; i < 7; i++) {
+      final f = i / 7;
+      final px = x + dir * 8 * f * f + sway * 0.5 * f, py = y - h * f;
+      canvas.drawLine(Offset(px - 4, py), Offset(px + 4, py - 1.5), Paint()..color = const Color(0x44000000)..strokeWidth = 1);
+    }
+    canvas.drawOval(Rect.fromCenter(center: Offset(x + 6, y + 2), width: 40, height: 7), _fill(const Color(0x22000000)));
+    for (var i = 0; i < 7; i++) {
+      final a = -math.pi * 0.95 + i * (math.pi * 0.9 / 6) + sway * 0.01;
+      final len = 36.0 + (i == 3 ? 6 : 0);
+      final tip = top + Offset(math.cos(a) * len, math.sin(a) * len * 0.6 + len * 0.28);
+      final mid = top + Offset(math.cos(a) * len * 0.55, math.sin(a) * len * 0.75 - 4);
+      final leaf = Path()..moveTo(top.dx, top.dy)..quadraticBezierTo(mid.dx, mid.dy - 4, tip.dx, tip.dy)..quadraticBezierTo(mid.dx, mid.dy + 5, top.dx, top.dy);
+      canvas.drawPath(leaf, _fill(i.isEven ? const Color(0xFF2E7D32) : const Color(0xFF43A047)));
+    }
+    canvas.drawCircle(top + const Offset(-2, 3), 3.2, _fill(const Color(0xFF6D4C41)));
+    canvas.drawCircle(top + const Offset(3, 4), 3.2, _fill(const Color(0xFF5D4037)));
   }
 
   void _court(Canvas canvas) {
-    // 沙地球場
+    // 沙地球場（前景）
     final g = Rect.fromLTWH(0, _floor, _cw, _courtH - _floor);
-    canvas.drawRect(g, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFF1D79A), Color(0xFFD9B873)]).createShader(g));
-    for (var i = 0; i < 40; i++) {
-      canvas.drawCircle(Offset(_h(i, 5) * _cw, _floor + 3 + _h(i, 6) * (_courtH - _floor - 5)), 0.9, Paint()..color = const Color(0x33806040));
+    canvas.drawRect(g, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFF3D99B), Color(0xFFD8B46C)]).createShader(g));
+    for (var i = 0; i < 70; i++) {
+      canvas.drawCircle(Offset(_h(i, 5) * _cw, _floor + 2 + _h(i, 6) * (_courtH - _floor - 3)), 0.5 + _h(i, 12) * 0.8, Paint()..color = (i % 3 == 0 ? const Color(0x55FFFFFF) : const Color(0x33806040)));
     }
-    canvas.drawLine(const Offset(0, _floor), const Offset(_cw, _floor), Paint()..color = Colors.white..strokeWidth = 2);
-    // 網：柱子 + 網格
-    final post = Paint()..color = const Color(0xFF5D4037);
-    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(_netX - 4, _netTop - 6, 8, _floor - _netTop + 8), const Radius.circular(3)), post);
-    final mesh = Paint()..color = const Color(0xCCFFFFFF)..strokeWidth = 0.8;
-    for (var y = _netTop + 4; y < _floor - 4; y += 7) {
-      canvas.drawLine(Offset(_netX - 13, y), Offset(_netX + 13, y), mesh);
+    // 沙紋
+    for (var i = 0; i < 6; i++) {
+      final y = _floor + 6 + i * 5.0;
+      canvas.drawPath(Path()..moveTo(0, y)..quadraticBezierTo(_cw * 0.25, y - 1.5, _cw * 0.5, y)..quadraticBezierTo(_cw * 0.75, y + 1.5, _cw, y), Paint()..style = PaintingStyle.stroke..strokeWidth = 0.7..color = const Color(0x18806040));
     }
-    for (var x = _netX - 12; x <= _netX + 12; x += 6) {
-      canvas.drawLine(Offset(x, _netTop + 2), Offset(x, _floor - 6), mesh);
+    // 場地白線：邊線、中線
+    final line = Paint()..color = Colors.white..strokeWidth = 2.4..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(0, _floor), const Offset(_cw, _floor), line);
+    canvas.drawLine(const Offset(6, _floor), const Offset(-4, _courtH), line);
+    canvas.drawLine(const Offset(_cw - 6, _floor), const Offset(_cw + 4, _courtH), line);
+    canvas.drawLine(const Offset(_netX, _floor), const Offset(_netX, _courtH), Paint()..color = Colors.white.withValues(alpha: 0.7)..strokeWidth = 1.6);
+    // 網的影子
+    canvas.drawOval(Rect.fromCenter(center: const Offset(_netX + 10, _floor + 5), width: 34, height: 5), _fill(const Color(0x33000000)));
+    // 網：柱子（金屬帽 + 條紋）
+    final sway = math.sin(s._clock * 14) * s._netShake * 3;
+    final post = Rect.fromLTWH(_netX - 4, _netTop - 8, 8, _floor - _netTop + 10);
+    canvas.drawRRect(RRect.fromRectAndRadius(post, const Radius.circular(3)), Paint()..shader = const LinearGradient(colors: [Color(0xFF4E342E), Color(0xFF8D6E63), Color(0xFF4E342E)]).createShader(post));
+    for (var y = _netTop.toDouble() + 6; y < _floor - 4; y += 12) {
+      canvas.drawRect(Rect.fromLTWH(_netX - 4, y, 8, 3), _fill(const Color(0x66FFFFFF)));
     }
-    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(_netX - 14, _netTop - 2, 28, 7), const Radius.circular(3)), Paint()..color = Colors.white);
-    canvas.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(_netX - 14, _netTop - 2, 28, 7), const Radius.circular(3)), Paint()..style = PaintingStyle.stroke..strokeWidth = 1..color = const Color(0xFFB71C1C));
-    canvas.drawCircle(const Offset(_netX, _netTop - 8), 5, Paint()..color = const Color(0xFFFFD54F));
+    canvas.drawCircle(const Offset(_netX, _netTop - 9), 5, Paint()..shader = const RadialGradient(center: Alignment(-0.4, -0.4), colors: [Color(0xFFFFF59D), Color(0xFFFFB300)]).createShader(Rect.fromCircle(center: const Offset(_netX, _netTop - 9), radius: 5)));
+    // 網面：菱形網格（隨球撞擊晃動）
+    final meshRect = Rect.fromLTRB(_netX - 15 + sway, _netTop + 3, _netX + 15 + sway, _floor - 8);
+    canvas.drawRect(meshRect, _fill(const Color(0x14FFFFFF)));
+    final mesh = Paint()..color = const Color(0xDDFFFFFF)..strokeWidth = 0.7;
+    canvas.save();
+    canvas.clipRect(meshRect);
+    for (var i = -6; i < 12; i++) {
+      final x0 = meshRect.left + i * 5.0;
+      canvas.drawLine(Offset(x0, meshRect.top), Offset(x0 + (meshRect.height * 0.5), meshRect.bottom), mesh);
+      canvas.drawLine(Offset(x0 + 30, meshRect.top), Offset(x0 + 30 - (meshRect.height * 0.5), meshRect.bottom), mesh);
+    }
+    canvas.restore();
+    // 網頂白帶 + 下緣黑帶
+    final tape = Rect.fromLTWH(_netX - 16 + sway, _netTop - 2, 32, 8);
+    canvas.drawRRect(RRect.fromRectAndRadius(tape, const Radius.circular(3)), _fill(Colors.white));
+    canvas.drawRRect(RRect.fromRectAndRadius(tape, const Radius.circular(3)), Paint()..style = PaintingStyle.stroke..strokeWidth = 1..color = const Color(0xFFB71C1C));
+    canvas.drawLine(Offset(_netX - 15 + sway, _netTop + 4), Offset(_netX + 15 + sway, _netTop + 4), Paint()..color = const Color(0x55000000)..strokeWidth = 1);
+    canvas.drawLine(Offset(_netX - 15, _floor - 8), Offset(_netX + 15, _floor - 8), Paint()..color = const Color(0xFF263238)..strokeWidth = 2);
+    // 標桿（紅白）
+    for (var i = 0; i < 6; i++) {
+      canvas.drawLine(Offset(_netX + 17 + sway, _netTop - 30 + i * 6.0), Offset(_netX + 17 + sway, _netTop - 24 + i * 6.0), Paint()..color = i.isEven ? const Color(0xFFE53935) : Colors.white..strokeWidth = 2);
+    }
   }
 
   void _players(Canvas canvas) {
@@ -762,24 +888,39 @@ class _VolleyPainter extends CustomPainter {
 
   void _ball(Canvas canvas) {
     final pos = s._ballPos();
-    // 殘影
+    // 殘影（沿軌跡的拉長光暈）
     for (var i = 0; i < s._trail.length; i++) {
       final t = (i + 1) / (s._trail.length + 1);
-      canvas.drawCircle(s._trail[i], _ballR * (0.4 + 0.5 * t), Paint()..color = Colors.white.withValues(alpha: 0.12 * t));
+      canvas.drawCircle(s._trail[i], _ballR * (0.35 + 0.6 * t), Paint()..color = const Color(0xFFFFF8E1).withValues(alpha: 0.10 * t));
     }
-    // 影子
+    // 影子（越高越小越淡）
     final hh = (_floor - pos.dy).clamp(0.0, 300.0);
-    canvas.drawOval(Rect.fromCenter(center: Offset(pos.dx, _floor + 4), width: 36 - hh * 0.06, height: 8), Paint()..color = Colors.black.withValues(alpha: (0.3 - hh * 0.0008).clamp(0.05, 0.3)));
+    canvas.drawOval(Rect.fromCenter(center: Offset(pos.dx, _floor + 5), width: 34 - hh * 0.05, height: 7), Paint()..color = Colors.black.withValues(alpha: (0.32 - hh * 0.0009).clamp(0.06, 0.32)));
     canvas.save();
     canvas.translate(pos.dx, pos.dy);
+    final circle = Path()..addOval(Rect.fromCircle(center: Offset.zero, radius: _ballR));
+    canvas.drawCircle(Offset.zero, _ballR + 1.5, Paint()..color = const Color(0x33000000)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2));
+    canvas.drawCircle(Offset.zero, _ballR, _fill(const Color(0xFFFFF8E1)));
+    canvas.save();
+    canvas.clipPath(circle);
     canvas.rotate(s._ballAng);
-    canvas.drawCircle(Offset.zero, _ballR, Paint()..shader = const RadialGradient(center: Alignment(-0.4, -0.4), colors: [Colors.white, Color(0xFFE8E8E8)]).createShader(Rect.fromCircle(center: Offset.zero, radius: _ballR)));
-    final seam = Paint()..style = PaintingStyle.stroke..strokeWidth = 2.2..color = const Color(0xFF1976D2);
-    final seam2 = Paint()..style = PaintingStyle.stroke..strokeWidth = 2.2..color = const Color(0xFFFFC107);
-    canvas.drawArc(Rect.fromCircle(center: const Offset(-_ballR * 0.9, 0), radius: _ballR * 1.1), -0.9, 1.8, false, seam);
-    canvas.drawArc(Rect.fromCircle(center: const Offset(_ballR * 0.9, 0), radius: _ballR * 1.1), math.pi - 0.9, 1.8, false, seam2);
-    canvas.drawArc(Rect.fromCircle(center: const Offset(0, -_ballR * 0.9), radius: _ballR * 1.1), 0.7, 1.75, false, seam);
-    canvas.drawCircle(Offset.zero, _ballR, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2..color = const Color(0xFF455A64));
+    // 三片彎曲的色帶（排球花紋）
+    for (var k = 0; k < 3; k++) {
+      canvas.save();
+      canvas.rotate(k * 2 * math.pi / 3);
+      final band = Path()..moveTo(-_ballR * 1.2, -_ballR * 0.1)..quadraticBezierTo(0, -_ballR * 1.15, _ballR * 1.2, -_ballR * 0.1);
+      canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 9..color = k == 1 ? const Color(0xFFFFC107) : const Color(0xFF1E88E5));
+      canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 10.5..color = const Color(0x55263238)..blendMode = BlendMode.srcOver);
+      canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 8..color = k == 1 ? const Color(0xFFFFCA28) : const Color(0xFF2196F3));
+      canvas.restore();
+    }
+    // 縫線
+    canvas.drawCircle(Offset.zero, _ballR * 0.62, Paint()..style = PaintingStyle.stroke..strokeWidth = 0.7..color = const Color(0x44263238));
+    canvas.restore();
+    // 立體光影
+    canvas.drawCircle(Offset.zero, _ballR, Paint()..shader = const RadialGradient(center: Alignment(-0.45, -0.5), radius: 1.05, colors: [Color(0x66FFFFFF), Color(0x00FFFFFF), Color(0x55102030)], stops: [0, 0.5, 1]).createShader(Rect.fromCircle(center: Offset.zero, radius: _ballR)));
+    canvas.drawOval(Rect.fromCenter(center: const Offset(-7, -9), width: 8, height: 5), _fill(Colors.white.withValues(alpha: 0.75)));
+    canvas.drawCircle(Offset.zero, _ballR, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.3..color = const Color(0xFF37474F));
     canvas.restore();
   }
 
