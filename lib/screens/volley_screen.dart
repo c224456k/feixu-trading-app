@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -90,6 +91,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   Duration _lastTick = Duration.zero;
   double _clock = 0;
   Duration _now = Duration.zero;
+  double _gapUs = 40000; // 快照平均到達間隔（微秒），補間時間跟著調
 
   @override
   void initState() {
@@ -231,7 +233,21 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   void _onFrame(Map<String, dynamic> m) {
     final p = [for (final q in m['p'] as List) [for (final v in q as List) (v as num).toDouble()]];
     final b = [for (final v in m['b'] as List) (v as num).toDouble()];
-    _prev = _cur;
+    // 新舊快照的過渡從「目前畫面上的位置」開始，封包晚到/早到時不會跳格
+    final old = _cur;
+    if (old != null) {
+      final a = _alpha;
+      final pr = _prev;
+      final bp = _ballPos();
+      _prev = _Snap([
+        for (var i = 0; i < old.p.length; i++)
+          pr == null
+              ? old.p[i]
+              : [pr.p[i][0] + (old.p[i][0] - pr.p[i][0]) * a, pr.p[i][1] + (old.p[i][1] - pr.p[i][1]) * a, old.p[i][2]]
+      ], [bp.dx, bp.dy, old.b[2]], _now);
+    }
+    final gap = old == null ? 40000.0 : (_now - old.at).inMicroseconds.toDouble();
+    _gapUs = _gapUs * 0.8 + gap.clamp(35000.0, 110000.0) * 0.2;
     _cur = _Snap(p, b, _now);
     final sc = (m['sc'] as List).cast<int>();
     final ev = (m['ev'] as List).cast<int>();
@@ -330,7 +346,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   double get _alpha {
     final c = _cur;
     if (c == null) return 1;
-    return ((_now - c.at).inMicroseconds / 40000.0).clamp(0.0, 1.0);
+    return ((_now - c.at).inMicroseconds / _gapUs).clamp(0.0, 1.0);
   }
 
   Offset _ballPos() {
@@ -563,7 +579,11 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           child: Center(
             child: AspectRatio(
               aspectRatio: _cw / _courtH,
-              child: LayoutBuilder(builder: (c, box) => CustomPaint(size: box.biggest, painter: _VolleyPainter(this))),
+              child: LayoutBuilder(
+                  builder: (c, box) => Stack(fit: StackFit.expand, children: [
+                        RepaintBoundary(child: CustomPaint(size: box.biggest, painter: _VolleyPainter(this, staticLayer: true))),
+                        RepaintBoundary(child: CustomPaint(size: box.biggest, painter: _VolleyPainter(this))),
+                      ])),
             ),
           ),
         ),
@@ -650,7 +670,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
 // ==================================================================== 繪圖
 class _VolleyPainter extends CustomPainter {
   final _VolleyScreenState s;
-  _VolleyPainter(this.s) : super(repaint: s._repaint);
+  final bool staticLayer; // true：只畫不會動的背景（外面包 RepaintBoundary，只畫一次）
+  _VolleyPainter(this.s, {this.staticLayer = false}) : super(repaint: staticLayer ? null : s._repaint);
 
   double _h(int i, int k) {
     var h = (i * 73856093) ^ (k * 19349663);
@@ -661,13 +682,19 @@ class _VolleyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final k = size.width / _cw;
+    if (staticLayer) {
+      canvas.scale(k);
+      _backgroundStatic(canvas);
+      _courtStatic(canvas);
+      return;
+    }
     canvas.save();
     if (s._shake > 0) {
       canvas.translate((math.sin(s._clock * 90) * 3) * s._shake * 4 * k, (math.cos(s._clock * 70) * 2) * s._shake * 4 * k);
     }
     canvas.scale(k);
-    _background(canvas);
-    _court(canvas);
+    _backgroundDynamic(canvas);
+    _net(canvas);
     final c = s._cur;
     if (c != null) {
       _players(canvas);
@@ -694,14 +721,32 @@ class _VolleyPainter extends CustomPainter {
 
   Paint _fill(Color c) => Paint()..color = c;
 
-  void _background(Canvas canvas) {
-    final clock = s._clock;
+  void _backgroundStatic(Canvas canvas) {
     // 天空
     final sky = const Rect.fromLTWH(0, 0, _cw, 190);
     canvas.drawRect(sky, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2F95E8), Color(0xFF7CCBFF), Color(0xFFFFF3D0)]).createShader(sky));
     canvas.drawCircle(const Offset(352, 62), 60, Paint()..shader = const RadialGradient(colors: [Color(0xAAFFF59D), Color(0x00FFF59D)]).createShader(Rect.fromCircle(center: const Offset(352, 62), radius: 60)));
     canvas.drawCircle(const Offset(352, 62), 18, _fill(const Color(0xFFFFEB3B)));
     canvas.drawCircle(const Offset(352, 62), 14, _fill(const Color(0xFFFFF59D)));
+    // 海（地平線 150 ~ 205）
+    final sea = const Rect.fromLTWH(0, 148, _cw, 62);
+    canvas.drawRect(sea, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1E88B8), Color(0xFF2FB5C9), Color(0xFF7BE0D8)]).createShader(sea));
+    // 遠方小島
+    final isl = Path()..moveTo(250, 150)..quadraticBezierTo(272, 128, 296, 150)..close();
+    canvas.drawPath(isl, _fill(const Color(0xFF3F8F6B)));
+    canvas.drawPath(Path()..moveTo(262, 150)..quadraticBezierTo(272, 136, 282, 150)..close(), _fill(const Color(0xFF2F7A57)));
+    // 後方沙灘（較淺）
+    final back = const Rect.fromLTWH(0, 205, _cw, 65);
+    canvas.drawRect(back, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFFF0C4), Color(0xFFF2D89C)]).createShader(back));
+    canvas.drawPath(Path()..moveTo(0, 205)..quadraticBezierTo(60, 200, 130, 206)..quadraticBezierTo(250, 212, 330, 204)..quadraticBezierTo(390, 200, _cw, 205)..lineTo(_cw, 210)..lineTo(0, 210)..close(), _fill(Colors.white.withValues(alpha: 0.6)));
+    // 遮陽傘、救生椅
+    _parasol(canvas, 62, 232, const Color(0xFFE53935));
+    _parasol(canvas, 372, 236, const Color(0xFF1E88E5));
+    _lifeguard(canvas, 300, 232);
+  }
+
+  void _backgroundDynamic(Canvas canvas) {
+    final clock = s._clock;
     // 雲
     for (var i = 0; i < 5; i++) {
       final x = ((_h(i, 1) * _cw + clock * (3 + i * 1.6)) % (_cw + 140)) - 70;
@@ -721,9 +766,6 @@ class _VolleyPainter extends CustomPainter {
       final flap = math.sin(clock * 7 + i * 2) * 4;
       canvas.drawPath(Path()..moveTo(x - 7, y + flap)..quadraticBezierTo(x - 3, y - 3, x, y)..quadraticBezierTo(x + 3, y - 3, x + 7, y + flap), Paint()..style = PaintingStyle.stroke..strokeWidth = 1.5..color = const Color(0xFF37474F)..strokeCap = StrokeCap.round);
     }
-    // 海（地平線 150 ~ 205）
-    final sea = const Rect.fromLTWH(0, 148, _cw, 62);
-    canvas.drawRect(sea, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1E88B8), Color(0xFF2FB5C9), Color(0xFF7BE0D8)]).createShader(sea));
     // 太陽的反光
     for (var i = 0; i < 9; i++) {
       final y = 152 + i * 6.0;
@@ -741,18 +783,6 @@ class _VolleyPainter extends CustomPainter {
     canvas.drawPath(Path()..moveTo(bx - 14, 162)..lineTo(bx + 14, 162)..lineTo(bx + 9, 168)..lineTo(bx - 9, 168)..close(), _fill(const Color(0xFF6D4C41)));
     canvas.drawPath(Path()..moveTo(bx, 160)..lineTo(bx, 140)..lineTo(bx + 12, 158)..close(), _fill(Colors.white));
     canvas.drawPath(Path()..moveTo(bx - 1, 160)..lineTo(bx - 1, 144)..lineTo(bx - 10, 158)..close(), _fill(const Color(0xFFFFCDD2)));
-    // 遠方小島
-    final isl = Path()..moveTo(250, 150)..quadraticBezierTo(272, 128, 296, 150)..close();
-    canvas.drawPath(isl, _fill(const Color(0xFF3F8F6B)));
-    canvas.drawPath(Path()..moveTo(262, 150)..quadraticBezierTo(272, 136, 282, 150)..close(), _fill(const Color(0xFF2F7A57)));
-    // 後方沙灘（較淺）
-    final back = const Rect.fromLTWH(0, 205, _cw, 65);
-    canvas.drawRect(back, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFFFF0C4), Color(0xFFF2D89C)]).createShader(back));
-    canvas.drawPath(Path()..moveTo(0, 205)..quadraticBezierTo(60, 200, 130, 206)..quadraticBezierTo(250, 212, 330, 204)..quadraticBezierTo(390, 200, _cw, 205)..lineTo(_cw, 210)..lineTo(0, 210)..close(), _fill(Colors.white.withValues(alpha: 0.6)));
-    // 遮陽傘、救生椅
-    _parasol(canvas, 62, 232, const Color(0xFFE53935));
-    _parasol(canvas, 372, 236, const Color(0xFF1E88E5));
-    _lifeguard(canvas, 300, 232);
     // 觀眾
     for (var i = 0; i < 16; i++) {
       final x = 118 + i * 14.0 + (_h(i, 21) - 0.5) * 6;
@@ -816,7 +846,7 @@ class _VolleyPainter extends CustomPainter {
     canvas.drawCircle(top + const Offset(3, 4), 3.2, _fill(const Color(0xFF5D4037)));
   }
 
-  void _court(Canvas canvas) {
+  void _courtStatic(Canvas canvas) {
     // 沙地球場（前景）
     final g = Rect.fromLTWH(0, _floor, _cw, _courtH - _floor);
     canvas.drawRect(g, Paint()..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFF3D99B), Color(0xFFD8B46C)]).createShader(g));
@@ -834,6 +864,9 @@ class _VolleyPainter extends CustomPainter {
     canvas.drawLine(const Offset(6, _floor), const Offset(-4, _courtH), line);
     canvas.drawLine(const Offset(_cw - 6, _floor), const Offset(_cw + 4, _courtH), line);
     canvas.drawLine(const Offset(_netX, _floor), const Offset(_netX, _courtH), Paint()..color = Colors.white.withValues(alpha: 0.7)..strokeWidth = 1.6);
+  }
+
+  void _net(Canvas canvas) {
     // 網的影子
     canvas.drawOval(Rect.fromCenter(center: const Offset(_netX + 10, _floor + 5), width: 34, height: 5), _fill(const Color(0x33000000)));
     // 網：柱子（金屬帽 + 條紋）
@@ -897,7 +930,11 @@ class _VolleyPainter extends CustomPainter {
       canvas.rotate(rot);
       canvas.scale(facing, sy);
       canvas.translate(-sz / 2, -sz * 0.92);
-      MonsterPainter(kind: look['kind'] as int, band: look['band'] as int, t: s._clock + i).paint(canvas, const Size(sz, sz));
+      final img = _sprite(look['kind'] as int, look['band'] as int);
+      final breathe = 1 + math.sin((s._clock + i) * 3) * 0.012;
+      canvas.translate(0, sz * (1 - breathe));
+      canvas.scale(1, breathe);
+      canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), const Rect.fromLTWH(0, 0, sz, sz), Paint()..filterQuality = FilterQuality.medium);
       canvas.restore();
       if (i == s._side) {
         // 自己頭上的小箭頭
@@ -905,6 +942,17 @@ class _VolleyPainter extends CustomPainter {
         canvas.drawPath(Path()..moveTo(tp.dx - 6, tp.dy - 8)..lineTo(tp.dx + 6, tp.dy - 8)..lineTo(tp.dx, tp.dy)..close(), Paint()..color = const Color(0xFFFFD54F));
       }
     }
+  }
+
+  // 怪物含漸層、saveLayer、模糊，每幀重畫兩隻手機會卡；改成每種造型只畫一次存成貼圖。
+  static final Map<int, ui.Image> _sprites = {};
+  ui.Image _sprite(int kind, int band) {
+    return _sprites.putIfAbsent(kind * 100 + band, () {
+      const px = 176.0;
+      final rec = ui.PictureRecorder();
+      MonsterPainter(kind: kind, band: band, t: 0).paint(Canvas(rec)..scale(px / 88), const Size(88, 88));
+      return rec.endRecording().toImageSync(px.toInt(), px.toInt());
+    });
   }
 
   void _ball(Canvas canvas) {
@@ -920,7 +968,7 @@ class _VolleyPainter extends CustomPainter {
     canvas.save();
     canvas.translate(pos.dx, pos.dy);
     final circle = Path()..addOval(Rect.fromCircle(center: Offset.zero, radius: _ballR));
-    canvas.drawCircle(Offset.zero, _ballR + 1.5, Paint()..color = const Color(0x33000000)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2));
+    canvas.drawCircle(Offset.zero, _ballR + 1.5, _fill(const Color(0x28000000)));
     canvas.drawCircle(Offset.zero, _ballR, _fill(const Color(0xFFFFF8E1)));
     canvas.save();
     canvas.clipPath(circle);
@@ -931,7 +979,6 @@ class _VolleyPainter extends CustomPainter {
       canvas.rotate(k * 2 * math.pi / 3);
       final band = Path()..moveTo(-_ballR * 1.2, -_ballR * 0.1)..quadraticBezierTo(0, -_ballR * 1.15, _ballR * 1.2, -_ballR * 0.1);
       canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 9..color = k == 1 ? const Color(0xFFFFC107) : const Color(0xFF1E88E5));
-      canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 10.5..color = const Color(0x55263238)..blendMode = BlendMode.srcOver);
       canvas.drawPath(band, Paint()..style = PaintingStyle.stroke..strokeWidth = 8..color = k == 1 ? const Color(0xFFFFCA28) : const Color(0xFF2196F3));
       canvas.restore();
     }
@@ -967,5 +1014,5 @@ class _VolleyPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _VolleyPainter old) => true;
+  bool shouldRepaint(covariant _VolleyPainter old) => !staticLayer || old.staticLayer != staticLayer;
 }
