@@ -122,7 +122,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
       if (_phase == _Phase.lobby) _send({'t': 'lobby'});
     });
     _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!_local && _phase == _Phase.playing) _send({'t': 'ping', 'ts': DateTime.now().microsecondsSinceEpoch});
+      // 本機對戰沒有流量，Cloudflare 隧道閒置約 100 秒會斷線，所以一直送 ping 保持連線
+      if (_ch != null) _send({'t': 'ping', 'ts': DateTime.now().microsecondsSinceEpoch});
     });
   }
 
@@ -170,7 +171,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     if (_phase == _Phase.over) return;
     if (_retry < 10) {
       _retry++;
-      setState(() => _error = _phase == _Phase.playing ? '連線中斷，重連中…（20 秒內回來可以繼續）' : null);
+      setState(() => _error = _phase == _Phase.playing && !_local ? '連線中斷，重連中…（20 秒內回來可以繼續）' : null);
       Future.delayed(const Duration(seconds: 2), () {
         if (!_closing && mounted && _ch == null) _connect();
       });
@@ -229,7 +230,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         _onFrame(m);
       case 'pong':
         final ts = m['ts'];
-        if (ts is int) setState(() => _ping = ((DateTime.now().microsecondsSinceEpoch - ts) / 1000).round());
+        if (ts is int && !_local) setState(() => _ping = ((DateTime.now().microsecondsSinceEpoch - ts) / 1000).round());
       case 'end':
         VolleyAudio.instance.duck(false);
         final ew = m['winner'] as int;
