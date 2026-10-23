@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../widgets/battle_stage.dart';
 import '../widgets/monster_art.dart';
@@ -67,6 +69,38 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   ({int r, int c, MtMonster m, List<Map<String, dynamic>> log, int hp, int atk, int def})? _battle;
   int _battleKey = 0;
 
+  static const _saveKey = 'magic_tower_save_v3';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  // 網頁重新整理、版本更新都會重開 App，所以每走一步就存檔，進來時接著玩。
+  Future<void> _load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final raw = sp.getString(_saveKey);
+      if (raw == null) return;
+      final g = MtGame.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      if (g == null || g.won || !mounted) return;
+      setState(() => _g = g);
+      _say('接續上次的進度（第 ${g.floor + 1} 層）');
+    } catch (_) {}
+  }
+
+  Future<void> _save() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (_g.won) {
+        await sp.remove(_saveKey);
+      } else {
+        await sp.setString(_saveKey, jsonEncode(_g.toJson()));
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _toastTimer?.cancel();
@@ -92,6 +126,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
       if (why != '牆') _say(why);
       return false;
     }
+    _save();
     if (ev == 'shop') {
       _walkTimer?.cancel();
       _openShop();
@@ -128,6 +163,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
       _battle = null;
       up = _g.resolveFight(b.r, b.c, hpAfter);
     });
+    _save();
     if (b.m.gold > 0) {
       _say(up > 0 ? '升級！Lv.${_g.lv}　攻+${mtLevelAtk * up} 防+${mtLevelDef * up} 血+${mtLevelHp * up}　💰+${b.m.gold}' : '💰 +${b.m.gold}　經驗 +${b.m.exp}');
       if (up > 0) HapticFeedback.mediumImpact();
@@ -163,6 +199,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
       _g = MtGame();
       _battle = null;
     });
+    _save();
   }
 
   // ---- 點地圖自動走路：BFS 找路（只走空地/道具/樓梯，終點可以是門或怪物）
@@ -261,6 +298,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                           onPressed: _g.gold >= o.price
                               ? () {
                                   _g.buy(o);
+                                  _save();
                                   Navigator.pop(c);
                                   setState(() {});
                                   _say('買了 ${o.name}，商人收攤走了');
@@ -287,7 +325,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                       '• 金幣只能在魔塔裡花：找 🧙 商人（第 3、7、11、15、19 層）買血量、攻防或鑰匙（每位商人只能買一樣），越深的樓層賣得越貴。\n'
                       '• 金鑰匙開金色的門、銀鑰匙開銀色的門、魔鑰匙開紫紅色的門，鑰匙有限，想清楚再開。\n'
                       '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。有些怪物防禦很高，要先找到更強的武器或升級。\n'
-                      '• 可以隨時上下樓回頭找漏掉的東西。')),
+                      '• 每兩層（第 2、4、6…18 層）有一隻守門員，比一般怪強很多，打贏才能上樓。\n• 可以隨時上下樓回頭找漏掉的東西。進度會自動存檔，重新整理網頁也能接著玩。')),
               actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('知道了'))],
             ));
   }
