@@ -9,7 +9,7 @@ import '../widgets/battle_stage.dart';
 import '../widgets/monster_art.dart';
 import 'magic_tower_logic.dart';
 
-// 魔塔（5 層試玩版）：格子地圖解謎。規則在 magic_tower_logic.dart，這裡負責畫地圖、操作，
+// 魔塔（20 層）：格子地圖解謎。規則在 magic_tower_logic.dart，這裡負責畫地圖、操作，
 // 撞到怪物時用百層塔的戰鬥舞台（BattleStage）播放戰鬥。單機、不連伺服器、不影響遊戲幣。
 
 class MagicTowerScreen extends StatefulWidget {
@@ -99,7 +99,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
     }
     if (ev.startsWith('fight:')) {
       final p = ev.split(':');
-      final m = mtMonsters[p[1]]!;
+      final m = mtMonsterAt(_g.floor, p[1])!;
       final nr = int.parse(p[2]), nc = int.parse(p[3]);
       setState(() {
         _battle = (r: nr, c: nc, m: m, log: mtBattleLog(_g.hp, _g.atk, _g.def, m), hp: _g.hp, atk: _g.atk, def: _g.def);
@@ -253,7 +253,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                   content: Column(mainAxisSize: MainAxisSize.min, children: [
                     const Text('金幣只能在魔塔裡花。', style: TextStyle(color: Colors.white60, fontSize: 12)),
                     const SizedBox(height: 8),
-                    for (final o in mtShop)
+                    for (final o in mtShopAt(_g.floor))
                       ListTile(
                         dense: true,
                         title: Text(o.name),
@@ -279,11 +279,11 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
         builder: (c) => AlertDialog(
               title: const Text('魔塔玩法'),
               content: const SingleChildScrollView(
-                  child: Text('目標：爬到第 5 層，打倒魔王。\n\n'
+                  child: Text('目標：爬到第 20 層，打倒魔王。\n\n'
                       '• 淺色磚地是可以走的路，深色磚牆走不過去。方向鍵／WASD 或畫面按鈕移動；點地圖上的格子會自動走過去。\n'
                       '• 撞到怪物就戰鬥：你先出手，雙方輪流攻擊，傷害＝攻擊−對方防禦。怪物腳下的數字是「打贏會損失的血量」，「？」是現在打不贏。\n'
                       '• 打怪會得到經驗和金幣。經驗滿了自動升級，每級 +3 攻擊、+3 防禦、+80 血（當場補上）。\n'
-                      '• 金幣只能在魔塔裡花：找 🧙 商人（第 2、4 層）買血量、攻防和鑰匙。\n'
+                      '• 金幣只能在魔塔裡花：找 🧙 商人（第 3、7、11、15、19 層）買血量、攻防和鑰匙，越深的樓層賣得越貴。\n'
                       '• 金鑰匙開金色的門、銀鑰匙開銀色的門、魔鑰匙開紫紅色的門，鑰匙有限，想清楚再開。\n'
                       '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。有些怪物防禦很高，要先找到更強的武器或升級。\n'
                       '• 可以隨時上下樓回頭找漏掉的東西。')),
@@ -404,9 +404,9 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
 
   Widget _hud() {
     final lv = _g.lv;
-    final lo = mtExpAt[lv - 1];
-    final hi = lv >= mtExpAt.length ? lo : mtExpAt[lv];
-    final ratio = lv >= mtExpAt.length ? 1.0 : ((_g.exp - lo) / (hi - lo)).clamp(0.0, 1.0);
+    final lo = mtExpNeed(lv);
+    final hi = mtExpNeed(lv + 1);
+    final ratio = ((_g.exp - lo) / (hi - lo)).clamp(0.0, 1.0);
     return Container(
       color: const Color(0xFF1C1829),
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -422,7 +422,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
         Wrap(alignment: WrapAlignment.center, children: [_keyStat('y', _g.ky), _keyStat('b', _g.kb), _keyStat('r', _g.kr)]),
         const SizedBox(height: 4),
         Row(children: [
-          Text(lv >= mtExpAt.length ? '經驗 MAX' : '經驗 ${_g.exp}/$hi', style: const TextStyle(fontSize: 11, color: Colors.white60)),
+          Text('經驗 ${_g.exp}/$hi', style: const TextStyle(fontSize: 11, color: Colors.white60)),
           const SizedBox(width: 8),
           Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: ratio, minHeight: 6, backgroundColor: Colors.white12, color: const Color(0xFF7C4DFF)))),
         ]),
@@ -605,7 +605,7 @@ class _MapPainter extends CustomPainter {
       _text(canvas, t == 'U' ? '▲' : '▼', Offset(cx, cy), cs * 0.34, Colors.white);
       return;
     }
-    final m = mtMonsters[t];
+    final m = mtMonsterAt(g.floor, t);
     if (m != null) {
       final sz = cs * (m.boss ? 1.0 : 0.92);
       canvas.save();
@@ -621,6 +621,8 @@ class _MapPainter extends CustomPainter {
     final it = mtItems[t];
     if (it != null) {
       _item(canvas, t, r, cs);
+      final gain = mtScaled(it.hp + it.atk + it.def, g.floor);
+      if (gain > 0) _text(canvas, '+$gain', Offset(cx, r.bottom - cs * 0.12), cs * 0.22, Colors.white, outline: true);
     }
   }
 
