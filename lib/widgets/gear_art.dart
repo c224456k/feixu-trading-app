@@ -31,6 +31,12 @@ const _mobStyles = <String, _MobStyle>{
   'frostgiant': _MobStyle(_Pal(Color(0xFFA9DCF5), Color(0xFF3F7DA6), Color(0xFFFFFFFF)), 'frost', Color(0xFFE0FBFF)),
   'skydragon': _MobStyle(_Pal(Color(0xFFFFE08A), Color(0xFFA06A12), Color(0xFFFFFFFF)), 'scale', Color(0xFF62E6FF)),
   'demonlord': _MobStyle(_Pal(Color(0xFF2B1B3D), Color(0xFF0C0614), Color(0xFF8A4FC0)), 'eye', Color(0xFFFF2E63)),
+  // T10 五行裝備
+  'metal': _MobStyle(_Pal(Color(0xFFE9E4D0), Color(0xFF8A8466), Color(0xFFFFFFFF)), 'scale', Color(0xFFFFE27A)),
+  'wood': _MobStyle(_Pal(Color(0xFF58B04A), Color(0xFF245A2A), Color(0xFFC6F0A8)), 'drip', Color(0xFF9BFF7A)),
+  'water': _MobStyle(_Pal(Color(0xFF3FA0E8), Color(0xFF16508C), Color(0xFFBFE8FF)), 'frost', Color(0xFFA6F0FF)),
+  'fire': _MobStyle(_Pal(Color(0xFFE84A2A), Color(0xFF7A1408), Color(0xFFFFB27A)), 'flame', Color(0xFFFFD43B)),
+  'earth': _MobStyle(_Pal(Color(0xFFB88A4A), Color(0xFF5A3C18), Color(0xFFE6C48A)), 'crack', Color(0xFFFFB04A)),
 };
 
 Color _acc = const Color(0xFFFFD36B);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../api_client.dart';
+import '../widgets/elements.dart';
 import '../widgets/hero_art.dart';
 import '../widgets/monster_art.dart';
 
@@ -16,7 +17,16 @@ enum _Phase { loading, idle, entering, walking, waiting, battle, after, cleared,
 const _bandNames = [
   '草原', '洞窟', '墓地', '森林', '沼澤', '礦坑', '熔岩', '冰霜', '天空', '魔界',
   '深淵之門', '虛空裂隙', '血色荒原', '枯骨王都', '雷鳴高地', '毒瘴沼淵', '時間迴廊', '鏡之迷宮', '星辰神殿', '混沌王座',
+  // 201~300 層：五行
+  '金鐵礦脈', '青木秘林', '寒水深淵', '赤炎火山', '厚土荒原', '金木幻林', '泥沼水澤', '熔金煉獄', '蒸汽雲海', '太極天闕',
 ];
+// 201 層以上每區出現的怪物屬性（對應後端 ELEM_BANDS）與沿用的舞台背景主題
+const _elemBandElems = [
+  [0], [1], [2], [3], [4], [0, 1], [4, 2], [3, 0], [2, 3], [0, 1, 2, 3, 4],
+];
+const _elemTheme = [5, 3, 7, 6, 1, 2, 4, 6, 8, 9];
+int _themeOf(int floor) => floor > 200 ? _elemTheme[((floor - 201) ~/ 10).clamp(0, 9)] : ((floor - 1) ~/ 10) % 10;
+List<int> _floorElems(int floor) => floor > 200 ? _elemBandElems[((floor - 201) ~/ 10).clamp(0, 9)] : const [];
 const _skyTop = [0xFF8FD3F4, 0xFF1B1626, 0xFF1D2340, 0xFF2E5E3A, 0xFF4B5A2A, 0xFF2A2A30, 0xFF4A1208, 0xFF9ED8F5, 0xFF5BA8F0, 0xFF1A0510];
 const _skyBottom = [0xFFDFF3D0, 0xFF3A2E4A, 0xFF4A4F7A, 0xFF9CCB7A, 0xFFA6B86B, 0xFF5A5A66, 0xFFFF7A2E, 0xFFEAF8FF, 0xFFFFE4B8, 0xFF7A1630];
 const _groundCol = [0xFF4C8C3A, 0xFF4A3B33, 0xFF3A3D4A, 0xFF3B6B2E, 0xFF4A5A2F, 0xFF5A5148, 0xFF3A2018, 0xFFDCEEF7, 0xFFEFE2C8, 0xFF2A1018];
@@ -26,9 +36,12 @@ class _Mon {
   final String name;
   final int kind;
   final int band;
+  final int elem;
   final bool boss;
   final int maxHp;
   int hp;
+  bool frozen = false; // 被冰凍：下一次行動會跳過
+  int burn = 0; // 燃燒剩餘回合
   double flash = 0;
   double dying = 0; // 0 活著，>0 淡出中
   double shown; // 血條顯示值（平滑追上 hp）
@@ -39,6 +52,7 @@ class _Mon {
       : name = m['name'] as String,
         kind = (m['kind'] as num).toInt(),
         band = (m['band'] as num).toInt(),
+        elem = (m['elem'] as num?)?.toInt() ?? -1,
         boss = m['boss'] == true,
         maxHp = (m['max_hp'] as num).toInt(),
         hp = (m['hp'] as num).toInt(),
@@ -54,9 +68,10 @@ class _Fx {
   final bool claw;
   final bool crit;
   final bool flip; // 勇者打怪物 = 由左上劈向右下；怪物打勇者反向
+  final Color? tint; // 屬性武器的打擊顏色
   double age = 0;
   static const dur = 0.38;
-  _Fx(this.x, this.y, this.size, {this.claw = false, this.crit = false, this.flip = false});
+  _Fx(this.x, this.y, this.size, {this.claw = false, this.crit = false, this.flip = false, this.tint});
 }
 
 class _Spark {
@@ -98,6 +113,9 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   Map<String, ({String id, int tier})> _equipped = {};
   Map<String, dynamic> _hero = {'atk': 10, 'def': 5, 'hp': 300, 'agi': 5, 'luk': 5};
   int _maxFloor = 100;
+  int _welem = -1; // 武器（攻擊）屬性
+  int _aelem = -1; // 鎧甲（防禦）屬性
+  bool _shieldOn = false; // 土屬性武器的護盾（只在這場戰鬥）
   int get _maxSelectable => math.min(_maxFloor, _bestFloor + 1); // 要先通關才能挑更高的樓層
   int _bestFloor = 0;
   int _dropsLeft = 20;
@@ -208,6 +226,8 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   void _applyState(Map<String, dynamic> st) {
     _hero = (st['hero'] as Map).cast<String, dynamic>();
     _maxFloor = (st['max_floor'] as num?)?.toInt() ?? 100;
+    _welem = (st['welem'] as num?)?.toInt() ?? -1;
+    _aelem = (st['aelem'] as num?)?.toInt() ?? -1;
     _setMeat(st);
     _bestFloor = (st['best_floor'] as num).toInt();
     _dropsLeft = (st['drops_left'] as num?)?.toInt() ?? 0;
@@ -327,6 +347,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         _applied = false;
         _heroHp = (r['hero_hp_before'] as num).toInt();
         _heroMax = (r['max_hp'] as num).toInt();
+        _shieldOn = false;
         _phase = _Phase.battle;
       });
     } catch (e) {
@@ -463,14 +484,36 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
   }
 
   // 舞台座標：寬 w、地面高度 gy（paint 時用同一組公式）
+  // 紀錄欄位：em 屬性倍率（2 剋制／0.5 被剋／0.75 同屬）、p 武器特效觸發、hh 勇者回血後的血量、
+  // ab 護盾吸收量、k 特殊事件（burn 灼傷、frozen 被冰凍跳過、bound 被纏繞落空）
   void _applyEvent(Map<String, dynamic> ev) {
     final miss = ev['miss'] == true;
     final crit = ev['crit'] == true;
     final dmg = (ev['dmg'] as num).toInt();
     final hp = (ev['hp'] as num).toInt();
     final d = ev['d'];
+    final k = ev['k'] as String?;
+    final em = (ev['em'] as num?)?.toDouble() ?? 1.0;
+    final procs = ((ev['p'] as List?) ?? const []).cast<String>();
+    final ab = (ev['ab'] as num?)?.toInt() ?? 0;
     if (d == 'h') {
-      _floats.add(_Float(miss ? 'MISS' : '-$dmg', _heroX, _groundY - 150, miss ? Colors.white70 : const Color(0xFFFF6B6B), crit ? 26 : 20));
+      final from = ev['a'];
+      if (k == 'frozen') {
+        if (from is int && from < _mons.length) {
+          final m = _mons[from];
+          m.frozen = false;
+          final pos = _monPos(from, _mons.length);
+          _floats.add(_Float('❄ 凍僵了', pos.dx, pos.dy - _monSize(m) - 16, elemColor(2), 20));
+        }
+        return;
+      }
+      if (from is int && from < _mons.length) _mons[from].frozen = false;
+      _floats.add(_Float(miss ? (k == 'bound' ? '被纏住 MISS' : 'MISS') : (dmg == 0 && ab > 0 ? '擋下' : '-$dmg'), _heroX, _groundY - 150,
+          miss ? Colors.white70 : const Color(0xFFFF6B6B), crit ? 26 : 20));
+      if (ab > 0) _floats.add(_Float('盾 -$ab', _heroX + 36, _groundY - 175, elemColor(4), 16));
+      if (!miss && em != 1.0 && dmg > 0) {
+        _floats.add(_Float(em > 1 ? '被剋 ×2' : (em < 1 && em > 0.6 ? '同屬 ×0.75' : '抵禦 ×0.5'), _heroX - 40, _groundY - 175, em > 1 ? const Color(0xFFFF9A3C) : const Color(0xFF9AD0FF), 15));
+      }
       if (!miss) {
         _heroFlash = 1;
         _heroKnock = 1;
@@ -480,6 +523,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
         _burst(_heroX, hy, crit ? 18 : 10, const [Color(0xFFFF5252), Color(0xFFFFB199), Colors.white]);
         _shake = math.max(_shake, crit ? 9 : 5);
       }
+      if (ab > 0 && dmg > 0) _shieldOn = false; // 護盾被打破
       _heroHp = hp;
       if (hp <= 0) {
         _heroDown = true;
@@ -489,23 +533,63 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
       if (i < _mons.length) {
         final m = _mons[i];
         final pos = _monPos(i, _mons.length);
-        _floats.add(_Float(miss ? 'MISS' : (crit ? '$dmg!' : '$dmg'), pos.dx, pos.dy - _monSize(m) - 16,
-            miss ? Colors.white70 : (crit ? const Color(0xFFFFD93D) : Colors.white), crit ? 28 : 20));
-        if (!miss) {
+        final top = pos.dy - _monSize(m) - 16;
+        if (k == 'burn') {
+          _floats.add(_Float('🔥 $dmg', pos.dx, top, elemColor(3), 20));
+          m.burn = math.max(0, m.burn - 1);
+          m.flash = 0.6;
+          _burst(pos.dx, pos.dy - _monSize(m) * 0.5, 12, const [Color(0xFFFF6A3C), Color(0xFFFFD43B), Color(0xFFFF9F1C)], speed: 160);
+        } else {
+          _floats.add(_Float(miss ? 'MISS' : (crit ? '$dmg!' : '$dmg'), pos.dx, top,
+              miss ? Colors.white70 : (crit ? const Color(0xFFFFD93D) : Colors.white), crit ? 28 : 20));
+          if (!miss && em != 1.0) {
+            _floats.add(_Float(em > 1 ? '剋制 ×2' : (em < 1 && em > 0.6 ? '同屬 ×0.75' : '被剋 ×0.5'), pos.dx, top - 20, em > 1 ? const Color(0xFFFF9A3C) : const Color(0xFF9AD0FF), 15));
+          }
+        }
+        if (!miss && k != 'burn') {
           m.flash = 1;
           m.knock = 1;
           m.ghostHold = 0.45;
           final cy = pos.dy - _monSize(m) * 0.5;
-          _fx.add(_Fx(pos.dx, cy, _monSize(m) * 0.62, crit: crit));
+          final tint = _welem >= 0 ? elemColor(_welem) : null;
+          _fx.add(_Fx(pos.dx, cy, _monSize(m) * 0.62, crit: crit, tint: tint));
           _burst(pos.dx, cy, crit ? 22 : 11,
-              crit ? const [Color(0xFFFFD93D), Colors.white, Color(0xFFFF9F1C)] : const [Colors.white, Color(0xFFBFE6FF), Color(0xFFFFE9A8)],
+              tint != null
+                  ? [tint, Colors.white, tint.withValues(alpha: 0.7)]
+                  : (crit ? const [Color(0xFFFFD93D), Colors.white, Color(0xFFFF9F1C)] : const [Colors.white, Color(0xFFBFE6FF), Color(0xFFFFE9A8)]),
               speed: crit ? 340 : 250);
           _shake = math.max(_shake, crit ? 9 : (m.boss ? 4 : 3));
         }
         m.hp = hp;
+        for (final p in procs) {
+          switch (p) {
+            case 'sunder':
+              _floats.add(_Float('破甲', pos.dx - 30, top - 38, elemColor(0), 16));
+            case 'bind':
+              _floats.add(_Float('纏繞', pos.dx - 30, top - 38, elemColor(1), 16));
+            case 'freeze':
+              m.frozen = true;
+              _floats.add(_Float('冰凍', pos.dx - 30, top - 38, elemColor(2), 18));
+            case 'burn':
+              m.burn = 3;
+              _floats.add(_Float('燃燒', pos.dx - 30, top - 38, elemColor(3), 16));
+            case 'shield':
+              _shieldOn = true;
+              _floats.add(_Float('地盾', _heroX, _groundY - 190, elemColor(4), 16));
+          }
+        }
         if (hp <= 0) {
           m.dying = 0.01;
+          m.frozen = false;
+          m.burn = 0;
           _burst(pos.dx, pos.dy - _monSize(m) * 0.45, 22, const [Color(0xFFEEEEEE), Color(0xFFB0BEC5), Color(0xFFFFE082)], speed: 200, size: 5);
+        }
+        final hh = (ev['hh'] as num?)?.toInt();
+        if (hh != null && hh > _heroHp) {
+          _floats.add(_Float('+${hh - _heroHp}', _heroX, _groundY - 150, const Color(0xFF7DFFA0), 16));
+          _heroHp = hh;
+        } else if (hh != null) {
+          _heroHp = hh;
         }
       }
     }
@@ -624,6 +708,27 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
     );
   }
 
+  // 舞台左下角：本層怪物屬性、勇者武器/鎧甲屬性
+  Widget _elemChip(int floor) {
+    final mons = _floorElems(floor);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (mons.isNotEmpty) ...[
+          const Text('怪 ', style: TextStyle(color: Colors.white70, fontSize: 11)),
+          for (final e in mons) Padding(padding: const EdgeInsets.only(right: 3), child: ElemBadge(elem: e, size: 17)),
+          const SizedBox(width: 6),
+        ],
+        const Text('武 ', style: TextStyle(color: Colors.white70, fontSize: 11)),
+        ElemBadge(elem: _welem, size: 17),
+        const SizedBox(width: 6),
+        const Text('甲 ', style: TextStyle(color: Colors.white70, fontSize: 11)),
+        ElemBadge(elem: _aelem, size: 17),
+      ]),
+    );
+  }
+
   void _showHelp() {
     showDialog(
       context: context,
@@ -637,8 +742,11 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
             '・樓層越高怪物越強；裝備越好的勇者才能爬得越高。\n'
             '・每挑戰一層（出發或上樓）消耗 10 塊肉🍖，肉每分鐘恢復 1 塊、上限 60（約 60 分鐘回滿）；層內的戰鬥不另外扣，肉不夠就不能出發。\n'
             '・勇者戰敗要等 5 分鐘才能復活。\n'
-            '・每場戰鬥勝利給現金：10 層約 625 元，越高越多，100 層約 2,500 元，200 層約 5,000 元，頭目那場加倍；1~100 層每天最多領 125,000 元，101 層以上另外算，每天最多 500,000 元。\n'
+            '・每場戰鬥勝利給現金：10 層約 625 元，越高越多，100 層約 2,500 元，200 層約 5,000 元，300 層約 7,500 元，頭目那場加倍；1~100 層每天最多領 125,000 元，101 層以上另外算，每天最多 500,000 元。\n'
             '・101 層以上：每層有固定詞綴（狂暴/堅殼/迅捷/穿甲/巨壯/連擊），怪物會無視一部分防禦，每 5 層多一場精英怪，勝利回血降到 10%。\n'
+            '・201~300 層是五行區：怪物各有金/木/水/火/土屬性，裝備頁可以穿 T10 五行武器（有特效）和五行鎧甲（穿上勇者就是該屬性）。'
+            '相剋：金剋木、木剋土、土剋水、水剋火、火剋金。武器打到被它剋的怪物 ×2、打到剋它的怪物 ×0.5、同屬性 ×0.75；怪物打你用同一張表（看你的鎧甲屬性）。'
+            '所以怪是金屬性，就穿火屬性的武器和鎧甲。沒穿五行裝備＝無屬性，不加不減。畫面左下角會顯示本層怪物屬性和你的武器/鎧甲屬性。五行區怪物不掉卡片，五行裝備從 201 層以上掉落。\n'
             '・裝備掉落（頭目必掉），每天最多 20 件，樓層越高掉越好的；101 層以上開始掉 T6~T9 裝備。\n'
             '・每隻被打倒的怪物都可能掉自己的卡片（頭目掉頭目卡），每天最多 30 張；T6 以上裝備有 1~2 個洞，可以插卡片。\n'
             '・結果由伺服器決定，中途離開頁面也算數。',
@@ -663,8 +771,14 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
               Positioned(
                 left: 10,
                 top: 8,
-                child: _chip('第 ${running ? _runFloor : _floor} 層・${_bandNames[(((running ? _runFloor : _floor) - 1) ~/ 10).clamp(0, 19)]}'),
+                child: _chip('第 ${running ? _runFloor : _floor} 層・${_bandNames[(((running ? _runFloor : _floor) - 1) ~/ 10).clamp(0, 29)]}'),
               ),
+              if (_welem >= 0 || _aelem >= 0 || (running ? _runFloor : _floor) > 200)
+                Positioned(
+                  left: 10,
+                  bottom: 8,
+                  child: _elemChip(running ? _runFloor : _floor),
+                ),
               if (running)
                 Positioned(
                   right: 10,
@@ -787,7 +901,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
 
   Widget _floorSelector(bool running) {
     void set(int v) => setState(() => _floor = v.clamp(1, _maxSelectable));
-    final band = _bandNames[((_floor - 1) ~/ 10).clamp(0, 19)];
+    final band = _bandNames[((_floor - 1) ~/ 10).clamp(0, 29)];
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
       decoration: BoxDecoration(color: const Color(0xFF1B1710), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF3D3320))),
@@ -796,6 +910,7 @@ class _TowerScreenState extends State<TowerScreen> with SingleTickerProviderStat
           Text('樓層  $_floor', style: const TextStyle(color: Color(0xFFFFD36B), fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(width: 8),
           Text('$band${_floor % 10 == 0 ? '・頭目層' : (_floor > 100 && _floor % 5 == 0 ? '・精英層' : '')}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          for (final e in _floorElems(_floor)) Padding(padding: const EdgeInsets.only(left: 4), child: ElemBadge(elem: e, size: 16)),
           const Spacer(),
           Text('最高通關 $_bestFloor 層・可選到 $_maxSelectable 層', style: const TextStyle(color: Colors.white38, fontSize: 12)),
         ]),
@@ -897,7 +1012,7 @@ class _StagePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final band = (((s._phase == _Phase.idle || s._phase == _Phase.dead && s._encounters.isEmpty ? s._floor : s._runFloor) - 1) ~/ 10) % 10;
+    final band = _themeOf(s._phase == _Phase.idle || s._phase == _Phase.dead && s._encounters.isEmpty ? s._floor : s._runFloor);
     canvas.save();
     if (s._shake > 0) {
       canvas.translate(math.sin(s._t * 130) * s._shake, math.cos(s._t * 110) * s._shake * 0.6);
@@ -920,7 +1035,7 @@ class _StagePainter extends CustomPainter {
       final sz = s._monSize(m);
       var lunge = 0.0;
       var attacking = false;
-      if (s._phase == _Phase.battle && s._logIdx < s._log.length && s._log[s._logIdx]['a'] == i) {
+      if (s._phase == _Phase.battle && s._logIdx < s._log.length && s._log[s._logIdx]['a'] == i && s._log[s._logIdx]['k'] != 'frozen') {
         lunge = -_lungeCurve(s._actionT) * 60;
         attacking = true;
       }
@@ -937,13 +1052,24 @@ class _StagePainter extends CustomPainter {
       canvas.rotate(k * 0.12 - lean * 0.08);
       canvas.scale((1 + k * -0.10 + (attacking ? lean.abs() * 0.06 : 0)) * (1 - m.dying * 0.3), (1 + k * 0.10 - (attacking ? lean.abs() * 0.04 : 0)) * (1 - m.dying * 0.3));
       canvas.translate(-sz / 2, -sz);
-      MonsterPainter(kind: m.kind, band: m.band, boss: m.boss, flash: m.flash, opacity: 1 - m.dying, t: s._t + i)
+      MonsterPainter(kind: m.kind, band: m.band, boss: m.boss, flash: m.flash, opacity: 1 - m.dying, t: s._t + i, elem: m.elem)
           .paint(canvas, Size(sz, sz));
+      if (m.dying == 0 && (m.frozen || m.burn > 0)) {
+        // 狀態：冰凍＝淡藍冰層、燃燒＝橘紅閃爍
+        final col = m.frozen ? elemColor(2).withValues(alpha: 0.38) : elemColor(3).withValues(alpha: 0.22 + 0.16 * math.sin(s._t * 14).abs());
+        canvas.drawOval(Rect.fromLTWH(sz * 0.12, sz * 0.12, sz * 0.76, sz * 0.8), Paint()..color = col);
+        if (m.frozen) {
+          canvas.drawOval(Rect.fromLTWH(sz * 0.12, sz * 0.12, sz * 0.76, sz * 0.8), Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..color = Colors.white.withValues(alpha: 0.7));
+        }
+      }
       canvas.restore();
       if (m.dying == 0 && (s._phase == _Phase.battle || s._phase == _Phase.after)) {
         _hpBar(canvas, Offset(pos.dx, pos.dy - sz - 4), m.boss ? 96 : 66, m, attacking);
       } else if (m.dying == 0 && (s._phase == _Phase.walking || s._phase == _Phase.waiting)) {
-        _label(canvas, Offset(pos.dx, pos.dy - sz - 2), m.name, 10, Colors.white70);
+        _label(canvas, Offset(pos.dx, pos.dy - sz - 2), m.elem >= 0 ? '${elemName(m.elem)}・${m.name}' : m.name, 10, m.elem >= 0 ? elemColor(m.elem) : Colors.white70);
       }
     }
 
@@ -980,7 +1106,7 @@ class _StagePainter extends CustomPainter {
     final p = (f.age / _Fx.dur).clamp(0.0, 1.0);
     final grow = Curves.easeOut.transform(math.min(1.0, p * 2.2));
     final alpha = (1 - Curves.easeIn.transform(p)).clamp(0.0, 1.0);
-    final glow = f.crit ? const Color(0xFFFFD93D) : (f.claw ? const Color(0xFFFF5252) : const Color(0xFF8FD3FF));
+    final glow = f.tint ?? (f.crit ? const Color(0xFFFFD93D) : f.claw ? const Color(0xFFFF5252) : const Color(0xFF8FD3FF));
     // 擴散環
     canvas.drawCircle(
         Offset(f.x, f.y),
@@ -1045,7 +1171,7 @@ class _StagePainter extends CustomPainter {
     if (s._phase == _Phase.walking) {
       y -= (math.sin(s._t * 12)).abs() * 5;
     }
-    if (s._phase == _Phase.battle && s._logIdx < s._log.length && s._log[s._logIdx]['a'] == 'h') {
+    if (s._phase == _Phase.battle && s._logIdx < s._log.length && s._log[s._logIdx]['a'] == 'h' && s._log[s._logIdx]['k'] != 'burn') {
       final tIdx = s._log[s._logIdx]['d'];
       final tx = tIdx is int && tIdx < s._mons.length ? s._monPos(tIdx, s._mons.length).dx : s._stageW * 0.6;
       x += _lungeCurve(s._actionT) * math.max(30.0, (tx - x) - 70);
@@ -1062,10 +1188,18 @@ class _StagePainter extends CustomPainter {
       canvas.translate(0, -hh * 0.2);
     }
     canvas.translate(-hw / 2, -hh);
+    if (s._aelem >= 0) paintElemAura(canvas, Offset(hw / 2, hh * 0.55), hh * 0.62, s._aelem, s._t); // 鎧甲屬性＝勇者屬性
     if (s._heroFlash > 0) {
       canvas.saveLayer(const Rect.fromLTWH(-40, -40, 200, 260), Paint());
     }
     HeroPaperDoll(s._equipped).paint(canvas, const Size(hw, hh));
+    if (s._shieldOn && s._phase == _Phase.battle) {
+      canvas.drawOval(Rect.fromCenter(center: Offset(hw / 2, hh * 0.52), width: hw * 1.5, height: hh * 1.05), Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = elemColor(4).withValues(alpha: 0.75));
+      canvas.drawOval(Rect.fromCenter(center: Offset(hw / 2, hh * 0.52), width: hw * 1.5, height: hh * 1.05), Paint()..color = elemColor(4).withValues(alpha: 0.14));
+    }
     if (s._heroFlash > 0) {
       canvas.drawRect(const Rect.fromLTWH(-40, -40, 200, 260), Paint()
         ..color = Colors.white.withValues(alpha: s._heroFlash * 0.7)
@@ -1099,7 +1233,8 @@ class _StagePainter extends CustomPainter {
     // 上緣高光
     canvas.drawRect(Rect.fromLTWH(r.left, r.top + 1, w * ratio, h * 0.28), Paint()..color = Colors.white.withValues(alpha: 0.25));
     canvas.restore();
-    _label(canvas, Offset(bottomCenter.dx, r.top - 2), m.boss ? '👑 ${m.name}' : m.name, m.boss ? 12 : 10, Colors.white);
+    final nm = m.elem >= 0 ? '${elemName(m.elem)}・${m.name}' : m.name;
+    _label(canvas, Offset(bottomCenter.dx, r.top - 2), m.boss ? '👑 $nm' : nm, m.boss ? 12 : 10, m.elem >= 0 ? Color.lerp(Colors.white, elemColor(m.elem), 0.6)! : Colors.white);
     if (m.boss) {
       _label(canvas, Offset(bottomCenter.dx, r.bottom + 12), '${m.hp} / ${m.maxHp}', 9, Colors.white70);
     }

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../api_client.dart';
+import '../widgets/elements.dart';
 import '../widgets/hero_art.dart';
 import 'hero_shop_screen.dart';
 import 'arena_screen.dart';
@@ -11,7 +12,7 @@ import 'tower_screen.dart';
 // 勇者紙娃娃（裝備欄）：中間是勇者剪影，左右各 5 個裝備欄，點欄位看裝備說明。
 // 裝備資料全由伺服器（hero_game.py）提供，這裡只負責顯示。
 
-const _tierNames = ['破舊', '普通', '精良', '稀有', '史詩', '傳說', '神話', '天啟', '混沌', '終焉'];
+const _tierNames = ['破舊', '普通', '精良', '稀有', '史詩', '傳說', '神話', '天啟', '混沌', '終焉', '五行'];
 const _tierColors = [
   Color(0xFF8D8D8D),
   Color(0xFFE8E8E8),
@@ -23,6 +24,7 @@ const _tierColors = [
   Color(0xFF2EE6D6),
   Color(0xFFFF4FD8),
   Color(0xFFFFF3B0),
+  Color(0xFFFFFFFF),
 ];
 const _statLabels = {
   'atk': '攻擊',
@@ -127,12 +129,12 @@ class _HeroScreenState extends State<HeroScreen> {
                       color:
                           _tierColors[((d['item'] as Map)['tier'] as num)
                               .toInt()
-                              .clamp(0, 9)],
+                              .clamp(0, 10)],
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   subtitle: Text(
-                    '${_tierNames[((d['item'] as Map)['tier'] as num).toInt().clamp(0, 9)]}・${reasons[d['reason']] ?? ''}\n${_statLine(d['item'] as Map<String, dynamic>)}',
+                    '${_tierNames[((d['item'] as Map)['tier'] as num).toInt().clamp(0, 10)]}・${reasons[d['reason']] ?? ''}\n${_statLine(d['item'] as Map<String, dynamic>)}',
                     style: const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                 ),
@@ -647,7 +649,7 @@ class _HeroScreenState extends State<HeroScreen> {
     String slotName,
     Map<String, dynamic> item,
   ) {
-    final tier = (item['tier'] as num).toInt().clamp(0, 9);
+    final tier = (item['tier'] as num).toInt().clamp(0, 10);
     final color = _tierColors[tier];
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -698,6 +700,28 @@ class _HeroScreenState extends State<HeroScreen> {
                 style: const TextStyle(color: Color(0xFF7DFFA0), fontSize: 15),
               ),
             ),
+        if (((item['elem'] as num?)?.toInt() ?? -1) >= 0) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            ElemBadge(elem: (item['elem'] as num).toInt(), size: 22),
+            const SizedBox(width: 8),
+            Text(
+              item['slot'] == 'weapon' ? '攻擊屬性：${item['elem_name']}' : '防禦屬性：${item['elem_name']}（穿上勇者就是${item['elem_name']}屬性）',
+              style: TextStyle(color: elemColor((item['elem'] as num).toInt()), fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+          ]),
+          if (item['effect'] != null) ...[
+            const SizedBox(height: 4),
+            Text('特效【${item['effect']}】${item['effect_desc']}', style: TextStyle(color: elemColor((item['elem'] as num).toInt()), fontSize: 13)),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            item['slot'] == 'weapon'
+                ? '打到被${item['elem_name']}剋的怪物傷害 ×2，打到剋${item['elem_name']}的怪物只剩 ×0.5。'
+                : '被剋${item['elem_name']}的怪物攻擊只受 ×0.5，被剋你的怪物攻擊會受 ×2。',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ],
         const SizedBox(height: 10),
         Text(
           '${item['desc']}',
@@ -1054,7 +1078,7 @@ class _SlotBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final filled = item != null;
-    final tier = filled ? (item!['tier'] as num).toInt().clamp(0, 9) : 0;
+    final tier = filled ? (item!['tier'] as num).toInt().clamp(0, 10) : 0;
     final color = _tierColors[tier];
     return Container(
       width: size,
@@ -1092,6 +1116,12 @@ class _SlotBox extends StatelessWidget {
               size: size * 0.8,
             ),
           ),
+          if (filled && ((item!['elem'] as num?)?.toInt() ?? -1) >= 0)
+            Positioned(
+              left: -size * 0.06,
+              bottom: -size * 0.06,
+              child: ElemBadge(elem: (item!['elem'] as num).toInt(), size: size * 0.32),
+            ),
           if (filled && ((item!['plus'] as num?)?.toInt() ?? 0) > 0)
             Positioned(
               right: -size * 0.08,

@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'elements.dart';
+
 // 百層塔的怪物：10 種造型（朝左），依「區域」換顏色。全部用 CustomPainter 在 0~100 方框內畫，
 // 腳底在 y=92。頭目多一圈紅色光暈、頭上有皇冠。
 
@@ -38,9 +40,12 @@ class MonsterPainter extends CustomPainter {
   final double flash; // 0~1：被打到時泛白
   final double opacity;
   final double t; // 動畫時間（秒），讓怪物有呼吸感
-  MonsterPainter({required this.kind, required this.band, this.boss = false, this.flash = 0, this.opacity = 1, this.t = 0});
+  final int elem; // 五行屬性（201 層以上）；-1 = 無屬性，沿用區域配色
+  MonsterPainter({required this.kind, required this.band, this.boss = false, this.flash = 0, this.opacity = 1, this.t = 0, this.elem = -1});
 
-  Color get _body => Color.lerp(_kindBase[kind % 10], _bandTints[band.clamp(0, 9)], kind == 3 || kind == 6 ? 0.18 : 0.42)!;
+  Color get _body => elem >= 0
+      ? Color.lerp(_kindBase[kind % 10], elemColors[elem], kind == 3 || kind == 6 ? 0.55 : 0.68)!
+      : Color.lerp(_kindBase[kind % 10], _bandTints[band.clamp(0, 9)], kind == 3 || kind == 6 ? 0.18 : 0.42)!;
 
   @override
   void paint(Canvas c, Size size) {
@@ -58,6 +63,7 @@ class MonsterPainter extends CustomPainter {
             ..shader = RadialGradient(colors: [const Color(0x66FF3B30), Colors.transparent])
                 .createShader(Rect.fromCircle(center: const Offset(50, 55), radius: 62)));
     }
+    if (elem >= 0) paintElemAura(c, const Offset(50, 56), 54, elem, t);
     c.translate(0, breathe * 0.4);
     c.drawOval(const Rect.fromLTWH(18, 88, 64, 9), Paint()..color = const Color(0x55000000));
     if (flash > 0) c.saveLayer(const Rect.fromLTWH(-20, -20, 140, 140), Paint());
@@ -83,6 +89,7 @@ class MonsterPainter extends CustomPainter {
       case 9:
         _demon(c);
     }
+    if (elem >= 0) _elemFx(c);
     if (boss) _crown(c);
     if (flash > 0) {
       c.drawRect(const Rect.fromLTWH(-20, -20, 140, 140), Paint()
@@ -92,6 +99,49 @@ class MonsterPainter extends CustomPainter {
     }
     if (opacity < 1) c.restore();
     c.restore();
+  }
+
+  // 五行特效：金＝閃光、木＝飄葉、水＝落水珠、火＝火苗上升、土＝碎石環繞
+  void _elemFx(Canvas c) {
+    final col = elemColors[elem];
+    for (var i = 0; i < 5; i++) {
+      final ph = (t * 0.7 + i * 0.2) % 1.0;
+      final x = 18.0 + i * 16 + math.sin(t * 2 + i * 1.7) * 4;
+      switch (elem) {
+        case 0:
+          final a = (math.sin(t * 5 + i * 2).abs());
+          final o = Offset(22 + (i * 17) % 60, 24 + (i * 23) % 50);
+          final r = 2.5 + a * 2.5;
+          c.drawPath(
+              Path()
+                ..moveTo(o.dx, o.dy - r)
+                ..lineTo(o.dx + r * 0.4, o.dy)
+                ..lineTo(o.dx, o.dy + r)
+                ..lineTo(o.dx - r * 0.4, o.dy)
+                ..close(),
+              Paint()..color = Colors.white.withValues(alpha: 0.4 + 0.5 * a));
+        case 1:
+          c.save();
+          c.translate(x, 20 + ph * 60);
+          c.rotate(ph * 6 + i);
+          c.drawOval(const Rect.fromLTWH(-3.5, -1.8, 7, 3.6), Paint()..color = col.withValues(alpha: 0.85 * (1 - ph * 0.6)));
+          c.restore();
+        case 2:
+          c.drawOval(Rect.fromCenter(center: Offset(x, 12 + ph * 70), width: 3.2, height: 5.4), Paint()..color = col.withValues(alpha: 0.9 * (1 - ph * 0.7)));
+        case 3:
+          final fy = 82 - ph * 62;
+          c.drawPath(
+              Path()
+                ..moveTo(x, fy - 6)
+                ..quadraticBezierTo(x + 4.5, fy, x, fy + 3)
+                ..quadraticBezierTo(x - 4.5, fy, x, fy - 6),
+              Paint()..color = Color.lerp(const Color(0xFFFFE066), col, ph)!.withValues(alpha: 0.9 * (1 - ph * 0.8)));
+        default:
+          final ang = t * 1.6 + i * 1.26;
+          final o = Offset(50 + math.cos(ang) * 40, 58 + math.sin(ang) * 11);
+          c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: o, width: 6, height: 5), const Radius.circular(1.5)), Paint()..color = col.withValues(alpha: 0.9));
+      }
+    }
   }
 
   Paint _fill(Rect r, Color base) => Paint()
@@ -454,5 +504,5 @@ class MonsterPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant MonsterPainter old) =>
-      old.kind != kind || old.band != band || old.boss != boss || old.flash != flash || old.opacity != opacity || old.t != t;
+      old.kind != kind || old.band != band || old.elem != elem || old.boss != boss || old.flash != flash || old.opacity != opacity || old.t != t;
 }
