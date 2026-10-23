@@ -69,7 +69,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   ({int r, int c, MtMonster m, List<Map<String, dynamic>> log, int hp, int atk, int def})? _battle;
   int _battleKey = 0;
 
-  static const _saveKey = 'magic_tower_save_v3';
+  static const _saveKey = 'magic_tower_save_v4';
 
   @override
   void initState() {
