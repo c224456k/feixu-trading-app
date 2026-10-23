@@ -12,21 +12,21 @@ const mtFloors = 5;
 class MtMonster {
   final String name;
   final int kind; // MonsterPainter 的種類（跟百層塔共用）
-  final int hp, atk, def;
+  final int hp, atk, def, exp, gold;
   final bool boss;
-  const MtMonster(this.name, this.kind, this.hp, this.atk, this.def, {this.boss = false});
+  const MtMonster(this.name, this.kind, this.hp, this.atk, this.def, this.exp, this.gold, {this.boss = false});
 }
 
 const mtMonsters = <String, MtMonster>{
-  '1': MtMonster('史萊姆', 0, 35, 20, 1),
-  '2': MtMonster('蝙蝠', 1, 38, 32, 2),
-  '3': MtMonster('哥布林', 2, 50, 42, 4),
-  '4': MtMonster('骷髏兵', 3, 60, 52, 8),
-  '5': MtMonster('野狼', 4, 80, 62, 10),
-  '6': MtMonster('獸人', 5, 110, 72, 18),
-  '7': MtMonster('石像鬼', 7, 90, 55, 30),
-  '8': MtMonster('惡魔', 9, 180, 100, 28),
-  'K': MtMonster('魔王', 9, 320, 90, 26, boss: true),
+  '1': MtMonster('史萊姆', 0, 35, 24, 1, 3, 3),
+  '2': MtMonster('蝙蝠', 1, 38, 37, 2, 5, 5),
+  '3': MtMonster('哥布林', 2, 50, 50, 4, 8, 8),
+  '4': MtMonster('骷髏兵', 3, 60, 61, 8, 12, 12),
+  '5': MtMonster('野狼', 4, 80, 72, 10, 18, 18),
+  '6': MtMonster('獸人', 5, 110, 83, 18, 26, 26),
+  '7': MtMonster('石像鬼', 7, 90, 64, 30, 30, 40),
+  '8': MtMonster('惡魔', 9, 180, 112, 28, 60, 80),
+  'K': MtMonster('魔王', 9, 320, 150, 26, 0, 0, boss: true),
 };
 
 // 道具：字元 → (說明, 血, 攻, 防, 黃鑰匙, 藍鑰匙, 紅鑰匙)
@@ -37,9 +37,9 @@ class MtItem {
 }
 
 const mtItems = <String, MtItem>{
-  'y': MtItem('黃鑰匙', ky: 1),
-  'b': MtItem('藍鑰匙', kb: 1),
-  'r': MtItem('紅鑰匙', kr: 1),
+  'y': MtItem('金鑰匙', ky: 1),
+  'b': MtItem('銀鑰匙', kb: 1),
+  'r': MtItem('魔鑰匙', kr: 1),
   'h': MtItem('小血瓶', hp: 150),
   'H': MtItem('大血瓶', hp: 350),
   'a': MtItem('紅寶石', atk: 3),
@@ -48,7 +48,33 @@ const mtItems = <String, MtItem>{
   'x': MtItem('聖盾', def: 12),
 };
 
-const mtStartHp = 1000, mtStartAtk = 10, mtStartDef = 10;
+const mtStartHp = 800, mtStartAtk = 12, mtStartDef = 10;
+
+/// 勇者等級：累積經驗到門檻就升級，每升一級 +攻 +防 +血（當場補上）。
+const mtExpAt = [0, 20, 50, 100, 170, 260, 370, 500, 650, 820]; // 第 i+1 級需要的累積經驗
+const mtLevelAtk = 3, mtLevelDef = 3, mtLevelHp = 80;
+int mtLevel(int exp) {
+  var lv = 1;
+  for (var i = 1; i < mtExpAt.length; i++) {
+    if (exp >= mtExpAt[i]) lv = i + 1;
+  }
+  return lv;
+}
+
+/// 商人：金幣只能在魔塔裡用。(名稱, 價格, 血, 攻, 防, 金鑰匙, 銀鑰匙)
+class MtOffer {
+  final String name;
+  final int price, hp, atk, def, ky, kb;
+  const MtOffer(this.name, this.price, {this.hp = 0, this.atk = 0, this.def = 0, this.ky = 0, this.kb = 0});
+}
+
+const mtShop = <MtOffer>[
+  MtOffer('生命 +400', 40, hp: 400),
+  MtOffer('攻擊 +4', 60, atk: 4),
+  MtOffer('防禦 +4', 60, def: 4),
+  MtOffer('金鑰匙 ×1', 25, ky: 1),
+  MtOffer('銀鑰匙 ×1', 45, kb: 1),
+];
 
 /// 每層一張 11x11。# 牆　. 空地　S 起點　U 上樓　D 下樓　YBR 黃藍紅門　數字/K 怪物　其餘見 mtItems。
 /// 上下樓的位置固定在中間欄（c5）的最上/最下，奇偶層交替。
@@ -70,7 +96,7 @@ const mtMaps = <List<String>>[
     '###########',
     '#h.#.D.#d.#',
     '#..B.4.Y..#',
-    '#a.#...#y.#',
+    '#a.#P..#y.#',
     '####.2.####',
     '#y2.....2b#',
     '####.3.####',
@@ -100,7 +126,7 @@ const mtMaps = <List<String>>[
     '####.5.####',
     '#y6.....6b#',
     '####.8.####',
-    '#x.#...#H.#',
+    '#x.#P..#H.#',
     '#..Y...B..#',
     '#a.#.U.#a.#',
     '###########',
@@ -153,6 +179,9 @@ class MtGame {
   int floor = 0, r = 9, c = 5;
   int hp = mtStartHp, atk = mtStartAtk, def = mtStartDef;
   int ky = 0, kb = 0, kr = 0;
+  int exp = 0, gold = 0;
+  int get lv => mtLevel(exp);
+  int facing = 1; // 1 朝右、-1 朝左（畫面用）
   int steps = 0;
   bool won = false;
 
@@ -185,9 +214,9 @@ class MtGame {
     if (nr < 0 || nc < 0 || nr >= mtSize || nc >= mtSize) return '牆';
     final t = grid[floor][nr][nc];
     if (t == '#') return '牆';
-    if (t == 'Y' && ky == 0) return '需要黃鑰匙';
-    if (t == 'B' && kb == 0) return '需要藍鑰匙';
-    if (t == 'R' && kr == 0) return '需要紅鑰匙';
+    if (t == 'Y' && ky == 0) return '需要金鑰匙';
+    if (t == 'B' && kb == 0) return '需要銀鑰匙';
+    if (t == 'R' && kr == 0) return '需要魔鑰匙';
     final m = mtMonsters[t];
     if (m != null && mtLoss(hp, atk, def, m) == null) return '打不贏${m.name}';
     return null;
@@ -196,6 +225,8 @@ class MtGame {
   /// 往 (dr,dc) 走一步。回傳事件：'wall'、'move'、'item:名稱'、'door'、'fight:怪物符號'（需由畫面播戰鬥，戰鬥後呼叫 [resolveFight]）、'stairs'、'win'。
   String move(int dr, int dc) {
     final nr = r + dr, nc = c + dc;
+    if (dc != 0) facing = dc;
+    if (nr >= 0 && nc >= 0 && nr < mtSize && nc < mtSize && grid[floor][nr][nc] == 'P') return 'shop';
     final why = blockedReason(nr, nc);
     if (why != null) return 'blocked:$why';
     final t = grid[floor][nr][nc];
@@ -245,13 +276,36 @@ class MtGame {
   }
 
   /// 戰鬥動畫播完後套用結果：扣血、怪物消失、勇者站到怪物的格子。
-  void resolveFight(int nr, int nc, int heroHpAfter) {
+  /// 回傳升了幾級。
+  int resolveFight(int nr, int nc, int heroHpAfter) {
     final t = grid[floor][nr][nc];
+    final m = mtMonsters[t]!;
     grid[floor][nr][nc] = '.';
     hp = heroHpAfter;
+    final before = lv;
+    exp += m.exp;
+    gold += m.gold;
+    final up = lv - before;
+    if (up > 0) {
+      atk += mtLevelAtk * up;
+      def += mtLevelDef * up;
+      hp += mtLevelHp * up;
+    }
     r = nr;
     c = nc;
     steps++;
     if (t == 'K') won = true;
+    return up;
+  }
+
+  bool buy(MtOffer o) {
+    if (gold < o.price) return false;
+    gold -= o.price;
+    hp += o.hp;
+    atk += o.atk;
+    def += o.def;
+    ky += o.ky;
+    kb += o.kb;
+    return true;
   }
 }

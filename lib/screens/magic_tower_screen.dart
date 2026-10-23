@@ -19,6 +19,43 @@ class MagicTowerScreen extends StatefulWidget {
   State<MagicTowerScreen> createState() => _MagicTowerScreenState();
 }
 
+const _keyColor = {'y': Color(0xFFFFC107), 'b': Color(0xFF90CAF9), 'r': Color(0xFFE040FB)};
+const _keyName = {'y': '金鑰匙', 'b': '銀鑰匙', 'r': '魔鑰匙'};
+
+class _KeyIconPainter extends CustomPainter {
+  final Color color;
+  _KeyIconPainter(this.color);
+  @override
+  void paint(Canvas canvas, Size size) {
+    paintKey(canvas, Rect.fromLTWH(0, 0, size.width, size.height), color);
+  }
+
+  @override
+  bool shouldRepaint(covariant _KeyIconPainter old) => old.color != color;
+}
+
+/// 鑰匙圖示（地圖和 HUD 共用）：斜放、帶外框，比較顯眼。
+void paintKey(Canvas canvas, Rect r, Color col) {
+  final cs = r.width;
+  canvas.save();
+  canvas.translate(r.center.dx, r.center.dy);
+  canvas.rotate(-math.pi / 4);
+  final dark = Paint()..color = Colors.black87;
+  final fill = Paint()..color = col;
+  // 柄與齒
+  canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(0, cs * 0.1), width: cs * 0.2, height: cs * 0.62), Radius.circular(cs * 0.04)), dark);
+  canvas.drawRect(Rect.fromLTWH(cs * 0.0, cs * 0.18, cs * 0.26, cs * 0.12), dark);
+  canvas.drawRect(Rect.fromLTWH(cs * 0.0, cs * 0.34, cs * 0.2, cs * 0.12), dark);
+  canvas.drawRect(Rect.fromCenter(center: Offset(0, cs * 0.1), width: cs * 0.1, height: cs * 0.56), fill);
+  canvas.drawRect(Rect.fromLTWH(cs * 0.0, cs * 0.2, cs * 0.2, cs * 0.07), fill);
+  canvas.drawRect(Rect.fromLTWH(cs * 0.0, cs * 0.36, cs * 0.14, cs * 0.07), fill);
+  // 圓環
+  canvas.drawCircle(Offset(0, -cs * 0.26), cs * 0.2, dark);
+  canvas.drawCircle(Offset(0, -cs * 0.26), cs * 0.15, fill);
+  canvas.drawCircle(Offset(0, -cs * 0.26), cs * 0.07, Paint()..color = const Color(0xFF241F33));
+  canvas.restore();
+}
+
 class _MagicTowerScreenState extends State<MagicTowerScreen> {
   var _g = MtGame();
   final _focus = FocusNode();
@@ -55,6 +92,11 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
       if (why != '牆') _say(why);
       return false;
     }
+    if (ev == 'shop') {
+      _walkTimer?.cancel();
+      _openShop();
+      return false;
+    }
     if (ev.startsWith('fight:')) {
       final p = ev.split(':');
       final m = mtMonsters[p[1]]!;
@@ -81,10 +123,15 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   void _onBattleDone(int hpAfter, bool won) {
     final b = _battle;
     if (b == null) return;
+    var up = 0;
     setState(() {
       _battle = null;
-      _g.resolveFight(b.r, b.c, hpAfter);
+      up = _g.resolveFight(b.r, b.c, hpAfter);
     });
+    if (b.m.gold > 0) {
+      _say(up > 0 ? '升級！Lv.${_g.lv}　攻+${mtLevelAtk * up} 防+${mtLevelDef * up} 血+${mtLevelHp * up}　💰+${b.m.gold}' : '💰 +${b.m.gold}　經驗 +${b.m.exp}');
+      if (up > 0) HapticFeedback.mediumImpact();
+    }
     if (_g.won) {
       Future.delayed(const Duration(milliseconds: 300), _showWin);
     }
@@ -192,6 +239,40 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
     return KeyEventResult.handled;
   }
 
+  void _openShop() {
+    showDialog(
+        context: context,
+        builder: (c) => StatefulBuilder(
+            builder: (c, setD) => AlertDialog(
+                  backgroundColor: const Color(0xFF241F33),
+                  title: Row(children: [
+                    const Text('🧙 魔塔商人'),
+                    const Spacer(),
+                    Text('💰 ${_g.gold}', style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold)),
+                  ]),
+                  content: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('金幣只能在魔塔裡花。', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    for (final o in mtShop)
+                      ListTile(
+                        dense: true,
+                        title: Text(o.name),
+                        trailing: FilledButton(
+                          onPressed: _g.gold >= o.price
+                              ? () {
+                                  _g.buy(o);
+                                  setD(() {});
+                                  setState(() {});
+                                }
+                              : null,
+                          child: Text('💰 ${o.price}'),
+                        ),
+                      ),
+                  ]),
+                  actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('離開'))],
+                )));
+  }
+
   void _help() {
     showDialog(
         context: context,
@@ -199,11 +280,12 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
               title: const Text('魔塔玩法'),
               content: const SingleChildScrollView(
                   child: Text('目標：爬到第 5 層，打倒魔王。\n\n'
-                      '• 方向鍵／WASD 或畫面按鈕移動；點地圖上的格子會自動走過去。\n'
-                      '• 撞到怪物就戰鬥：你先出手，雙方輪流攻擊，傷害＝攻擊−對方防禦。怪物頭上的數字是「打贏會損失的血量」，「？」是現在打不贏。\n'
-                      '• 黃／藍／紅鑰匙開同色的門，鑰匙是有限的，想清楚再開。\n'
-                      '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。部分怪物防禦很高，要先找到更強的武器。\n'
-                      '• 沒有回血的地方，血量就是你的本錢：先撿道具再打怪，通常會省很多血。\n'
+                      '• 淺色磚地是可以走的路，深色磚牆走不過去。方向鍵／WASD 或畫面按鈕移動；點地圖上的格子會自動走過去。\n'
+                      '• 撞到怪物就戰鬥：你先出手，雙方輪流攻擊，傷害＝攻擊−對方防禦。怪物腳下的數字是「打贏會損失的血量」，「？」是現在打不贏。\n'
+                      '• 打怪會得到經驗和金幣。經驗滿了自動升級，每級 +3 攻擊、+3 防禦、+80 血（當場補上）。\n'
+                      '• 金幣只能在魔塔裡花：找 🧙 商人（第 2、4 層）買血量、攻防和鑰匙。\n'
+                      '• 金鑰匙開金色的門、銀鑰匙開銀色的門、魔鑰匙開紫紅色的門，鑰匙有限，想清楚再開。\n'
+                      '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。有些怪物防禦很高，要先找到更強的武器或升級。\n'
                       '• 可以隨時上下樓回頭找漏掉的東西。')),
               actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('知道了'))],
             ));
@@ -280,7 +362,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                               ],
                               log: b.log,
                               heroHp: b.hp,
-                              heroMax: math.max(b.hp, mtStartHp),
+                              heroMax: b.hp,
                               band: mtBands[_g.floor],
                               speed: (b.log.length / 8).clamp(1.5, 4.0),
                               onDone: _onBattleDone,
@@ -302,23 +384,48 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   Widget _stat(String icon, String v, {Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(icon, style: const TextStyle(fontSize: 16)),
+          Text(icon, style: const TextStyle(fontSize: 15)),
           const SizedBox(width: 3),
-          Text(v, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color ?? Colors.white)),
+          Text(v, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color ?? Colors.white)),
         ]),
       );
 
+  Widget _keyStat(String code, int n) {
+    final col = _keyColor[code]!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 22, height: 22, child: CustomPaint(painter: _KeyIconPainter(col))),
+        const SizedBox(width: 3),
+        Text('${_keyName[code]} ×$n', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: col)),
+      ]),
+    );
+  }
+
   Widget _hud() {
+    final lv = _g.lv;
+    final lo = mtExpAt[lv - 1];
+    final hi = lv >= mtExpAt.length ? lo : mtExpAt[lv];
+    final ratio = lv >= mtExpAt.length ? 1.0 : ((_g.exp - lo) / (hi - lo)).clamp(0.0, 1.0);
     return Container(
       color: const Color(0xFF1C1829),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      child: Wrap(alignment: WrapAlignment.center, children: [
-        _stat('❤️', '${_g.hp}', color: const Color(0xFFFF8A80)),
-        _stat('⚔️', '${_g.atk}'),
-        _stat('🛡️', '${_g.def}'),
-        _stat('🟡', '${_g.ky}', color: const Color(0xFFFFD54F)),
-        _stat('🔵', '${_g.kb}', color: const Color(0xFF64B5F6)),
-        _stat('🔴', '${_g.kr}', color: const Color(0xFFE57373)),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Wrap(alignment: WrapAlignment.center, children: [
+          _stat('🎖️', 'Lv.$lv', color: const Color(0xFFFFE082)),
+          _stat('❤️', '${_g.hp}', color: const Color(0xFFFF8A80)),
+          _stat('⚔️', '${_g.atk}'),
+          _stat('🛡️', '${_g.def}'),
+          _stat('💰', '${_g.gold}', color: const Color(0xFFFFD54F)),
+        ]),
+        const SizedBox(height: 3),
+        Wrap(alignment: WrapAlignment.center, children: [_keyStat('y', _g.ky), _keyStat('b', _g.kb), _keyStat('r', _g.kr)]),
+        const SizedBox(height: 4),
+        Row(children: [
+          Text(lv >= mtExpAt.length ? '經驗 MAX' : '經驗 ${_g.exp}/$hi', style: const TextStyle(fontSize: 11, color: Colors.white60)),
+          const SizedBox(width: 8),
+          Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: ratio, minHeight: 6, backgroundColor: Colors.white12, color: const Color(0xFF7C4DFF)))),
+        ]),
       ]),
     );
   }
@@ -355,8 +462,8 @@ class _MapPainter extends CustomPainter {
   final MtGame g;
   _MapPainter(this.g);
 
-  static const _wallA = Color(0xFF4A4458), _wallB = Color(0xFF383245), _floorA = Color(0xFF2A2536), _floorB = Color(0xFF302B3F);
-  static const _doorCol = {'Y': Color(0xFFFFC107), 'B': Color(0xFF42A5F5), 'R': Color(0xFFEF5350)};
+  static const _floorA = Color(0xFFB9AE96), _floorB = Color(0xFFADA189); // 淺色磚地＝可以走
+  static const _doorCol = {'Y': Color(0xFFFFC107), 'B': Color(0xFF90CAF9), 'R': Color(0xFFE040FB)};
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -367,14 +474,14 @@ class _MapPainter extends CustomPainter {
         final rect = Rect.fromLTWH(c * cs, r * cs, cs, cs);
         final t = g.at(f, r, c);
         if (t == '#') {
-          canvas.drawRect(rect, Paint()..color = (r + c).isEven ? _wallA : _wallB);
-          canvas.drawRect(rect.deflate(cs * 0.04), Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1
-            ..color = Colors.black26);
+          _wall(canvas, rect, cs, r, c);
           continue;
         }
         canvas.drawRect(rect, Paint()..color = (r + c).isEven ? _floorA : _floorB);
+        canvas.drawRect(rect, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.6
+          ..color = const Color(0x33000000));
         _tile(canvas, t, rect, cs);
       }
     }
@@ -384,15 +491,85 @@ class _MapPainter extends CustomPainter {
     _hero(canvas, hr, cs);
   }
 
+  // 深色磚牆：兩排錯開的磚塊 + 上緣高光，跟淺色地板明顯分開
+  void _wall(Canvas canvas, Rect rect, double cs, int r, int c) {
+    canvas.drawRect(rect, Paint()..color = const Color(0xFF2B2438));
+    final line = Paint()
+      ..color = const Color(0xFF16121F)
+      ..strokeWidth = math.max(1.0, cs * 0.04);
+    final h = cs / 3;
+    for (var i = 1; i < 3; i++) {
+      canvas.drawLine(Offset(rect.left, rect.top + h * i), Offset(rect.right, rect.top + h * i), line);
+    }
+    for (var i = 0; i < 3; i++) {
+      final off = (i + r) % 2 == 0 ? cs * 0.5 : cs * 0.25;
+      canvas.drawLine(Offset(rect.left + off, rect.top + h * i), Offset(rect.left + off, rect.top + h * (i + 1)), line);
+    }
+    canvas.drawRect(Rect.fromLTWH(rect.left, rect.top, cs, cs * 0.06), Paint()..color = const Color(0xFF4E4566));
+  }
+
   void _hero(Canvas canvas, Rect r, double cs) {
+    final cx = r.center.dx, base = r.bottom - cs * 0.04;
+    final f = g.facing.toDouble(); // 面向
     final p = Paint();
-    final cx = r.center.dx;
-    // 身體（藍披風）、頭、劍
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(cx, r.center.dy + cs * 0.12), width: cs * 0.42, height: cs * 0.44), Radius.circular(cs * 0.1)), p..color = const Color(0xFF3F6FD8));
-    canvas.drawCircle(Offset(cx, r.center.dy - cs * 0.17), cs * 0.17, p..color = const Color(0xFFF3CFA7));
-    canvas.drawArc(Rect.fromCenter(center: Offset(cx, r.center.dy - cs * 0.2), width: cs * 0.38, height: cs * 0.34), math.pi, math.pi, true, p..color = const Color(0xFFB0BEC5));
-    canvas.drawRect(Rect.fromCenter(center: Offset(cx + cs * 0.3, r.center.dy), width: cs * 0.07, height: cs * 0.55), p..color = const Color(0xFFECEFF1));
-    canvas.drawRect(Rect.fromCenter(center: Offset(cx + cs * 0.3, r.center.dy + cs * 0.2), width: cs * 0.2, height: cs * 0.06), p..color = const Color(0xFFFFB300));
+    final ol = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.0, cs * 0.04)
+      ..color = const Color(0xFF2A1B10);
+    // 披風（在身體後面，往身後飄）
+    final cape = Path()
+      ..moveTo(cx - f * cs * 0.1, base - cs * 0.5)
+      ..quadraticBezierTo(cx - f * cs * 0.42, base - cs * 0.3, cx - f * cs * 0.34, base - cs * 0.06)
+      ..lineTo(cx - f * cs * 0.06, base - cs * 0.14)
+      ..close();
+    canvas.drawPath(cape, p..color = const Color(0xFFC62828));
+    canvas.drawPath(cape, ol);
+    // 腿
+    for (final dx in [-0.1, 0.1]) {
+      final leg = RRect.fromRectAndRadius(Rect.fromLTWH(cx + cs * dx - cs * 0.07, base - cs * 0.2, cs * 0.14, cs * 0.2), Radius.circular(cs * 0.04));
+      canvas.drawRRect(leg, p..color = const Color(0xFF5D4037));
+      canvas.drawRRect(leg, ol);
+    }
+    // 身體：銀甲 + 藍色衣襬 + 腰帶
+    final body = RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(cx, base - cs * 0.36), width: cs * 0.44, height: cs * 0.34), Radius.circular(cs * 0.1));
+    canvas.drawRRect(body, p..color = const Color(0xFFCFD8DC));
+    canvas.drawRect(Rect.fromCenter(center: Offset(cx, base - cs * 0.3), width: cs * 0.44, height: cs * 0.06), p..color = const Color(0xFF3949AB));
+    canvas.drawRect(Rect.fromCenter(center: Offset(cx, base - cs * 0.3), width: cs * 0.08, height: cs * 0.08), p..color = const Color(0xFFFFD54F));
+    canvas.drawRRect(body, ol);
+    // 胸前紋章
+    canvas.drawCircle(Offset(cx, base - cs * 0.42), cs * 0.05, p..color = const Color(0xFF3949AB));
+    // 頭
+    final hc = Offset(cx, base - cs * 0.64);
+    canvas.drawCircle(hc, cs * 0.2, p..color = const Color(0xFFFFE0B2));
+    canvas.drawCircle(hc, cs * 0.2, ol);
+    // 頭盔：銀色半罩 + 紅色羽飾
+    canvas.drawArc(Rect.fromCircle(center: hc, radius: cs * 0.21), math.pi, math.pi, true, p..color = const Color(0xFFB0BEC5));
+    canvas.drawArc(Rect.fromCircle(center: hc, radius: cs * 0.21), math.pi, math.pi, true, ol);
+    final plume = Path()
+      ..moveTo(cx, hc.dy - cs * 0.2)
+      ..quadraticBezierTo(cx - f * cs * 0.1, hc.dy - cs * 0.42, cx - f * cs * 0.26, hc.dy - cs * 0.3)
+      ..quadraticBezierTo(cx - f * cs * 0.12, hc.dy - cs * 0.26, cx - f * cs * 0.02, hc.dy - cs * 0.17)
+      ..close();
+    canvas.drawPath(plume, p..color = const Color(0xFFE53935));
+    canvas.drawPath(plume, ol);
+    // 眼睛（朝面向那側偏）
+    final ey = hc.dy + cs * 0.02;
+    for (final dx in [-0.07, 0.08]) {
+      canvas.drawOval(Rect.fromCenter(center: Offset(cx + f * cs * 0.03 + cs * dx, ey), width: cs * 0.06, height: cs * 0.09), p..color = const Color(0xFF212121));
+    }
+    // 盾（面向的反側手）與劍（面向那側手）
+    final sc = Offset(cx - f * cs * 0.3, base - cs * 0.36);
+    canvas.drawCircle(sc, cs * 0.14, p..color = const Color(0xFF3949AB));
+    canvas.drawCircle(sc, cs * 0.14, ol);
+    canvas.drawCircle(sc, cs * 0.05, p..color = const Color(0xFFFFD54F));
+    canvas.save();
+    canvas.translate(cx + f * cs * 0.3, base - cs * 0.36);
+    canvas.rotate(f * 0.35);
+    canvas.drawRect(Rect.fromCenter(center: Offset(0, -cs * 0.22), width: cs * 0.09, height: cs * 0.5), p..color = const Color(0xFFECEFF1));
+    canvas.drawRect(Rect.fromCenter(center: Offset(0, -cs * 0.22), width: cs * 0.09, height: cs * 0.5), ol);
+    canvas.drawRect(Rect.fromCenter(center: Offset(0, 0.02), width: cs * 0.26, height: cs * 0.06), p..color = const Color(0xFFFFB300));
+    canvas.drawRect(Rect.fromCenter(center: Offset(0, cs * 0.08), width: cs * 0.07, height: cs * 0.12), p..color = const Color(0xFF6D4C41));
+    canvas.restore();
   }
 
   void _tile(Canvas canvas, String t, Rect r, double cs) {
@@ -400,9 +577,22 @@ class _MapPainter extends CustomPainter {
     final cx = r.center.dx, cy = r.center.dy;
     final door = _doorCol[t];
     if (door != null) {
-      canvas.drawRRect(RRect.fromRectAndRadius(r.deflate(cs * 0.08), Radius.circular(cs * 0.1)), p..color = door.withValues(alpha: 0.85));
-      canvas.drawRect(Rect.fromCenter(center: Offset(cx, cy), width: cs * 0.06, height: cs * 0.7), p..color = Colors.black38);
-      canvas.drawCircle(Offset(cx + cs * 0.14, cy), cs * 0.06, p..color = Colors.white70);
+      final rr = RRect.fromRectAndRadius(r.deflate(cs * 0.05), Radius.circular(cs * 0.12));
+      canvas.drawRRect(rr, p..color = const Color(0xFF3E2723));
+      canvas.drawRRect(rr.deflate(cs * 0.07), p..color = door);
+      canvas.drawRRect(rr.deflate(cs * 0.07), Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = Colors.black54);
+      // 兩片門板的接縫 + 鎖
+      canvas.drawRect(Rect.fromCenter(center: Offset(cx, cy), width: cs * 0.05, height: cs * 0.78), p..color = Colors.black38);
+      canvas.drawCircle(Offset(cx, cy), cs * 0.15, p..color = const Color(0xFF212121));
+      canvas.drawCircle(Offset(cx, cy), cs * 0.1, p..color = Colors.white);
+      canvas.drawRect(Rect.fromCenter(center: Offset(cx, cy + cs * 0.06), width: cs * 0.05, height: cs * 0.1), p..color = const Color(0xFF212121));
+      return;
+    }
+    if (t == 'P') {
+      _merchant(canvas, r, cs);
       return;
     }
     if (t == 'U' || t == 'D') {
@@ -434,6 +624,33 @@ class _MapPainter extends CustomPainter {
     }
   }
 
+  void _merchant(Canvas canvas, Rect r, double cs) {
+    final p = Paint();
+    final cx = r.center.dx, base = r.bottom - cs * 0.04;
+    final ol = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.0, cs * 0.04)
+      ..color = Colors.black87;
+    final robe = Path()
+      ..moveTo(cx - cs * 0.28, base)
+      ..quadraticBezierTo(cx - cs * 0.3, base - cs * 0.4, cx, base - cs * 0.52)
+      ..quadraticBezierTo(cx + cs * 0.3, base - cs * 0.4, cx + cs * 0.28, base)
+      ..close();
+    canvas.drawPath(robe, p..color = const Color(0xFF6A1B9A));
+    canvas.drawPath(robe, ol);
+    canvas.drawCircle(Offset(cx, base - cs * 0.58), cs * 0.17, p..color = const Color(0xFFFFE0B2));
+    canvas.drawCircle(Offset(cx, base - cs * 0.58), cs * 0.17, ol);
+    final hat = Path()
+      ..moveTo(cx - cs * 0.26, base - cs * 0.62)
+      ..lineTo(cx, base - cs * 0.98)
+      ..lineTo(cx + cs * 0.26, base - cs * 0.62)
+      ..close();
+    canvas.drawPath(hat, p..color = const Color(0xFF4A148C));
+    canvas.drawPath(hat, ol);
+    canvas.drawCircle(Offset(cx, base - cs * 0.3), cs * 0.07, p..color = const Color(0xFFFFD54F));
+    _text(canvas, '💰', Offset(r.right - cs * 0.15, r.top + cs * 0.18), cs * 0.24, Colors.white);
+  }
+
   void _item(Canvas canvas, String t, Rect r, double cs) {
     final p = Paint();
     final cx = r.center.dx, cy = r.center.dy;
@@ -441,12 +658,8 @@ class _MapPainter extends CustomPainter {
       case 'y':
       case 'b':
       case 'r':
-        final col = t == 'y' ? const Color(0xFFFFC107) : (t == 'b' ? const Color(0xFF42A5F5) : const Color(0xFFEF5350));
-        canvas.drawCircle(Offset(cx - cs * 0.1, cy - cs * 0.12), cs * 0.13, p..color = col);
-        canvas.drawCircle(Offset(cx - cs * 0.1, cy - cs * 0.12), cs * 0.05, Paint()..color = _floorA);
-        canvas.drawRect(Rect.fromCenter(center: Offset(cx + cs * 0.02, cy + cs * 0.06), width: cs * 0.1, height: cs * 0.42), Paint()..color = col);
-        canvas.drawRect(Rect.fromLTWH(cx + cs * 0.02, cy + cs * 0.12, cs * 0.18, cs * 0.07), Paint()..color = col);
-        canvas.drawRect(Rect.fromLTWH(cx + cs * 0.02, cy + cs * 0.24, cs * 0.14, cs * 0.07), Paint()..color = col);
+        canvas.drawCircle(Offset(cx, cy), cs * 0.36, Paint()..color = _doorCol[t.toUpperCase()]!.withValues(alpha: 0.35));
+        paintKey(canvas, Rect.fromCenter(center: Offset(cx, cy), width: cs * 0.85, height: cs * 0.85), _doorCol[t.toUpperCase()]!);
       case 'h':
       case 'H':
         final big = t == 'H';
