@@ -194,6 +194,7 @@ class _BattleStageState extends State<BattleStage> with SingleTickerProviderStat
         _done = true;
         final won = _heroHp > 0;
         widget.onDone(_heroHp, won);
+        if (!mounted) return; // onDone 通常會讓父層把舞台拆掉
       }
     }
     setState(() {});

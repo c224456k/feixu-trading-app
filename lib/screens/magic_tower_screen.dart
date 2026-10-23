@@ -69,7 +69,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   ({int r, int c, MtMonster m, List<Map<String, dynamic>> log, int hp, int atk, int def})? _battle;
   int _battleKey = 0;
 
-  static const _saveKey = 'magic_tower_save_v4';
+  static const _saveKey = 'magic_tower_save_v5';
 
   @override
   void initState() {
@@ -378,6 +378,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                     }),
                     if (_toast.isNotEmpty)
                       Positioned(
+                          key: const ValueKey('mt-toast'),
                           left: 0,
                           right: 0,
                           top: 6,
@@ -389,6 +390,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                           ))),
                     if (b != null)
                       Positioned.fill(
+                        key: const ValueKey('mt-battle'),
                         child: Container(
                           color: Colors.black.withValues(alpha: 0.78),
                           alignment: Alignment.center,
