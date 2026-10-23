@@ -69,7 +69,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
   ({int r, int c, MtMonster m, List<Map<String, dynamic>> log, int hp, int atk, int def})? _battle;
   int _battleKey = 0;
 
-  static const _saveKey = 'magic_tower_save_v6';
+  static const _saveKey = 'magic_tower_save_v7';
 
   @override
   void initState() {
@@ -321,7 +321,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                   child: Text('目標：爬到第 20 層，打倒魔王。\n\n'
                       '• 淺色磚地是可以走的路，深色磚牆走不過去。方向鍵／WASD 或畫面按鈕移動；點地圖上的格子會自動走過去。\n'
                       '• 撞到怪物就戰鬥：你先出手，雙方輪流攻擊，你的傷害＝攻擊−怪物防禦；怪物的攻擊會穿透你 30% 的防禦（防禦只算 70%）。怪物腳下的數字是「打贏會損失的血量」，「？」是現在打不贏。\n'
-                      '• 打怪會得到經驗和金幣。經驗滿了自動升級，每級 +3 攻擊、+3 防禦、+80 血（當場補上）。\n'
+                      '• 打怪會得到經驗和金幣。經驗滿了自動升級，每級 +3 攻擊、+3 防禦、+40 血（當場補上）。\n'
                       '• 金幣只能在魔塔裡花：找 🧙 商人（第 3、7、11、15、19 層）買血量、攻防或鑰匙（每位商人只能買一樣），越深的樓層賣得越貴。\n'
                       '• 金鑰匙開金色的門、銀鑰匙開銀色的門、魔鑰匙開紫紅色的門，鑰匙有限，想清楚再開。\n'
                       '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。有些怪物防禦很高，要先找到更強的武器或升級。\n'
