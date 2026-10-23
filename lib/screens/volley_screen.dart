@@ -12,9 +12,11 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../api_client.dart';
 import '../widgets/monster_art.dart';
 import '../widgets/volley_audio.dart';
+import 'volley_sim.dart';
 
 // 怪物打排球：仿《皮卡丘打排球》的連線雙人對戰，角色是百層塔的原創怪物。
-// 物理全部在伺服器（25Hz），這裡只傳按鍵、把收到的位置補間畫出來。
+// 連線對戰：物理在伺服器（25Hz），這裡傳按鍵、補間畫出收到的位置，自己的角色另外在本機預測（按了馬上動）。
+// 電腦對戰：物理與電腦對手都在本機跑（volley_sim.dart），不連伺服器、不受網路影響。
 
 final _money = NumberFormat('#,##0');
 const _kindNames = ['史萊姆', '蝙蝠', '哥布林', '骷髏', '野狼', '獸人', '幽靈', '石像鬼', '飛龍', '惡魔'];
@@ -86,6 +88,20 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   List<int> _lastSent = [0, 0, 0, 0];
   Timer? _inputTimer;
 
+  // 電腦對戰（本機模擬）
+  bool _local = false, _localOver = false;
+  VolleyGame? _lg;
+  VolleyBot? _lbot;
+  double _acc = 0;
+
+  // 連線對戰：自己角色的本機預測 + ping
+  VolleyPlayer? _pred;
+  double _predPx = 0, _predPy = 0, _predCx = 0, _predCy = 0;
+  int _lastRs = -1;
+  List<int> _inp = [0, 0, 0, 0];
+  int _ping = -1;
+  Timer? _pingTimer;
+
   late final Ticker _ticker;
   final ValueNotifier<int> _repaint = ValueNotifier(0);
   Duration _lastTick = Duration.zero;
@@ -105,6 +121,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     _lobbyTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_phase == _Phase.lobby) _send({'t': 'lobby'});
     });
+    _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!_local && _phase == _Phase.playing) _send({'t': 'ping', 'ts': DateTime.now().microsecondsSinceEpoch});
+    });
   }
 
   @override
@@ -113,6 +132,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     VolleyAudio.instance.leave();
     _lobbyTimer?.cancel();
     _inputTimer?.cancel();
+    _pingTimer?.cancel();
     _ticker.dispose();
     _repaint.dispose();
     _sub?.cancel();
@@ -197,6 +217,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           _score = [0, 0];
           _prevScore = [0, 0];
           _prev = _cur = null;
+          _pred = null;
+          _lastRs = -1;
           _endMsg = null;
           _fx.clear();
           _trail.clear();
@@ -205,6 +227,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         _sendInput(force: true);
       case 's':
         _onFrame(m);
+      case 'pong':
+        final ts = m['ts'];
+        if (ts is int) setState(() => _ping = ((DateTime.now().microsecondsSinceEpoch - ts) / 1000).round());
       case 'end':
         VolleyAudio.instance.duck(false);
         final ew = m['winner'] as int;
@@ -249,6 +274,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     final gap = old == null ? 40000.0 : (_now - old.at).inMicroseconds.toDouble();
     _gapUs = _gapUs * 0.8 + gap.clamp(35000.0, 110000.0) * 0.2;
     _cur = _Snap(p, b, _now);
+    if (!_local) _reconcile(m['rs'], p[_side][0], p[_side][1]);
     final sc = (m['sc'] as List).cast<int>();
     final ev = (m['ev'] as List).cast<int>();
     final scored = sc[0] != _score[0] || sc[1] != _score[1];
@@ -294,6 +320,39 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     if (hudChanged && mounted) setState(() {});
   }
 
+  // 自己的角色只受自己的按鍵影響（沒有碰撞），所以本機照同一套規則先跑，伺服器的位置只用來校正。
+  void _reconcile(dynamic rs, double sx, double sy) {
+    if (rs is! int) return; // 舊伺服器沒有 rs → 不預測
+    var pr = _pred;
+    if (pr == null || rs != _lastRs) {
+      pr ??= _pred = VolleyPlayer(sx);
+      pr.reset(_side == 0 ? 108.0 : 324.0);
+      if (rs == _lastRs || _lastRs == -1) {
+        pr.x = sx;
+        pr.y = sy;
+      }
+      _predPx = _predCx = pr.x;
+      _predPy = _predCy = pr.y;
+      _lastRs = rs;
+      return;
+    }
+    if ((pr.x - sx).abs() > 60 || (pr.y - sy).abs() > 80) {
+      pr.x = sx;
+      pr.y = sy;
+      pr.vy = 0;
+      _predPx = _predCx = sx;
+      _predPy = _predCy = sy;
+    }
+  }
+
+  /// 畫面上自己的角色位置（有預測就用預測）。
+  (double, double, int)? myPredicted() {
+    final pr = _pred;
+    if (pr == null || _local || _phase != _Phase.playing) return null;
+    final a = (_acc / volleyTick).clamp(0.0, 1.0);
+    return (_predPx + (_predCx - _predPx) * a, _predPy + (_predCy - _predPy) * a, pr.state);
+  }
+
   // ---------------------------------------------------------------- 輸入
   void _sendInput({bool force = false}) {
     final l = (_keys.contains(LogicalKeyboardKey.arrowLeft) || _keys.contains(LogicalKeyboardKey.keyA) || _tl) ? 1 : 0;
@@ -304,6 +363,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         ? 1
         : 0;
     final now = [l, r, u, h];
+    _inp = now;
+    if (_local) return;
     if (!force && now.toString() == _lastSent.toString()) return;
     _lastSent = now;
     _send({'t': 'in', 'l': l, 'r': r, 'u': u, 'h': h});
@@ -326,6 +387,32 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     _lastTick = d;
     _now = d;
     _clock += dt;
+    if (_local) {
+      if (_phase == _Phase.playing && !_localOver && _lg != null) {
+        _acc += dt;
+        var n = 0;
+        while (_acc >= volleyTick && n < 3 && !_localOver) {
+          _acc -= volleyTick;
+          n++;
+          _localStep();
+        }
+        if (n == 3 && _acc > volleyTick) _acc = 0;
+      }
+    } else if (_pred != null && _phase == _Phase.playing) {
+      _acc += dt;
+      var n = 0;
+      while (_acc >= volleyTick && n < 3) {
+        _acc -= volleyTick;
+        n++;
+        _predPx = _predCx;
+        _predPy = _predCy;
+        final pr = _pred!;
+        pr.step(_side, _inp);
+        _predCx = pr.x;
+        _predCy = pr.y;
+      }
+      if (n == 3 && _acc > volleyTick) _acc = 0;
+    }
     if (_bannerT > 0) _bannerT -= dt;
     if (_shake > 0) _shake -= dt;
     if (_netShake > 0) _netShake = math.max(0, _netShake - dt * 1.6);
@@ -358,12 +445,62 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   }
 
   // ---------------------------------------------------------------- 動作
-  void _createBot(int level) => _send({'t': 'create_bot', 'level': level, 'points': _points, 'kind': _myKind, 'band': _myBand});
+  void _createBot(int level) {
+    final rng = math.Random();
+    VolleyAudio.instance.duck(true);
+    setState(() {
+      _local = true;
+      _localOver = false;
+      _error = null;
+      _lg = VolleyGame(_points);
+      _lbot = VolleyBot(1, level);
+      _acc = 0;
+      _side = 0;
+      _phase = _Phase.playing;
+      _betNow = 0;
+      _pointsNow = _points;
+      _me = {'name': '你', 'look': {'kind': _myKind, 'band': _myBand}};
+      _opp = {'name': volleyBotName(level), 'look': {'kind': rng.nextInt(10), 'band': rng.nextInt(10)}};
+      _score = [0, 0];
+      _prevScore = [0, 0];
+      _server = _lg!.server;
+      _prev = _cur = null;
+      _pred = null;
+      _endMsg = null;
+      _fx.clear();
+      _trail.clear();
+      _inp = [0, 0, 0, 0];
+      _showBanner('準備！');
+    });
+  }
+
+  void _localStep() {
+    final g = _lg!, bot = _lbot!;
+    final ev = g.step([_inp, bot.act(g)]);
+    _onFrame(g.frame(ev));
+    if (g.winner != null) {
+      _localOver = true;
+      final w = g.winner!;
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (!mounted || !_local) return;
+        VolleyAudio.instance.duck(false);
+        VolleyAudio.instance.play(w == _side ? 'win' : 'lose', volume: 0.9);
+        setState(() {
+          _endMsg = {'winner': w, 'reason': 'score', 'bet': 0, 'payout': 0, 'refund': 0};
+          _phase = _Phase.over;
+        });
+      });
+    }
+  }
   void _create() => _send({'t': 'create', 'bet': _bet, 'points': _points, 'kind': _myKind, 'band': _myBand});
   void _join(Map room) => _send({'t': 'join', 'room': room['id'], 'kind': _myKind, 'band': _myBand});
 
   Future<bool> _confirmLeave() async {
     if (_phase != _Phase.playing) return true;
+    if (_local) {
+      VolleyAudio.instance.duck(false);
+      return true;
+    }
     final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
@@ -583,6 +720,11 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
                   builder: (c, box) => Stack(fit: StackFit.expand, children: [
                         RepaintBoundary(child: CustomPaint(size: box.biggest, painter: _VolleyPainter(this, staticLayer: true))),
                         RepaintBoundary(child: CustomPaint(size: box.biggest, painter: _VolleyPainter(this))),
+                        if (!_local && _ping >= 0)
+                          Positioned(
+                              right: 6,
+                              top: 4,
+                              child: Text('延遲 $_ping ms', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _ping < 80 ? Colors.greenAccent : (_ping < 160 ? Colors.amberAccent : Colors.redAccent)))),
                       ])),
             ),
           ),
@@ -658,6 +800,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
               setState(() {
                 _phase = _Phase.lobby;
                 _endMsg = null;
+                _local = false;
+                _lg = null;
+                _lbot = null;
               });
               _send({'t': 'lobby'});
             },
@@ -911,7 +1056,15 @@ class _VolleyPainter extends CustomPainter {
         x = p.p[i][0] + (c.p[i][0] - p.p[i][0]) * a;
         y = p.p[i][1] + (c.p[i][1] - p.p[i][1]) * a;
       }
-      final st = c.p[i][2].toInt();
+      var st = c.p[i][2].toInt();
+      if (i == s._side) {
+        final mp = s.myPredicted();
+        if (mp != null) {
+          x = mp.$1;
+          y = mp.$2;
+          st = mp.$3;
+        }
+      }
       final who = (i == s._side ? s._me : s._opp);
       final look = who['look'] as Map?;
       if (look == null) continue;
