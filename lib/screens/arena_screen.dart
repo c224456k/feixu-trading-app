@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../api_client.dart';
+import '../widgets/elements.dart';
 import '../widgets/hero_art.dart';
 
 // 競技場：玩家之間的友誼 PK（沒有排名與賭注）。邀請 → 對方同意 → 兩邊同時看同一場。
@@ -349,7 +350,14 @@ class _ArenaScreenState extends State<ArenaScreen>
     if (e['miss'] == true) return '$att 的攻擊被 $def 閃開了';
     if (e['t'] == 'thorns') return '$att 反彈了 $dmg 點傷害';
     if (e['t'] == 'breath') return '$att 噴出龍息，對 $def 造成 $dmg';
-    return '$att 對 $def 造成 $dmg${e['crit'] == true ? '（暴擊！）' : ''}';
+    if (e['t'] == 'burn') return '🔥 $def 被灼傷 $dmg';
+    if (e['t'] == 'frozen') return '❄ $att 被冰凍，這回合動不了';
+    const procNames = {'sunder': '破甲', 'bind': '纏繞', 'freeze': '冰凍', 'burn': '燃燒', 'shield': '地盾'};
+    final em = (e['em'] as num?)?.toDouble() ?? 1.0;
+    final procs = ((e['p'] as List?) ?? const []).map((x) => procNames[x] ?? '$x').join('、');
+    return '$att 對 $def 造成 $dmg${e['crit'] == true ? '（暴擊！）' : ''}'
+        '${em > 1 ? '（剋制 ×${em.toStringAsFixed(em == em.roundToDouble() ? 0 : 2)}）' : (em < 1 ? '（${em < 0.6 ? '被剋' : '同屬'} ×$em）' : '')}'
+        '${procs.isNotEmpty ? '【$procs】' : ''}';
   }
 
   Widget _hpBar(Map<String, dynamic> side, int hp, bool right) {
@@ -360,13 +368,27 @@ class _ArenaScreenState extends State<ArenaScreen>
           ? CrossAxisAlignment.end
           : CrossAxisAlignment.start,
       children: [
-        Text(
-          '${side['name']}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-          overflow: TextOverflow.ellipsis,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (right) ...[
+              if (((side['aelem'] as num?)?.toInt() ?? -1) >= 0) ElemBadge(elem: (side['aelem'] as num).toInt(), size: 15),
+              if (((side['welem'] as num?)?.toInt() ?? -1) >= 0) ...[const SizedBox(width: 2), ElemBadge(elem: (side['welem'] as num).toInt(), size: 15)],
+              const SizedBox(width: 4),
+            ],
+            Flexible(
+              child: Text(
+                '${side['name']}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (!right) ...[
+              const SizedBox(width: 4),
+              if (((side['welem'] as num?)?.toInt() ?? -1) >= 0) ElemBadge(elem: (side['welem'] as num).toInt(), size: 15),
+              if (((side['aelem'] as num?)?.toInt() ?? -1) >= 0) ...[const SizedBox(width: 2), ElemBadge(elem: (side['aelem'] as num).toInt(), size: 15)],
+            ],
+          ],
         ),
         const SizedBox(height: 2),
         ClipRRect(
@@ -564,7 +586,7 @@ class _ArenaPainter extends CustomPainter {
       downB = win != null && win.toInt() == 0;
     }
     final gap = (xB - xA) - _hw - 20;
-    if (live && e['t'] != 'breath') {
+    if (live && e['t'] != 'breath' && e['t'] != 'burn' && e['t'] != 'frozen') {
       final f = c.frac;
       // 前 45% 衝過去，命中後收回
       final lunge =
@@ -607,7 +629,10 @@ class _ArenaPainter extends CustomPainter {
               ..color = col.withValues(alpha: (1 - p) * 0.8),
           );
         }
-        final txt = e['miss'] == true ? 'MISS' : '-${e['dmg']}';
+        final em = (e['em'] as num?)?.toDouble() ?? 1.0;
+        final txt = e['t'] == 'frozen'
+            ? '❄ 凍僵'
+            : (e['miss'] == true ? 'MISS' : '-${e['dmg']}${em > 1 ? ' 剋!' : ''}');
         final crit = e['crit'] == true && e['miss'] != true;
         _label(
           canvas,
