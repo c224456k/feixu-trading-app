@@ -251,7 +251,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                     Text('💰 ${_g.gold}', style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold)),
                   ]),
                   content: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Text('金幣只能在魔塔裡花。', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                    const Text('金幣只能在魔塔裡花。每位商人只賣你一樣，想清楚再買！', style: TextStyle(color: Colors.white60, fontSize: 12)),
                     const SizedBox(height: 8),
                     for (final o in mtShopAt(_g.floor))
                       ListTile(
@@ -261,8 +261,9 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                           onPressed: _g.gold >= o.price
                               ? () {
                                   _g.buy(o);
-                                  setD(() {});
+                                  Navigator.pop(c);
                                   setState(() {});
+                                  _say('買了 ${o.name}，商人收攤走了');
                                 }
                               : null,
                           child: Text('💰 ${o.price}'),
@@ -283,7 +284,7 @@ class _MagicTowerScreenState extends State<MagicTowerScreen> {
                       '• 淺色磚地是可以走的路，深色磚牆走不過去。方向鍵／WASD 或畫面按鈕移動；點地圖上的格子會自動走過去。\n'
                       '• 撞到怪物就戰鬥：你先出手，雙方輪流攻擊，傷害＝攻擊−對方防禦。怪物腳下的數字是「打贏會損失的血量」，「？」是現在打不贏。\n'
                       '• 打怪會得到經驗和金幣。經驗滿了自動升級，每級 +3 攻擊、+3 防禦、+80 血（當場補上）。\n'
-                      '• 金幣只能在魔塔裡花：找 🧙 商人（第 3、7、11、15、19 層）買血量、攻防和鑰匙，越深的樓層賣得越貴。\n'
+                      '• 金幣只能在魔塔裡花：找 🧙 商人（第 3、7、11、15、19 層）買血量、攻防或鑰匙（每位商人只能買一樣），越深的樓層賣得越貴。\n'
                       '• 金鑰匙開金色的門、銀鑰匙開銀色的門、魔鑰匙開紫紅色的門，鑰匙有限，想清楚再開。\n'
                       '• 紅寶石加攻擊、藍寶石加防禦、血瓶補血。有些怪物防禦很高，要先找到更強的武器或升級。\n'
                       '• 可以隨時上下樓回頭找漏掉的東西。')),
