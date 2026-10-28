@@ -65,6 +65,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   int _bet = 0, _points = 11;
   Timer? _lobbyTimer;
   Timer? _tnTimer;
+  bool _spec = false; // 觀戰中
+  List<Map<String, dynamic>> _live = [];
   Map<String, dynamic>? _tn; // 今晚賽事狀態（伺服器推送）
   String? _notice;
 
@@ -203,6 +205,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
           _error = null;
           if (_phase == _Phase.connecting || _phase == _Phase.lobby || _phase == _Phase.over) _phase = _Phase.lobby;
           _rooms = (m['rooms'] as List).cast<Map<String, dynamic>>();
+          _live = ((m['live'] as List?) ?? const []).cast<Map<String, dynamic>>();
           _top = (m['top'] as List).cast<Map<String, dynamic>>();
           _cash = (m['cash'] as num).toDouble();
         });
@@ -217,6 +220,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         VolleyAudio.instance.duck(true);
         setState(() {
           _phase = _Phase.playing;
+          _spec = m['spectator'] == true;
           _side = m['side'] as int;
           _betNow = (m['bet'] as num).toInt();
           _pointsNow = m['points'] as int;
@@ -286,7 +290,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     final gap = old == null ? 40000.0 : (_now - old.at).inMicroseconds.toDouble();
     _gapUs = _gapUs * 0.8 + gap.clamp(35000.0, 110000.0) * 0.2;
     _cur = _Snap(p, b, _now);
-    if (!_local) _reconcile(m['rs'], p[_side][0], p[_side][1]);
+    if (!_local && !_spec) _reconcile(m['rs'], p[_side][0], p[_side][1]);
     final sc = (m['sc'] as List).cast<int>();
     final ev = (m['ev'] as List).cast<int>();
     final scored = sc[0] != _score[0] || sc[1] != _score[1];
@@ -367,6 +371,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
 
   // ---------------------------------------------------------------- 輸入
   void _sendInput({bool force = false}) {
+    if (_spec) return;
     final l = (_keys.contains(LogicalKeyboardKey.arrowLeft) || _keys.contains(LogicalKeyboardKey.keyA) || _tl) ? 1 : 0;
     final r = (_keys.contains(LogicalKeyboardKey.arrowRight) || _keys.contains(LogicalKeyboardKey.keyD) || _tr) ? 1 : 0;
     final u = (_keys.contains(LogicalKeyboardKey.arrowUp) || _keys.contains(LogicalKeyboardKey.keyW) || _keys.contains(LogicalKeyboardKey.space) || _tu) ? 1 : 0;
@@ -509,6 +514,11 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
 
   Future<bool> _confirmLeave() async {
     if (_phase != _Phase.playing) return true;
+    if (_spec) {
+      _send({'t': 'unwatch'});
+      _spec = false;
+      return true;
+    }
     if (_local) {
       VolleyAudio.instance.duck(false);
       return true;
@@ -581,7 +591,10 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         final b = m['b'] ?? '（輪空）';
         final w = m['winner'];
         final mark = m['state'] == 'playing' ? '⚔️ 對戰中' : (w != null ? '→ $w 晉級' : '等待中');
-        rows.add(Text('${m['me'] == true ? '▶ ' : ''}${m['a']} vs $b  $mark', style: TextStyle(fontSize: 12, fontWeight: m['me'] == true ? FontWeight.bold : FontWeight.normal)));
+        rows.add(Row(children: [
+          Expanded(child: Text('${m['me'] == true ? '▶ ' : ''}${m['a']} vs $b  $mark', style: TextStyle(fontSize: 12, fontWeight: m['me'] == true ? FontWeight.bold : FontWeight.normal))),
+          if (m['room'] != null && t['alive'] != true) TextButton(onPressed: () => _send({'t': 'watch', 'room': m['room']}), child: const Text('觀戰')),
+        ]));
       }
     } else if (st == 'done') {
       head = '🏆 今晚排球大賽已結束';
@@ -689,6 +702,20 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         ),
       ),
       const SizedBox(height: 8),
+      if (_live.isNotEmpty) ...[
+        const Text('👀 正在進行的比賽（可觀戰）', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        for (final g in _live)
+          Card(
+            color: const Color(0xFF1B3050),
+            child: ListTile(
+              dense: true,
+              title: Text('${g['tourney'] == true ? '🏆 ' : ''}${g['a']} vs ${g['b']}'),
+              subtitle: Text('${(g['sc'] as List).join(' : ')}｜${(g['bet'] as num) > 0 ? '賭 ${_money.format(g['bet'])}' : '友誼賽'}'),
+              trailing: FilledButton(onPressed: () => _send({'t': 'watch', 'room': g['id']}), child: const Text('觀戰')),
+            ),
+          ),
+        const SizedBox(height: 8),
+      ],
       const Text('等待中的房間', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       if (_rooms.isEmpty) const Padding(padding: EdgeInsets.all(14), child: Text('目前沒有人開房，自己開一間吧～', style: TextStyle(color: Colors.white54))),
       for (final r in _rooms)
@@ -740,7 +767,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
       return Expanded(
         child: Row(mainAxisAlignment: right ? MainAxisAlignment.end : MainAxisAlignment.start, children: [
           if (!right) SizedBox(width: 34, height: 34, child: CustomPaint(painter: MonsterPainter(kind: (who['look']['kind'] as int), band: (who['look']['band'] as int)))),
-          Flexible(child: Text('${serving ? '🏐 ' : ''}${who['name']}${s == _side ? '（你）' : ''}', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, color: s == _side ? Colors.amber : Colors.white))),
+          Flexible(child: Text('${serving ? '🏐 ' : ''}${who['name']}${s == _side && !_spec ? '（你）' : ''}', overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, color: s == _side && !_spec ? Colors.amber : Colors.white))),
           if (right) SizedBox(width: 34, height: 34, child: CustomPaint(painter: MonsterPainter(kind: (who['look']['kind'] as int), band: (who['look']['band'] as int)))),
         ]),
       );
@@ -788,7 +815,24 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
             ),
           ),
         ),
-        if (_phase == _Phase.playing) _touchPad() else _resultBar(),
+        if (_phase == _Phase.playing && _spec)
+          Padding(
+              padding: const EdgeInsets.all(8),
+              child: OutlinedButton.icon(
+                  onPressed: () {
+                    _send({'t': 'unwatch'});
+                    VolleyAudio.instance.duck(false);
+                    setState(() {
+                      _spec = false;
+                      _phase = _Phase.lobby;
+                    });
+                  },
+                  icon: const Icon(Icons.visibility_off),
+                  label: const Text('離開觀戰')))
+        else if (_phase == _Phase.playing)
+          _touchPad()
+        else
+          _resultBar(),
       ]),
     );
   }
@@ -835,7 +879,10 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     final w = e['winner'] as int;
     final reason = e['reason'];
     String title, sub;
-    if (w == -1) {
+    if (e['spectator'] == true) {
+      title = w == -1 ? '比賽結束' : '🏁 ${(w == 0 ? _me : _opp)['name']} 獲勝';
+      sub = (e['score'] as List?)?.join(' : ') ?? '';
+    } else if (w == -1) {
       title = reason == 'error' ? '對局發生錯誤' : '平手';
       sub = (e['refund'] as num) > 0 ? '賭金 ${_money.format(e['refund'])} 已原額退回' : '';
     } else if (w == _side) {
@@ -859,6 +906,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
               setState(() {
                 _phase = _Phase.lobby;
                 _endMsg = null;
+                _spec = false;
                 _local = false;
                 _lg = null;
                 _lbot = null;
