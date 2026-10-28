@@ -64,6 +64,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   int _myKind = 0, _myBand = 0;
   int _bet = 0, _points = 11;
   Timer? _lobbyTimer;
+  Timer? _tnTimer;
+  Map<String, dynamic>? _tn; // 今晚賽事狀態（伺服器推送）
+  String? _notice;
 
   // 對戰
   int _side = 0;
@@ -121,6 +124,9 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     _lobbyTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (_phase == _Phase.lobby) _send({'t': 'lobby'});
     });
+    _tnTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _phase == _Phase.lobby && _tn?['on'] == true && _tn?['status'] == 'open') setState(() {});
+    });
     _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       // 本機對戰沒有流量，Cloudflare 隧道閒置約 100 秒會斷線，所以一直送 ping 保持連線
       if (_ch != null) _send({'t': 'ping', 'ts': DateTime.now().microsecondsSinceEpoch});
@@ -132,6 +138,7 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     _closing = true;
     VolleyAudio.instance.leave();
     _lobbyTimer?.cancel();
+    _tnTimer?.cancel();
     _inputTimer?.cancel();
     _pingTimer?.cancel();
     _ticker.dispose();
@@ -228,6 +235,10 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
         _sendInput(force: true);
       case 's':
         _onFrame(m);
+      case 'tourney':
+        setState(() => _tn = m);
+      case 'notice':
+        setState(() => _notice = m['msg'] as String?);
       case 'pong':
         final ts = m['ts'];
         if (ts is int && !_local) setState(() => _ping = ((DateTime.now().microsecondsSinceEpoch - ts) / 1000).round());
@@ -547,6 +558,51 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
     );
   }
 
+  Widget _tourneyCard() {
+    final t = _tn;
+    if (t == null || t['on'] != true) {
+      return const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text('🏆 每晚 21:00 Discord 開放報名，21:05 在這裡開打，冠軍獨得 100 萬', style: TextStyle(fontSize: 12, color: Colors.white54)));
+    }
+    final st = t['status'] as String;
+    final prize = _money.format(t['prize']);
+    final rows = <Widget>[];
+    String head;
+    if (st == 'open') {
+      final left = ((t['start_at'] as num).toDouble() - DateTime.now().millisecondsSinceEpoch / 1000).ceil();
+      final mm = left > 0 ? '${left ~/ 60}:${(left % 60).toString().padLeft(2, '0')}' : '即將開始';
+      head = '🏆 今晚排球大賽｜冠軍獨得 $prize｜${t['n']} 人報名｜倒數 $mm';
+      rows.add(Text(t['entered'] == true ? '✅ 你已報名，請停在這個頁面等開打（沒準時就判負）' : '還沒報名？到 Discord 交易頻道按「我要報名」', style: const TextStyle(color: Colors.white70)));
+    } else if (st == 'running') {
+      head = '🏆 今晚排球大賽｜第 ${t['round']}/${t['rounds']} 輪';
+      rows.add(Text(t['alive'] == true ? '你還在賽事中！輪到你時會自動開打，請不要離開這個頁面' : (t['entered'] == true ? '你已淘汰，可以留下來看戰況' : '報名已截止'), style: const TextStyle(color: Colors.white70)));
+      for (final m in (t['matches'] as List).cast<Map<String, dynamic>>()) {
+        final b = m['b'] ?? '（輪空）';
+        final w = m['winner'];
+        final mark = m['state'] == 'playing' ? '⚔️ 對戰中' : (w != null ? '→ $w 晉級' : '等待中');
+        rows.add(Text('${m['me'] == true ? '▶ ' : ''}${m['a']} vs $b  $mark', style: TextStyle(fontSize: 12, fontWeight: m['me'] == true ? FontWeight.bold : FontWeight.normal)));
+      }
+    } else if (st == 'done') {
+      head = '🏆 今晚排球大賽已結束';
+      rows.add(Text('冠軍：${t['champion'] ?? ''}（獎金 $prize）'));
+    } else {
+      head = '🏆 今晚排球大賽取消';
+      rows.add(const Text('報名人數不足或伺服器重啟', style: TextStyle(color: Colors.white70)));
+    }
+    return Card(
+      color: const Color(0xFF3A2D10),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(head, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFFE08A))),
+          const SizedBox(height: 4),
+          ...rows,
+        ]),
+      ),
+    );
+  }
+
   Widget _monsterPicker() {
     return Card(
       color: const Color(0xFF16263F),
@@ -585,6 +641,8 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
   Widget _lobby() {
     return ListView(padding: const EdgeInsets.all(12), children: [
       if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(color: Colors.redAccent))),
+      if (_notice != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_notice!, style: const TextStyle(color: Color(0xFFFFE08A)))),
+      _tourneyCard(),
       _monsterPicker(),
       const SizedBox(height: 8),
       Card(
@@ -782,11 +840,11 @@ class _VolleyScreenState extends State<VolleyScreen> with SingleTickerProviderSt
       sub = (e['refund'] as num) > 0 ? '賭金 ${_money.format(e['refund'])} 已原額退回' : '';
     } else if (w == _side) {
       title = '🎉 你贏了！';
-      sub = (e['bet'] as num) > 0 ? '拿走 ${_money.format(e['payout'])}（淨賺 ${_money.format((e['payout'] as num) - (e['bet'] as num))}）' : '友誼賽';
+      sub = e['tourney'] == true ? '晉級！請回大廳等下一輪' : (e['bet'] as num) > 0 ? '拿走 ${_money.format(e['payout'])}（淨賺 ${_money.format((e['payout'] as num) - (e['bet'] as num))}）' : '友誼賽';
       if (reason == 'forfeit') sub += '｜對手認輸/斷線';
     } else {
       title = '😢 你輸了';
-      sub = (e['bet'] as num) > 0 ? '輸掉 ${_money.format(e['bet'])}' : '友誼賽';
+      sub = e['tourney'] == true ? '賽事淘汰，可以回大廳看戰況' : (e['bet'] as num) > 0 ? '輸掉 ${_money.format(e['bet'])}' : '友誼賽';
     }
     return Container(
       width: double.infinity,
