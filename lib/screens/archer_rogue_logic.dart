@@ -12,6 +12,9 @@ const rgChapterNames = ['翠綠草原', '幽暗洞窟', '亡者墓地', '熔岩�
 const rgChapterBands = [0, 1, 2, 6, 9]; // MonsterPainter 的區域配色
 const _hpMul = [1.0, 1.75, 2.7, 3.9, 5.3];
 const _dmgMul = [1.0, 1.2, 1.42, 1.68, 1.95];
+const _mobHpMul = 1.3; // 小怪額外倍率（頭目不吃）
+const _mobDmgMul = 1.25;
+const _roomWaves = [0, 1, 1, 2]; // 各一般房的增援波數（剩 1 隻時從傳送門冒出來）
 
 class RgSkillDef {
   final String id, name, icon, desc;
@@ -58,7 +61,7 @@ class RgStats {
   double get interval => 1 / (1.25 * (1 + 0.2 * lv('spd'))) * (1 + 0.12 * lv('multi'));
   double get critRate => 0.05 + 0.10 * lv('crit');
   double get critMul => 2.0 + 0.3 * lv('crit');
-  int get xpNeed => 40 + 30 * (level - 1);
+  int get xpNeed => 40 + 33 * (level - 1);
 
   RgStats copy() => RgStats()
     ..sk = Map.of(sk)
@@ -98,6 +101,8 @@ class RgEnemy {
   double flash = 0;
   double orbCd = 0;
   bool airborne = false;
+  bool elite = false;
+  double spawnT = 0; // 出場淡入，0.5 秒內不會動
   final double seed;
   RgEnemy(this.type, this.name, this.kind, this.boss, this.fly, this.x, this.y, this.r, this.hp, this.speed, this.contact,
       this.bdmg, this.xp, this.seed)
@@ -143,6 +148,27 @@ class RgFloat {
   final int color;
   final bool big;
   RgFloat(this.x, this.y, this.s, this.color, {this.big = false});
+}
+
+class RgFx {
+  final int kind; // 0 火花/碎片 1 擴散圈 2 升級光柱
+  double x, y, vx, vy, t = 0;
+  final double life, size;
+  final int color;
+  RgFx(this.kind, this.x, this.y, this.vx, this.vy, this.life, this.size, this.color);
+}
+
+class RgGem {
+  double x, y, vx, vy;
+  RgGem(this.x, this.y, this.vx, this.vy);
+}
+
+class RgPortal {
+  final double x, y;
+  final String ch;
+  final bool elite;
+  double t;
+  RgPortal(this.x, this.y, this.ch, this.elite, this.t);
 }
 
 class RgHeart {
@@ -641,6 +667,11 @@ class RgGame {
   List<RgZone> zones = [];
   List<RgFloat> floats = [];
   List<RgHeart> hearts = [];
+  List<RgFx> fx = [];
+  List<RgGem> gems = [];
+  List<RgPortal> portals = [];
+  int wavesLeft = 0;
+  double hurtT = 0;
   bool cleared = false;
   double clearT = 0;
   int pendingPicks = 0;
@@ -702,6 +733,11 @@ class RgGame {
     zones = [];
     hearts = [];
     floats = [];
+    fx = [];
+    gems = [];
+    portals = [];
+    wavesLeft = r < _roomWaves.length ? _roomWaves[r] : 0;
+    hurtT = 0;
     _volleys.clear();
     cleared = false;
     clearT = 0;
@@ -725,12 +761,56 @@ class RgGame {
         }
       }
     }
+    // 精英怪：每間 1 隻，第 3 關起後兩間 2 隻
+    if (!isBossRoom && !(chapter == 0 && r == 0)) {
+      final n = chapter >= 2 && r >= 2 ? 2 : 1;
+      final pool = List.of(en)..shuffle(rng);
+      for (final e in pool.take(n)) {
+        _makeElite(e);
+      }
+    }
+  }
+
+  void _makeElite(RgEnemy e) {
+    e.elite = true;
+    e.hp *= 2.2;
+    e.maxHp = e.hp;
+    e.r *= 1.18;
+    e.contact *= 1.2;
+    e.bdmg *= 1.15;
+    e.xp = (e.xp * 1.5).round();
+  }
+
+  List<String> get _chapterPool {
+    final set = <String>{};
+    for (final m in rgMaps[chapter].take(rgRoomsPerChapter - 1)) {
+      for (final row in m) {
+        for (final ch in row.split('')) {
+          if (_types.containsKey(ch)) set.add(ch);
+        }
+      }
+    }
+    return set.toList()..sort();
+  }
+
+  void _spawnWave() {
+    wavesLeft--;
+    final pool = _chapterPool;
+    final n = 3 + (chapter >= 2 ? 1 : 0);
+    for (var i = 0; i < n; i++) {
+      for (var k = 0; k < 40; k++) {
+        final x = 0.6 + rng.nextDouble() * (rgCols - 1.2), y = 0.6 + rng.nextDouble() * 8.5;
+        if (_d2(x, y, px, py) < 3.5 * 3.5 || circleBlocked(x, y, 0.45)) continue;
+        portals.add(RgPortal(x, y, pool[rng.nextInt(pool.length)], i == 0 && wavesLeft == 0 && chapter >= 1, 1.0 + i * 0.15));
+        break;
+      }
+    }
   }
 
   RgEnemy spawn(String ch, double x, double y) {
     final t = _types[ch]!;
-    final e = RgEnemy(ch, t.name, t.kind, false, t.fly, x, y, t.r, t.hp * hpMul, t.speed, t.contact * dmgMul,
-        t.bdmg * dmgMul, (t.xp * (1 + 0.25 * chapter)).round(), rng.nextDouble() * 10);
+    final e = RgEnemy(ch, t.name, t.kind, false, t.fly, x, y, t.r, t.hp * hpMul * _mobHpMul, t.speed,
+        t.contact * dmgMul * _mobDmgMul, t.bdmg * dmgMul * _mobDmgMul, (t.xp * (1 + 0.25 * chapter)).round(), rng.nextDouble() * 10);
     e.t = -rng.nextDouble() * 0.8; // 錯開節奏
     en.add(e);
     return e;
@@ -808,6 +888,15 @@ class RgGame {
       f.y -= dt * 0.8;
     }
     floats.removeWhere((f) => f.t > 0.9);
+    if (hurtT > 0) hurtT -= dt;
+    for (final f in fx) {
+      f.t += dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vx *= 0.9;
+      f.vy *= 0.9;
+    }
+    fx.removeWhere((f) => f.t >= f.life);
 
     // 玩家移動
     final ml = math.sqrt(mx * mx + my * my);
@@ -883,7 +972,41 @@ class RgGame {
     en.removeWhere((e) => e.hp <= 0);
     if (phase != RgPhase.play) return;
 
-    if (!cleared && en.isEmpty) {
+    // 增援
+    for (final p in portals) {
+      p.t -= dt;
+      if (p.t <= 0) {
+        final e = spawn(p.ch, p.x, p.y);
+        e.xp = (e.xp * 0.6).round(); // 增援給的經驗少，避免升太快
+        if (p.elite) _makeElite(e);
+        fx.add(RgFx(1, p.x, p.y, 0, 0, 0.4, 1.0, 0xFFB388FF));
+      }
+    }
+    portals.removeWhere((p) => p.t <= 0);
+    if (!cleared && wavesLeft > 0 && portals.isEmpty && en.length <= 1) _spawnWave();
+
+    if (cleared) {
+      for (final g in gems) {
+        final dx = px - g.x, dy = py - g.y;
+        final d = math.sqrt(dx * dx + dy * dy) + 1e-6;
+        final sp = 4 + clearT * 14;
+        g.vx = g.vx * 0.85 + dx / d * sp * 0.15;
+        g.vy = g.vy * 0.85 + dy / d * sp * 0.15;
+        g.x += g.vx * dt;
+        g.y += g.vy * dt;
+      }
+      gems.removeWhere((g) => _d2(g.x, g.y, px, py) < 0.3 * 0.3);
+    } else {
+      for (final g in gems) {
+        g.x += g.vx * dt;
+        g.y += g.vy * dt;
+        g.vx *= 0.88;
+        g.vy *= 0.88;
+      }
+    }
+
+    if (!cleared && en.isEmpty && portals.isEmpty && wavesLeft == 0) {
+      final lvBefore = st.level;
       cleared = true;
       clearT = 0;
       bl.removeWhere((b) => !b.mine);
@@ -895,10 +1018,11 @@ class RgGame {
         st.level++;
         pendingPicks++;
       }
+      if (st.level > lvBefore) fx.add(RgFx(2, px, py, 0, 0, 0.9, 1, 0xFFFFD54F));
     }
     if (cleared) {
       clearT += dt;
-      if (clearT > 0.6 && pendingPicks > 0) {
+      if (clearT > 0.9 && pendingPicks > 0) {
         _openPick();
         return;
       }
@@ -1026,6 +1150,12 @@ class RgGame {
     if (crit) d *= st.critMul;
     e.hp -= d;
     e.flash = 0.12;
+    if (fx.length < 160) {
+      for (var i = 0; i < (crit ? 4 : 2); i++) {
+        final a = rng.nextDouble() * 2 * math.pi, v = 2 + rng.nextDouble() * 3;
+        fx.add(RgFx(0, e.x, e.y, math.cos(a) * v, math.sin(a) * v, 0.25, 0.06, crit ? 0xFFFFD54F : 0xFFFFFFFF));
+      }
+    }
     if (floats.length < 60) {
       floats.add(RgFloat(e.x + (rng.nextDouble() - 0.5) * 0.4, e.y - e.r, d.round().toString(),
           crit ? 0xFFFFD54F : 0xFFFFFFFF, big: crit));
@@ -1048,6 +1178,18 @@ class RgGame {
     if (st.lv('vamp') > 0) _healPct(0.025 * st.lv('vamp'));
     if (!e.boss && rng.nextDouble() < 0.05) hearts.add(RgHeart(e.x, e.y));
     if (e.boss) shake = 0.5;
+    fx.add(RgFx(1, e.x, e.y, 0, 0, 0.35, e.r * 2.2, e.elite ? 0xFFFFD54F : 0xFFFFFFFF));
+    final n = e.boss ? 24 : 8;
+    for (var i = 0; i < n && fx.length < 200; i++) {
+      final a = rng.nextDouble() * 2 * math.pi, v = 1.5 + rng.nextDouble() * 4;
+      fx.add(RgFx(0, e.x, e.y, math.cos(a) * v, math.sin(a) * v, 0.5 + rng.nextDouble() * 0.3, 0.07 + rng.nextDouble() * 0.06,
+          e.boss ? 0xFFFF7043 : 0xFFCFD8DC));
+    }
+    final gn = math.min(8, 1 + e.xp ~/ 6);
+    for (var i = 0; i < gn; i++) {
+      final a = rng.nextDouble() * 2 * math.pi, v = 1 + rng.nextDouble() * 2.5;
+      gems.add(RgGem(e.x, e.y, math.cos(a) * v, math.sin(a) * v));
+    }
   }
 
   void _hurt(double d, String by) {
@@ -1063,6 +1205,7 @@ class RgGame {
     lastHitBy = by;
     inv = 0.6;
     shake = 0.18;
+    hurtT = 0.35;
     floats.add(RgFloat(px, py - 0.5, '-${dmg.round()}', 0xFFFF5252, big: true));
     if (st.hp <= 0) {
       st.hp = 0;
@@ -1223,7 +1366,11 @@ class RgGame {
       return;
     }
     final spd = e.slowT > 0 ? 0.6 : 1.0;
-    final edt = dt * (e.slowT > 0 ? 0.75 : 1.0); // 減速時動作節奏也變慢
+    if (e.spawnT < 0.5) {
+      e.spawnT += dt;
+      return;
+    }
+    final edt = dt * (e.slowT > 0 ? 0.75 : 1.0) * (e.elite ? 1.3 : 1.0); // 減速時動作節奏也變慢、精英較快
     e.t += edt;
 
     // 碰撞傷害
@@ -1242,12 +1389,12 @@ class RgGame {
       case 'a':
         if (e.st == 0) {
           _wanderMove(e, e.speed * spd, dt);
-          if (e.t > 1.3) {
+          if (e.t > 1.05) {
             _setSt(e, 1);
             e.ang = _aim(e);
           }
         } else if (e.t > 0.6) {
-          if (c >= 3) {
+          if (c >= 2 || e.elite) {
             _fan(e, 3, 0.4, 6.0, e.bdmg, at: e.ang);
           } else {
             _shoot(e, e.ang, 6.0, e.bdmg);
@@ -1270,7 +1417,7 @@ class RgGame {
       case 'k':
         if (e.st == 0) {
           _chase(e, e.speed * spd, dt);
-          if (e.t > 2.3) _setSt(e, 1);
+          if (e.t > 2.0) _setSt(e, 1);
         } else if (e.t > 0.4) {
           _fan(e, c >= 3 ? 5 : 3, c >= 3 ? 0.8 : 0.4, 4.5, e.bdmg);
           _setSt(e, 0);

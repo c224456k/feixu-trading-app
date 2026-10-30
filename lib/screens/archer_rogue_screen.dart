@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -21,6 +22,7 @@ const _floorColors = [
   (Color(0xFF4E342E), Color(0xFF3E2723)), // 熔岩
   (Color(0xFF3A2440), Color(0xFF2E1B35)), // 魔王城
 ];
+const _wallColors = [Color(0xFF5D4037), Color(0xFF3E2C22), Color(0xFF37474F), Color(0xFF212121), Color(0xFF1A1020)];
 
 class ArcherRogueScreen extends StatefulWidget {
   const ArcherRogueScreen({super.key});
@@ -32,6 +34,7 @@ class ArcherRogueScreen extends StatefulWidget {
 class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTickerProviderStateMixin {
   final _g = RgGame();
   final _focus = FocusNode();
+  final _floorCache = _FloorCache();
   final ValueNotifier<int> _repaint = ValueNotifier(0);
   late final Ticker _ticker;
   Duration _last = Duration.zero;
@@ -266,7 +269,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                         onPanCancel: () => _joyOrigin = _joyNow = null,
                         child: RepaintBoundary(
                           child: CustomPaint(
-                            painter: _ArenaPainter(_g, _repaint, () => (_joyOrigin, _joyNow)),
+                            painter: _ArenaPainter(_g, _floorCache, _repaint, () => (_joyOrigin, _joyNow)),
                             size: Size(w, h),
                           ),
                         ),
@@ -289,41 +292,91 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     final st = _g.st;
     return ValueListenableBuilder(
       valueListenable: _repaint,
-      builder: (context, _, _) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      builder: (context, _, _) => Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF232733), Color(0xFF14161C)]),
+        ),
         child: Column(
           children: [
             Row(
               children: [
-                Text('第 ${_g.chapter + 1} 關 ${rgChapterNames[_g.chapter]}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 8),
-                Text(_g.isBossRoom ? '👑 頭目' : '房間 ${_g.room + 1}/${rgRoomsPerChapter - 1}',
-                    style: const TextStyle(color: Colors.white70)),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(color: const Color(0xFF37474F), borderRadius: BorderRadius.circular(8)),
+                  child: Text('第 ${_g.chapter + 1} 關・${rgChapterNames[_g.chapter]}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+                const SizedBox(width: 10),
+                for (var i = 0; i < rgRoomsPerChapter; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: i == rgRoomsPerChapter - 1
+                        ? Text('👑', style: TextStyle(fontSize: 13, color: i <= _g.room ? null : Colors.white24))
+                        : Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i < _g.room || i == _g.room && _g.cleared
+                                  ? const Color(0xFF69F0AE)
+                                  : i == _g.room
+                                      ? Colors.amberAccent
+                                      : Colors.white24,
+                            ),
+                          ),
+                  ),
                 const Spacer(),
-                Text('Lv ${st.level}', style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold)),
+                Text('擊殺 ${_g.kills}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
               ],
             ),
-            const SizedBox(height: 4),
-            _bar(st.hp / st.maxHp, const Color(0xFFE53935), '${st.hp.round()} / ${st.maxHp.round()}'),
-            const SizedBox(height: 3),
-            _bar(st.xp / st.xpNeed, const Color(0xFF29B6F6), null, height: 5),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Text('❤️', style: TextStyle(fontSize: 14)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _bar(st.hp / st.maxHp, const [Color(0xFFFF5252), Color(0xFFC62828)], '${st.hp.round()} / ${st.maxHp.round()}'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 18,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: const Color(0xFF0277BD), borderRadius: BorderRadius.circular(9)),
+                  child: Text('Lv${st.level}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 6),
+                Expanded(child: _bar(st.xp / st.xpNeed, const [Color(0xFF80D8FF), Color(0xFF0288D1)], null, height: 7)),
+              ],
+            ),
             if (st.sk.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               SizedBox(
-                height: 22,
+                height: 24,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   children: [
                     for (final e in st.sk.entries)
                       if (e.key != 'heal')
-                        Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 5),
-                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(6)),
-                          alignment: Alignment.center,
-                          child: Text('${rgSkill(e.key).icon}${e.value > 1 ? '×${e.value}' : ''}',
-                              style: const TextStyle(fontSize: 12, color: Colors.white)),
+                        Tooltip(
+                          message: rgSkill(e.key).name,
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF263238),
+                              borderRadius: BorderRadius.circular(7),
+                              border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.35)),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text('${rgSkill(e.key).icon}${e.value > 1 ? ' ${e.value}' : ''}',
+                                style: const TextStyle(fontSize: 12, color: Colors.white)),
+                          ),
                         ),
                   ],
                 ),
@@ -335,18 +388,35 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     );
   }
 
-  Widget _bar(double v, Color c, String? label, {double height = 14}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(height / 2),
-      child: SizedBox(
-        height: height,
+  Widget _bar(double v, List<Color> c, String? label, {double height = 15}) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(height / 2),
+        border: Border.all(color: Colors.black, width: 1),
+        color: const Color(0xFF0B0C10),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(height / 2),
         child: Stack(
           children: [
-            Container(color: Colors.white12),
-            FractionallySizedBox(widthFactor: v.clamp(0.0, 1.0), child: Container(color: c)),
+            FractionallySizedBox(
+              widthFactor: v.clamp(0.0, 1.0),
+              child: Container(
+                decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: c)),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: height * 0.4,
+              child: Container(color: Colors.white.withValues(alpha: 0.18)),
+            ),
             if (label != null)
               Center(
-                child: Text(label, style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                child: Text(label,
+                    style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold, shadows: [Shadow(blurRadius: 2)])),
               ),
           ],
         ),
@@ -361,7 +431,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
         children: [
           Text(b.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12, shadows: [Shadow(blurRadius: 3)])),
           const SizedBox(height: 2),
-          _bar(b.hp / b.maxHp, const Color(0xFFAB47BC), null, height: 8),
+          _bar(b.hp / b.maxHp, const [Color(0xFFE040FB), Color(0xFF7B1FA2)], null, height: 10),
         ],
       ),
     );
@@ -523,10 +593,23 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   }
 }
 
+/// 地板＋岩石不會變，錄成 Picture 快取（換房間或尺寸才重畫）
+class _FloorCache {
+  String key = '';
+  ui.Picture? pic;
+}
+
+double _hash(int x, int y, int salt) {
+  var h = (x * 73856093) ^ (y * 19349663) ^ (salt * 83492791);
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) & 0xFFFF) / 0xFFFF;
+}
+
 class _ArenaPainter extends CustomPainter {
   final RgGame g;
+  final _FloorCache cache;
   final (Offset?, Offset?) Function() joy;
-  _ArenaPainter(this.g, Listenable repaint, this.joy) : super(repaint: repaint);
+  _ArenaPainter(this.g, this.cache, Listenable repaint, this.joy) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -537,90 +620,321 @@ class _ArenaPainter extends CustomPainter {
       final k = g.shake * 10;
       canvas.translate(math.sin(g.time * 90) * k, math.cos(g.time * 77) * k);
     }
-    _floor(canvas, s);
+    final key = '${g.chapter}/${g.room}/${size.width.toStringAsFixed(1)}';
+    if (cache.key != key || cache.pic == null) {
+      final rec = ui.PictureRecorder();
+      _staticFloor(Canvas(rec), s, size);
+      cache.pic?.dispose();
+      cache.pic = rec.endRecording();
+      cache.key = key;
+    }
+    canvas.drawPicture(cache.pic!);
+    _liquids(canvas, s);
+    _door(canvas, s);
+    _ambient(canvas, s, size);
     _zones(canvas, s);
+    _portals(canvas, s);
     _telegraphs(canvas, s);
     for (final h in g.hearts) {
       _heart(canvas, Offset(h.x * s, h.y * s), s * 0.22);
     }
-    for (final e in g.en) {
-      _enemy(canvas, e, s);
+    _gems(canvas, s);
+    final sorted = List.of(g.en)..sort((a, b) => a.y.compareTo(b.y));
+    for (final e in sorted) {
+      if (e.y <= g.py) _enemy(canvas, e, s);
     }
     _player(canvas, s);
+    for (final e in sorted) {
+      if (e.y > g.py) _enemy(canvas, e, s);
+    }
+    _fx(canvas, s);
     _bullets(canvas, s);
     _floats(canvas, s);
     canvas.restore();
+    _vignette(canvas, size);
+    _banner(canvas, size, s);
     _joystick(canvas);
   }
 
-  void _floor(Canvas c, double s) {
-    final (a, b) = _floorColors[g.chapter];
+  // ---------- 靜態地板 ----------
+  void _staticFloor(Canvas c, double s, Size size) {
+    final ch = g.chapter;
+    final (a, b) = _floorColors[ch];
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
-        c.drawRect(Rect.fromLTWH(x * s, y * s, s + 0.5, s + 0.5), Paint()..color = (x + y).isEven ? a : b);
+        final r = Rect.fromLTWH(x * s, y * s, s + 0.5, s + 0.5);
+        final n = _hash(x, y, ch);
+        final base = Color.lerp((x + y).isEven ? a : b, n > 0.5 ? Colors.white : Colors.black, (n - 0.5).abs() * 0.12)!;
+        c.drawRect(r, Paint()..color = base);
+        _tileDeco(c, ch, x, y, s);
       }
     }
-    // 門
-    final door = Rect.fromLTWH(3.6 * s, 0, 1.8 * s, 0.35 * s);
-    if (g.cleared) {
-      final pulse = 0.5 + 0.5 * math.sin(g.time * 5);
-      c.drawRect(door, Paint()..color = Color.lerp(const Color(0xFF00E676), Colors.white, pulse * 0.4)!);
-      final tp = TextPainter(
-        text: TextSpan(text: '▲', style: TextStyle(color: Colors.white.withValues(alpha: 0.6 + 0.4 * pulse), fontSize: s * 0.6)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(c, Offset(4.5 * s - tp.width / 2, 0.45 * s + math.sin(g.time * 5) * s * 0.08));
-    } else {
-      c.drawRect(door, Paint()..color = const Color(0xFF3E2723));
-      for (var i = 0; i < 5; i++) {
-        c.drawLine(Offset((3.75 + i * 0.37) * s, 0), Offset((3.75 + i * 0.37) * s, 0.35 * s),
-            Paint()
-              ..color = Colors.grey.shade500
-              ..strokeWidth = s * 0.06);
-      }
+    // 四周牆壁的陰影
+    final edge = s * 0.6;
+    for (final (rect, begin) in [
+      (Rect.fromLTWH(0, 0, size.width, edge), Alignment.topCenter),
+      (Rect.fromLTWH(0, size.height - edge, size.width, edge), Alignment.bottomCenter),
+      (Rect.fromLTWH(0, 0, edge, size.height), Alignment.centerLeft),
+      (Rect.fromLTWH(size.width - edge, 0, edge, size.height), Alignment.centerRight),
+    ]) {
+      c.drawRect(
+          rect,
+          Paint()
+            ..shader = LinearGradient(begin: begin, end: -begin, colors: const [Color(0x88000000), Color(0x00000000)])
+                .createShader(rect));
     }
+    // 上方牆面
+    final wall = Rect.fromLTWH(0, 0, size.width, s * 0.32);
+    c.drawRect(wall, Paint()..color = _wallColors[ch]);
+    for (var i = 0; i < rgCols * 2; i++) {
+      c.drawLine(Offset(i * s / 2, 0), Offset(i * s / 2, s * 0.32), Paint()
+        ..color = const Color(0x33000000)
+        ..strokeWidth = 1);
+    }
+    c.drawLine(Offset(0, s * 0.32), Offset(size.width, s * 0.32), Paint()
+      ..color = const Color(0x66000000)
+      ..strokeWidth = 2);
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
-        final ch = g.grid[y][x];
-        final r = Rect.fromLTWH(x * s, y * s, s, s);
-        if (ch == '#') {
-          final rr = RRect.fromRectAndRadius(r.deflate(s * 0.04), Radius.circular(s * 0.18));
-          c.drawRRect(rr.shift(Offset(0, s * 0.06)), Paint()..color = const Color(0x66000000));
-          c.drawRRect(
-              rr,
-              Paint()
-                ..shader = LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: g.chapter == 3 ? [const Color(0xFF6D4C41), const Color(0xFF3E2723)] : [const Color(0xFF9E9E9E), const Color(0xFF616161)],
-                ).createShader(r));
-          c.drawLine(r.topLeft + Offset(s * 0.25, s * 0.3), r.topLeft + Offset(s * 0.5, s * 0.45),
-              Paint()
-                ..color = const Color(0x55000000)
-                ..strokeWidth = s * 0.04);
-        } else if (ch == '~') {
-          final lava = g.chapter == 3 || g.chapter == 4;
-          c.drawRect(r, Paint()..color = lava ? const Color(0xFFE65100) : const Color(0xFF1E88E5));
-          final wave = Paint()
-            ..color = (lava ? const Color(0xFFFFCA28) : Colors.white).withValues(alpha: 0.45)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = s * 0.04;
-          for (var k = 0; k < 2; k++) {
-            final p = Path();
-            final yy = y * s + s * (0.35 + k * 0.35);
-            for (var i = 0; i <= 8; i++) {
-              final xx = x * s + i * s / 8;
-              final dy = math.sin(g.time * 3 + i * 0.8 + x + k) * s * 0.05;
-              if (i == 0) {
-                p.moveTo(xx, yy + dy);
-              } else {
-                p.lineTo(xx, yy + dy);
-              }
-            }
-            c.drawPath(p, wave);
+        if (g.grid[y][x] == '#') _rock(c, ch, x, y, s);
+      }
+    }
+  }
+
+  void _tileDeco(Canvas c, int ch, int x, int y, double s) {
+    if (g.grid[y][x] != '.') return;
+    final n1 = _hash(x, y, 11 + ch), n2 = _hash(x, y, 29 + ch), n3 = _hash(x, y, 47 + ch);
+    final o = Offset((x + 0.2 + n2 * 0.6) * s, (y + 0.2 + n3 * 0.6) * s);
+    switch (ch) {
+      case 0: // 草叢、小花
+        if (n1 < 0.35) {
+          final p = Paint()
+            ..color = const Color(0xFF33691E).withValues(alpha: 0.6)
+            ..strokeWidth = s * 0.03
+            ..strokeCap = StrokeCap.round;
+          for (var i = -1; i <= 1; i++) {
+            c.drawLine(o, o + Offset(i * s * 0.06, -s * 0.13), p);
           }
+        } else if (n1 < 0.42) {
+          final col = n2 < 0.5 ? const Color(0xFFFFF176) : const Color(0xFFF8BBD0);
+          for (var i = 0; i < 5; i++) {
+            final a = i * 2 * math.pi / 5;
+            c.drawCircle(o + Offset(math.cos(a), math.sin(a)) * s * 0.05, s * 0.035, Paint()..color = col);
+          }
+          c.drawCircle(o, s * 0.03, Paint()..color = const Color(0xFFFF8F00));
+        }
+      case 1: // 碎石、裂縫
+        if (n1 < 0.3) {
+          c.drawOval(Rect.fromCenter(center: o, width: s * 0.14, height: s * 0.09), Paint()..color = const Color(0x55000000));
+          c.drawOval(Rect.fromCenter(center: o - Offset(0, s * 0.015), width: s * 0.12, height: s * 0.07),
+              Paint()..color = const Color(0xFF8D7B6A));
+        } else if (n1 < 0.45) {
+          _crack(c, o, s, const Color(0x44000000));
+        }
+      case 2: // 裂縫、骨頭
+        if (n1 < 0.25) {
+          _crack(c, o, s, const Color(0x55000000));
+        } else if (n1 < 0.32) {
+          final p = Paint()
+            ..color = const Color(0xFFD7CCC8).withValues(alpha: 0.7)
+            ..strokeWidth = s * 0.035
+            ..strokeCap = StrokeCap.round;
+          final d = Offset(math.cos(n2 * 6), math.sin(n2 * 6)) * s * 0.12;
+          c.drawLine(o - d, o + d, p);
+          c.drawCircle(o - d, s * 0.03, p);
+          c.drawCircle(o + d, s * 0.03, p);
+        }
+      case 3: // 發光岩漿裂縫
+        if (n1 < 0.35) _crack(c, o, s, const Color(0xCCFF6D00), width: 0.03);
+      case 4: // 大理石磁磚的金邊
+        final r = Rect.fromLTWH(x * s, y * s, s, s).deflate(s * 0.04);
+        c.drawRect(
+            r,
+            Paint()
+              ..color = const Color(0x22FFD54F)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+        if (n1 < 0.2) _crack(c, o, s, const Color(0x33FFFFFF), width: 0.015);
+    }
+  }
+
+  void _crack(Canvas c, Offset o, double s, Color col, {double width = 0.02}) {
+    final p = Path()..moveTo(o.dx - s * 0.18, o.dy - s * 0.05);
+    p.lineTo(o.dx - s * 0.04, o.dy + s * 0.03);
+    p.lineTo(o.dx + s * 0.05, o.dy - s * 0.04);
+    p.lineTo(o.dx + s * 0.18, o.dy + s * 0.06);
+    p.moveTo(o.dx + s * 0.05, o.dy - s * 0.04);
+    p.lineTo(o.dx + s * 0.08, o.dy - s * 0.15);
+    c.drawPath(
+        p,
+        Paint()
+          ..color = col
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = s * width);
+  }
+
+  void _rock(Canvas c, int ch, int x, int y, double s) {
+    final r = Rect.fromLTWH(x * s, y * s, s, s);
+    final n = _hash(x, y, 5);
+    c.drawOval(Rect.fromLTWH(r.left + s * 0.05, r.bottom - s * 0.25, s * 0.95, s * 0.3), Paint()..color = const Color(0x66000000));
+    if (ch == 2) {
+      // 墓碑
+      final t = RRect.fromRectAndCorners(Rect.fromLTWH(r.left + s * 0.18, r.top + s * 0.08, s * 0.64, s * 0.84),
+          topLeft: Radius.circular(s * 0.32), topRight: Radius.circular(s * 0.32), bottomLeft: Radius.circular(s * 0.04),
+          bottomRight: Radius.circular(s * 0.04));
+      c.drawRRect(t, Paint()..shader = const LinearGradient(colors: [Color(0xFFB0BEC5), Color(0xFF607D8B)]).createShader(r));
+      c.drawRRect(t, Paint()
+        ..color = const Color(0x55000000)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
+      final cp = Paint()
+        ..color = const Color(0x88263238)
+        ..strokeWidth = s * 0.06;
+      c.drawLine(r.topLeft + Offset(s * 0.5, s * 0.25), r.topLeft + Offset(s * 0.5, s * 0.6), cp);
+      c.drawLine(r.topLeft + Offset(s * 0.36, s * 0.37), r.topLeft + Offset(s * 0.64, s * 0.37), cp);
+      return;
+    }
+    if (ch == 4) {
+      // 石柱
+      final col = Rect.fromLTWH(r.left + s * 0.15, r.top + s * 0.02, s * 0.7, s * 0.92);
+      c.drawRect(col,
+          Paint()..shader = const LinearGradient(colors: [Color(0xFF4A3B5C), Color(0xFF9575CD), Color(0xFF4A3B5C)]).createShader(col));
+      for (final yy in [col.top, col.bottom - s * 0.12]) {
+        c.drawRect(Rect.fromLTWH(r.left + s * 0.08, yy, s * 0.84, s * 0.12), Paint()..color = const Color(0xFFFFD54F).withValues(alpha: 0.85));
+      }
+      return;
+    }
+    final colors = switch (ch) {
+      0 => const [Color(0xFFBDBDBD), Color(0xFF757575), Color(0xFF424242)],
+      1 => const [Color(0xFFA1887F), Color(0xFF6D4C41), Color(0xFF3E2723)],
+      _ => const [Color(0xFF616161), Color(0xFF303030), Color(0xFF121212)],
+    };
+    final p = Path();
+    const pts = 8;
+    for (var i = 0; i < pts; i++) {
+      final a = i * 2 * math.pi / pts;
+      final rr = s * (0.40 + _hash(x * 8 + i, y, 3) * 0.08);
+      final pt = Offset(r.center.dx + math.cos(a) * rr, r.center.dy + math.sin(a) * rr * 0.9);
+      if (i == 0) {
+        p.moveTo(pt.dx, pt.dy);
+      } else {
+        p.lineTo(pt.dx, pt.dy);
+      }
+    }
+    p.close();
+    c.drawPath(p, Paint()..shader = RadialGradient(center: const Alignment(-0.4, -0.5), colors: colors).createShader(r));
+    c.drawPath(p, Paint()
+      ..color = const Color(0x66000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5);
+    if (ch == 0 && n < 0.6) {
+      // 青苔
+      c.drawOval(Rect.fromLTWH(r.left + s * 0.2, r.top + s * 0.14, s * 0.4, s * 0.18), Paint()..color = const Color(0xAA558B2F));
+    }
+    if (ch == 3) _crack(c, r.center, s * 0.8, const Color(0xFFFF6D00), width: 0.04);
+    c.drawCircle(r.center + Offset(-s * 0.15, -s * 0.18), s * 0.06, Paint()..color = const Color(0x44FFFFFF));
+  }
+
+  // ---------- 動態 ----------
+  void _liquids(Canvas c, double s) {
+    final lava = g.chapter >= 3;
+    for (var y = 0; y < rgRows; y++) {
+      for (var x = 0; x < rgCols; x++) {
+        if (g.grid[y][x] != '~') continue;
+        final r = Rect.fromLTWH(x * s, y * s, s + 0.5, s + 0.5);
+        final glow = 0.5 + 0.5 * math.sin(g.time * 2 + x * 0.7 + y);
+        c.drawRect(
+            r,
+            Paint()
+              ..color = lava
+                  ? Color.lerp(const Color(0xFFD84315), const Color(0xFFFF9100), glow * 0.5)!
+                  : Color.lerp(const Color(0xFF1565C0), const Color(0xFF29B6F6), glow * 0.3)!);
+        final wave = Paint()
+          ..color = (lava ? const Color(0xFFFFE082) : Colors.white).withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = s * 0.035;
+        for (var k = 0; k < 2; k++) {
+          final p = Path();
+          final yy = y * s + s * (0.3 + k * 0.4);
+          for (var i = 0; i <= 6; i++) {
+            final xx = x * s + i * s / 6;
+            final dy = math.sin(g.time * 3 + i * 0.9 + x * 2 + k * 2) * s * 0.05;
+            if (i == 0) {
+              p.moveTo(xx, yy + dy);
+            } else {
+              p.lineTo(xx, yy + dy);
+            }
+          }
+          c.drawPath(p, wave);
+        }
+        if (lava && _hash(x, y, (g.time * 1.5).floor()) < 0.25) {
+          final ph = (g.time * 1.5) % 1;
+          c.drawCircle(r.center + Offset((_hash(x, y, 9) - 0.5) * s * 0.5, 0), s * 0.08 * (1 - ph),
+              Paint()..color = const Color(0xFFFFF59D).withValues(alpha: 1 - ph));
         }
       }
+    }
+  }
+
+  void _door(Canvas c, double s) {
+    final door = Rect.fromLTWH(3.6 * s, 0, 1.8 * s, 0.4 * s);
+    if (g.cleared) {
+      final pulse = 0.5 + 0.5 * math.sin(g.time * 5);
+      c.drawRect(
+          Rect.fromLTWH(3.3 * s, 0, 2.4 * s, 1.6 * s),
+          Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [const Color(0xFF69F0AE).withValues(alpha: 0.35 + 0.2 * pulse), const Color(0x0069F0AE)],
+            ).createShader(Rect.fromLTWH(3.3 * s, 0, 2.4 * s, 1.6 * s)));
+      c.drawRect(door, Paint()..color = const Color(0xFF0D3B26));
+      c.drawRect(door.deflate(2), Paint()..color = Color.lerp(const Color(0xFF00E676), Colors.white, pulse * 0.5)!);
+      for (var i = 0; i < 2; i++) {
+        final yy = (0.7 + i * 0.45) * s - ((g.time * 1.2) % 1) * s * 0.45;
+        final a = (1 - i * 0.4) * (0.5 + 0.5 * pulse);
+        final p = Path()
+          ..moveTo(4.2 * s, yy + s * 0.18)
+          ..lineTo(4.5 * s, yy)
+          ..lineTo(4.8 * s, yy + s * 0.18);
+        c.drawPath(
+            p,
+            Paint()
+              ..color = Colors.white.withValues(alpha: a)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = s * 0.07
+              ..strokeCap = StrokeCap.round);
+      }
+    } else {
+      c.drawRect(door, Paint()..color = const Color(0xFF1A1110));
+      for (var i = 0; i < 5; i++) {
+        final xx = (3.75 + i * 0.37) * s;
+        c.drawLine(Offset(xx, 0), Offset(xx, 0.4 * s), Paint()
+          ..color = const Color(0xFF9E9E9E)
+          ..strokeWidth = s * 0.07);
+        c.drawCircle(Offset(xx, 0.4 * s), s * 0.05, Paint()..color = const Color(0xFF757575));
+      }
+    }
+  }
+
+  // 環境粒子：草原螢火蟲、熔岩火星、魔王城紫光（用時間公式算，不存狀態）
+  void _ambient(Canvas c, double s, Size size) {
+    final col = switch (g.chapter) {
+      0 => const Color(0xFFF0F4C3),
+      1 => const Color(0xFFFFE0B2),
+      2 => const Color(0xFFB2EBF2),
+      3 => const Color(0xFFFF9100),
+      _ => const Color(0xFFE1BEE7),
+    };
+    final rising = g.chapter >= 3;
+    for (var i = 0; i < 14; i++) {
+      final sp = 0.15 + _hash(i, 1, 7) * 0.25;
+      final ph = (g.time * sp + _hash(i, 2, 7)) % 1;
+      final x = (_hash(i, 3, 7) * rgCols + math.sin(g.time * 0.7 + i) * 0.4) * s;
+      final y = rising ? (1 - ph) * size.height : (_hash(i, 4, 7) * rgRows + math.cos(g.time * 0.5 + i) * 0.5) * s;
+      final a = rising ? math.sin(ph * math.pi) : 0.5 + 0.5 * math.sin(g.time * 2 + i * 1.7);
+      c.drawCircle(Offset(x, y), s * 0.09, Paint()..color = col.withValues(alpha: 0.15 * a));
+      c.drawCircle(Offset(x, y), s * 0.035, Paint()..color = col.withValues(alpha: 0.7 * a));
     }
   }
 
@@ -628,15 +942,34 @@ class _ArenaPainter extends CustomPainter {
     for (final z in g.zones) {
       final k = 1 - (z.t / z.total).clamp(0.0, 1.0);
       final o = Offset(z.x * s, z.y * s);
-      c.drawCircle(o, z.r * s, Paint()..color = const Color(0x33FF1744));
-      c.drawCircle(
-          o,
-          z.r * s,
-          Paint()
-            ..color = const Color(0xCCFF1744)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2);
-      c.drawCircle(o, z.r * s * k, Paint()..color = const Color(0x66FF5722));
+      c.drawCircle(o, z.r * s, Paint()..color = Color.fromRGBO(255, 23, 68, 0.12 + 0.15 * k));
+      c.drawCircle(o, z.r * s, Paint()
+        ..color = const Color(0xDDFF1744)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2);
+      c.drawCircle(o, z.r * s * k, Paint()..color = const Color(0x55FF5722));
+      // 從天而降的石頭影子
+      final rock = o.translate(0, -(1 - k) * s * 3);
+      c.drawCircle(rock, s * 0.25 * (0.5 + k * 0.5), Paint()..color = const Color(0xFF5D4037).withValues(alpha: k));
+    }
+  }
+
+  void _portals(Canvas c, double s) {
+    for (final p in g.portals) {
+      final o = Offset(p.x * s, p.y * s);
+      final k = (1 - p.t).clamp(0.0, 1.0);
+      final r = s * (0.25 + 0.3 * k);
+      c.drawCircle(o, r * 1.4, Paint()..color = const Color(0x337C4DFF));
+      c.drawOval(Rect.fromCenter(center: o, width: r * 2, height: r * 1.2), Paint()..color = const Color(0xAA311B92));
+      for (var i = 0; i < 3; i++) {
+        c.drawArc(
+            Rect.fromCenter(center: o, width: r * 2 * (1 - i * 0.25), height: r * 1.2 * (1 - i * 0.25)),
+            g.time * 6 + i * 2, 2.2, false,
+            Paint()
+              ..color = (p.elite ? const Color(0xFFFFD54F) : const Color(0xFFB388FF)).withValues(alpha: 0.9)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2);
+      }
     }
   }
 
@@ -645,28 +978,46 @@ class _ArenaPainter extends CustomPainter {
       final o = Offset(e.x * s, e.y * s);
       final dashing = (e.type == 'w' || e.type == 'B2') && e.st == 1 || e.type == 'B5' && e.st == 5;
       if (dashing) {
-        final end = o + Offset(math.cos(e.ang), math.sin(e.ang)) * s * 6;
-        c.drawLine(o, end,
+        final len = s * 6;
+        c.save();
+        c.translate(o.dx, o.dy);
+        c.rotate(e.ang);
+        final w = e.r * 2 * s;
+        final lane = Rect.fromLTWH(0, -w / 2, len, w);
+        c.drawRect(
+            lane,
             Paint()
-              ..color = const Color(0x55FF1744)
-              ..strokeWidth = e.r * 2 * s
-              ..strokeCap = StrokeCap.round);
+              ..shader = const LinearGradient(colors: [Color(0x88FF1744), Color(0x00FF1744)]).createShader(lane));
+        for (var i = 0; i < 4; i++) {
+          final xx = ((g.time * 4 + i / 4) % 1) * len;
+          final p = Path()
+            ..moveTo(xx, -w * 0.3)
+            ..lineTo(xx + w * 0.3, 0)
+            ..lineTo(xx, w * 0.3);
+          c.drawPath(
+              p,
+              Paint()
+                ..color = Colors.white.withValues(alpha: 0.5 * (1 - xx / len))
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 2);
+        }
+        c.restore();
       } else if (e.type == 'a' && e.st == 1) {
-        final end = o + Offset(math.cos(e.ang), math.sin(e.ang)) * s * 12;
-        c.drawLine(o, end,
-            Paint()
-              ..color = const Color(0x99FF1744)
-              ..strokeWidth = 1.5);
+        final dir = Offset(math.cos(e.ang), math.sin(e.ang));
+        final p = Paint()
+          ..color = const Color(0xBBFF1744)
+          ..strokeWidth = 1.5;
+        for (var d = 0.4; d < 12; d += 0.35) {
+          c.drawLine(o + dir * d * s, o + dir * (d + 0.18) * s, p);
+        }
       } else if (e.type == 'B1' && (e.st == 1 || e.st == 2)) {
         final t = Offset(e.tx * s, e.ty * s);
-        c.drawCircle(t, e.r * s * 1.1, Paint()..color = const Color(0x44FF1744));
-        c.drawCircle(
-            t,
-            e.r * s * 1.1,
-            Paint()
-              ..color = const Color(0xCCFF1744)
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2);
+        final pulse = 0.5 + 0.5 * math.sin(g.time * 16);
+        c.drawCircle(t, e.r * s * 1.15, Paint()..color = Color.fromRGBO(255, 23, 68, 0.2 + 0.15 * pulse));
+        c.drawCircle(t, e.r * s * 1.15, Paint()
+          ..color = const Color(0xDDFF1744)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5);
       }
     }
   }
@@ -674,14 +1025,25 @@ class _ArenaPainter extends CustomPainter {
   void _enemy(Canvas c, RgEnemy e, double s) {
     var o = Offset(e.x * s, e.y * s);
     final sz = e.r * 2.9 * s;
+    final fade = (e.spawnT / 0.5).clamp(0.0, 1.0);
     if (e.airborne) {
       final k = (e.t / 0.7).clamp(0.0, 1.0);
-      c.drawOval(Rect.fromCenter(center: o, width: e.r * 2 * s, height: e.r * s * 0.8), Paint()..color = const Color(0x55000000));
+      c.drawOval(Rect.fromCenter(center: o, width: e.r * 2 * s * (1 - 0.4 * math.sin(k * math.pi)), height: e.r * s * 0.7),
+          Paint()..color = const Color(0x66000000));
       o = o.translate(0, -math.sin(k * math.pi) * s * 2.2);
+    }
+    if (e.elite) {
+      c.drawCircle(o, e.r * s * 1.4, Paint()..color = const Color(0x33FFD54F));
+      c.drawArc(Rect.fromCircle(center: o, radius: e.r * s * 1.35), g.time * 3, 4.2, false,
+          Paint()
+            ..color = const Color(0xCCFFD54F)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2);
     }
     if (e.windup) {
       final pulse = 0.5 + 0.5 * math.sin(g.time * 30);
       c.drawCircle(o, e.r * s * 1.35, Paint()..color = Color.fromRGBO(255, 40, 40, 0.18 + 0.25 * pulse));
+      _text(c, '!', o.translate(0, -e.r * s * 2.1), s * 0.45, const Color(0xFFFF1744));
     }
     c.save();
     c.translate(o.dx - sz / 2, o.dy - sz / 2 - sz * 0.08);
@@ -690,38 +1052,54 @@ class _ArenaPainter extends CustomPainter {
       band: rgChapterBands[g.chapter],
       boss: e.boss,
       flash: e.flash > 0 ? 0.8 : 0,
+      opacity: fade,
       t: g.time + e.seed,
     ).paint(c, Size(sz, sz));
     c.restore();
     if (e.frozeT > 0) {
-      c.drawCircle(o, e.r * s * 1.1, Paint()..color = const Color(0x7781D4FA));
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromCircle(center: o, radius: e.r * s * 1.1), Radius.circular(e.r * s * 0.3)),
+          Paint()..color = const Color(0x8881D4FA));
     } else if (e.slowT > 0) {
-      c.drawCircle(
-          o,
-          e.r * s * 1.1,
-          Paint()
-            ..color = const Color(0x8881D4FA)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5);
+      c.drawCircle(o, e.r * s * 1.1, Paint()
+        ..color = const Color(0x8881D4FA)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
     }
-    if (e.burnT > 0) c.drawCircle(o + Offset(e.r * s * 0.7, -e.r * s * 0.5), s * 0.07, Paint()..color = const Color(0xFFFF6D00));
-    if (e.poison > 0) c.drawCircle(o + Offset(-e.r * s * 0.7, -e.r * s * 0.5), s * 0.07, Paint()..color = const Color(0xFF76FF03));
-    if (!e.boss) {
+    if (e.burnT > 0) {
+      for (var i = 0; i < 3; i++) {
+        final ph = (g.time * 2 + i / 3) % 1;
+        c.drawCircle(o + Offset((i - 1) * e.r * s * 0.5, -ph * e.r * s * 1.4), s * 0.06 * (1 - ph),
+            Paint()..color = Color.fromRGBO(255, 109 + (ph * 100).round(), 0, 1 - ph));
+      }
+    }
+    if (e.poison > 0) {
+      final ph = (g.time * 1.5) % 1;
+      c.drawCircle(o + Offset(-e.r * s * 0.6, -ph * e.r * s), s * 0.05, Paint()..color = const Color(0xFF76FF03).withValues(alpha: 1 - ph));
+    }
+    if (!e.boss && e.hp < e.maxHp && fade >= 1) {
       final w = e.r * 2.2 * s;
-      final r = Rect.fromLTWH(o.dx - w / 2, o.dy - e.r * s * 1.55, w, s * 0.09);
-      c.drawRect(r, Paint()..color = Colors.black54);
-      c.drawRect(Rect.fromLTWH(r.left, r.top, w * (e.hp / e.maxHp).clamp(0.0, 1.0), r.height), Paint()..color = const Color(0xFFFF5252));
+      final r = Rect.fromLTWH(o.dx - w / 2, o.dy - e.r * s * 1.6, w, s * 0.1);
+      c.drawRRect(RRect.fromRectAndRadius(r.inflate(1), const Radius.circular(2)), Paint()..color = Colors.black87);
+      c.drawRect(Rect.fromLTWH(r.left, r.top, w * (e.hp / e.maxHp).clamp(0.0, 1.0), r.height),
+          Paint()..color = e.elite ? const Color(0xFFFFB300) : const Color(0xFFFF5252));
     }
   }
 
   void _player(Canvas c, double s) {
-    final o = Offset(g.px * s, g.py * s);
+    final o0 = Offset(g.px * s, g.py * s);
     final r = g.pr * s;
+    // 腳下光圈
+    c.drawOval(Rect.fromCenter(center: o0 + Offset(0, r * 0.85), width: r * 2.8, height: r * 1.0),
+        Paint()
+          ..color = const Color(0xFF64FFDA).withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2);
     // 旋轉刀刃
     final orbs = 2 * g.st.lv('orb');
     for (var i = 0; i < orbs; i++) {
       final a = g.orbAng + 2 * math.pi * i / orbs;
-      final p = o + Offset(math.cos(a), math.sin(a)) * 1.15 * s;
+      final p = o0 + Offset(math.cos(a), math.sin(a)) * 1.15 * s;
+      c.drawCircle(p, s * 0.24, Paint()..color = const Color(0x2280DEEA));
       c.save();
       c.translate(p.dx, p.dy);
       c.rotate(g.time * 12);
@@ -733,119 +1111,288 @@ class _ArenaPainter extends CustomPainter {
         ..close();
       c.drawPath(blade, Paint()..color = const Color(0xFFE0F7FA));
       c.rotate(math.pi / 2);
-      c.drawPath(blade, Paint()..color = const Color(0xFFB2EBF2));
+      c.drawPath(blade, Paint()..color = const Color(0xFF80DEEA));
       c.restore();
     }
-    if (g.inv > 0 && (g.time * 20).floor().isOdd && g.phase == RgPhase.play) return;
-    c.drawOval(Rect.fromCenter(center: o + Offset(0, r * 0.9), width: r * 2, height: r * 0.7), Paint()..color = const Color(0x55000000));
-    // 披風身體
-    c.drawCircle(o, r, Paint()..color = const Color(0xFF2E7D32));
-    c.drawCircle(o + Offset(0, -r * 0.15), r * 0.62, Paint()..color = const Color(0xFFFFCC80));
-    // 帽子
-    final hat = Path()
-      ..moveTo(o.dx - r * 0.7, o.dy - r * 0.35)
-      ..lineTo(o.dx + r * 0.7, o.dy - r * 0.35)
-      ..lineTo(o.dx + r * 0.1, o.dy - r * 1.35)
+    if (g.inv > 0 && g.hurtT > 0 && (g.time * 20).floor().isOdd && g.phase == RgPhase.play) return;
+    final bob = g.moving ? math.sin(g.time * 16).abs() * r * 0.25 : 0.0;
+    final o = o0.translate(0, -bob);
+    c.drawOval(Rect.fromCenter(center: o0 + Offset(0, r * 0.85), width: r * 1.8, height: r * 0.6), Paint()..color = const Color(0x66000000));
+    final fa = math.atan2(g.faceY, g.faceX);
+    // 披風（往面向的反方向飄）
+    final back = Offset(-g.faceX, -g.faceY);
+    final sway = math.sin(g.time * (g.moving ? 14 : 3)) * r * 0.15;
+    final cape = Path()
+      ..moveTo(o.dx - r * 0.75, o.dy - r * 0.2)
+      ..quadraticBezierTo(o.dx + back.dx * r * 1.4 - r * 0.6 + sway, o.dy + back.dy * r * 0.6 + r * 1.0,
+          o.dx + back.dx * r * 0.9 + sway, o.dy + r * 1.05)
+      ..quadraticBezierTo(o.dx + back.dx * r * 1.4 + r * 0.6 + sway, o.dy + back.dy * r * 0.6 + r * 1.0, o.dx + r * 0.75, o.dy - r * 0.2)
       ..close();
-    c.drawPath(hat, Paint()..color = const Color(0xFF1B5E20));
-    c.drawCircle(o + Offset(r * 0.1, -r * 1.35), r * 0.12, Paint()..color = const Color(0xFFFF5252));
-    // 眼睛看向面向
-    final eye = Offset(g.faceX, g.faceY) * r * 0.18;
-    c.drawCircle(o + Offset(-r * 0.22, -r * 0.12) + eye, r * 0.09, Paint()..color = Colors.black);
-    c.drawCircle(o + Offset(r * 0.22, -r * 0.12) + eye, r * 0.09, Paint()..color = Colors.black);
-    // 弓
-    final a = math.atan2(g.faceY, g.faceX);
+    c.drawPath(cape, Paint()..color = const Color(0xFF1B5E20));
+    // 身體
+    c.drawOval(Rect.fromCenter(center: o + Offset(0, r * 0.25), width: r * 1.5, height: r * 1.3),
+        Paint()..shader = const LinearGradient(colors: [Color(0xFF66BB6A), Color(0xFF2E7D32)]).createShader(Rect.fromCircle(center: o, radius: r)));
+    c.drawLine(o + Offset(-r * 0.6, r * 0.25), o + Offset(r * 0.6, r * 0.25), Paint()
+      ..color = const Color(0xFF6D4C41)
+      ..strokeWidth = r * 0.18);
+    // 頭＋兜帽
+    final head = o + Offset(0, -r * 0.45);
+    c.drawCircle(head, r * 0.62, Paint()..color = const Color(0xFF2E7D32));
+    c.drawCircle(head + Offset(g.faceX * r * 0.12, g.faceY * r * 0.08 + r * 0.05), r * 0.45, Paint()..color = const Color(0xFFFFCC80));
+    final hood = Path()
+      ..moveTo(head.dx - r * 0.66, head.dy + r * 0.05)
+      ..quadraticBezierTo(head.dx - r * 0.5, head.dy - r * 0.8, head.dx + r * 0.15, head.dy - r * 1.05)
+      ..quadraticBezierTo(head.dx + r * 0.3, head.dy - r * 0.6, head.dx + r * 0.66, head.dy + r * 0.05)
+      ..quadraticBezierTo(head.dx, head.dy - r * 0.45, head.dx - r * 0.66, head.dy + r * 0.05);
+    c.drawPath(hood, Paint()..color = const Color(0xFF388E3C));
+    c.drawCircle(head + Offset(r * 0.18, -r * 1.0), r * 0.1, Paint()..color = const Color(0xFFFF5252));
+    if (g.faceY < 0.6) {
+      final eye = Offset(g.faceX, g.faceY) * r * 0.15;
+      for (final dx in [-0.17, 0.17]) {
+        c.drawCircle(head + Offset(dx * r, r * 0.05) + eye, r * 0.075, Paint()..color = const Color(0xFF3E2723));
+      }
+    }
+    // 弓：快射擊時拉弦
+    final pull = g.moving ? 0.0 : (1 - (g.shootCd / g.st.interval).clamp(0.0, 1.0));
     c.save();
-    c.translate(o.dx, o.dy);
-    c.rotate(a);
-    c.drawArc(Rect.fromCircle(center: Offset(r * 0.7, 0), radius: r * 0.75), -1.2, 2.4, false,
+    c.translate(o.dx, o.dy + r * 0.1);
+    c.rotate(fa);
+    final bowR = r * 0.85;
+    final bc = Offset(r * 0.55, 0);
+    c.drawArc(Rect.fromCircle(center: bc, radius: bowR), -1.15, 2.3, false,
         Paint()
           ..color = const Color(0xFF8D6E63)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = r * 0.18
+          ..strokeWidth = r * 0.2
           ..strokeCap = StrokeCap.round);
-    final ex = r * 0.7 + math.cos(1.2) * r * 0.75, ey = math.sin(1.2) * r * 0.75;
-    c.drawLine(Offset(ex, -ey), Offset(ex, ey), Paint()
+    final tipX = bc.dx + math.cos(1.15) * bowR, tipY = math.sin(1.15) * bowR;
+    final nock = Offset(tipX - pull * r * 0.55, 0);
+    final sp = Paint()
       ..color = Colors.white70
-      ..strokeWidth = 1);
+      ..strokeWidth = 1;
+    c.drawLine(Offset(tipX, -tipY), nock, sp);
+    c.drawLine(Offset(tipX, tipY), nock, sp);
+    if (pull > 0.3 && g.en.isNotEmpty) {
+      c.drawLine(nock, Offset(bc.dx + bowR + r * 0.2, 0), Paint()
+        ..color = const Color(0xFFFFF59D)
+        ..strokeWidth = r * 0.1);
+    }
     c.restore();
     // 血條
-    final w = s * 0.9;
-    final hb = Rect.fromLTWH(o.dx - w / 2, o.dy + r * 1.35, w, s * 0.1);
-    c.drawRect(hb, Paint()..color = Colors.black54);
-    c.drawRect(Rect.fromLTWH(hb.left, hb.top, w * (g.st.hp / g.st.maxHp).clamp(0.0, 1.0), hb.height),
-        Paint()..color = const Color(0xFF00E676));
+    final w = s * 0.95;
+    final hb = Rect.fromLTWH(o0.dx - w / 2, o0.dy + r * 1.4, w, s * 0.11);
+    c.drawRRect(RRect.fromRectAndRadius(hb.inflate(1), const Radius.circular(3)), Paint()..color = Colors.black87);
+    final frac = (g.st.hp / g.st.maxHp).clamp(0.0, 1.0);
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(hb.left, hb.top, w * frac, hb.height), const Radius.circular(2)),
+        Paint()..color = frac < 0.3 ? const Color(0xFFFF5252) : const Color(0xFF00E676));
+  }
+
+  void _gems(Canvas c, double s) {
+    for (final gm in g.gems) {
+      final o = Offset(gm.x * s, gm.y * s);
+      final r = s * 0.09;
+      c.drawCircle(o, r * 2, Paint()..color = const Color(0x3340C4FF));
+      final p = Path()
+        ..moveTo(o.dx, o.dy - r * 1.3)
+        ..lineTo(o.dx + r, o.dy)
+        ..lineTo(o.dx, o.dy + r * 1.3)
+        ..lineTo(o.dx - r, o.dy)
+        ..close();
+      c.drawPath(p, Paint()..color = const Color(0xFF40C4FF));
+      c.drawLine(o - Offset(r * 0.4, r * 0.4), o, Paint()
+        ..color = Colors.white
+        ..strokeWidth = 1);
+    }
+  }
+
+  void _fx(Canvas c, double s) {
+    for (final f in g.fx) {
+      final k = (f.t / f.life).clamp(0.0, 1.0);
+      final o = Offset(f.x * s, f.y * s);
+      final col = Color(f.color);
+      switch (f.kind) {
+        case 0:
+          c.drawCircle(o, f.size * s * (1 - k * 0.6), Paint()..color = col.withValues(alpha: 1 - k));
+        case 1:
+          c.drawCircle(o, f.size * s * (0.4 + k * 0.8), Paint()
+            ..color = col.withValues(alpha: 0.8 * (1 - k))
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = s * 0.08 * (1 - k) + 1);
+        case 2:
+          final pos = Offset(g.px * s, g.py * s);
+          final col2 = Rect.fromCenter(center: pos.translate(0, -s * 1.5), width: s * (1.2 - k * 0.6), height: s * 3.5);
+          c.drawRect(
+              col2,
+              Paint()
+                ..shader = LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [col.withValues(alpha: 0.6 * (1 - k)), col.withValues(alpha: 0)],
+                ).createShader(col2));
+          c.drawCircle(pos, s * (0.5 + k * 1.5), Paint()
+            ..color = col.withValues(alpha: 1 - k)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3);
+          if (k < 0.8) _text(c, 'LEVEL UP!', pos.translate(0, -s * (1.2 + k)), s * 0.42, col.withValues(alpha: 1 - k));
+      }
+    }
   }
 
   void _bullets(Canvas c, double s) {
     for (final b in g.bl) {
       final o = Offset(b.x * s, b.y * s);
+      final sp = math.sqrt(b.vx * b.vx + b.vy * b.vy) + 1e-6;
+      final dir = Offset(b.vx / sp, b.vy / sp);
       if (b.mine) {
-        final sp = math.sqrt(b.vx * b.vx + b.vy * b.vy);
-        final d = Offset(b.vx / sp, b.vy / sp) * s * 0.38;
-        c.drawLine(o - d, o,
-            Paint()
-              ..color = const Color(0xFFFFF59D)
-              ..strokeWidth = s * 0.07
-              ..strokeCap = StrokeCap.round);
-        c.drawCircle(o, s * 0.05, Paint()..color = Colors.white);
+        final tail = o - dir * s * 0.42;
+        c.drawLine(o - dir * s * 0.9, tail, Paint()
+          ..color = const Color(0x33FFF59D)
+          ..strokeWidth = s * 0.05);
+        c.drawLine(tail, o, Paint()
+          ..color = const Color(0xFFD7CCC8)
+          ..strokeWidth = s * 0.045);
+        final nrm = Offset(-dir.dy, dir.dx);
+        final head = Path()
+          ..moveTo(o.dx + dir.dx * s * 0.12, o.dy + dir.dy * s * 0.12)
+          ..lineTo(o.dx + nrm.dx * s * 0.06, o.dy + nrm.dy * s * 0.06)
+          ..lineTo(o.dx - nrm.dx * s * 0.06, o.dy - nrm.dy * s * 0.06)
+          ..close();
+        c.drawPath(head, Paint()..color = Colors.white);
+        final fl = Paint()
+          ..color = const Color(0xFFFF7043)
+          ..strokeWidth = s * 0.035;
+        c.drawLine(tail, tail - dir * s * 0.1 + nrm * s * 0.07, fl);
+        c.drawLine(tail, tail - dir * s * 0.1 - nrm * s * 0.07, fl);
         continue;
       }
       final r = b.r * s;
       final (core, glow) = switch (b.style) {
-        2 => (const Color(0xFFEA80FC), const Color(0x88AA00FF)),
-        3 => (const Color(0xFF8D6E63), const Color(0x88FF6D00)),
-        4 => (const Color(0xFFFFE082), const Color(0x99FF3D00)),
-        _ => (const Color(0xFFFF8A80), const Color(0x88FF1744)),
+        2 => (const Color(0xFFEA80FC), const Color(0xFFAA00FF)),
+        3 => (const Color(0xFF8D6E63), const Color(0xFFFF6D00)),
+        4 => (const Color(0xFFFFE082), const Color(0xFFFF3D00)),
+        _ => (const Color(0xFFFF8A80), const Color(0xFFFF1744)),
       };
-      c.drawCircle(o, r * 1.6, Paint()..color = glow);
+      if (b.style == 4 || b.style == 3) {
+        for (var i = 1; i <= 3; i++) {
+          c.drawCircle(o - dir * (r * i * 0.9), r * (1 - i * 0.22), Paint()..color = glow.withValues(alpha: 0.35 - i * 0.08));
+        }
+      }
+      final pulse = 1 + 0.12 * math.sin(g.time * 20 + b.x * 3);
+      c.drawCircle(o, r * 1.9 * pulse, Paint()..color = glow.withValues(alpha: 0.18));
+      c.drawCircle(o, r * 1.35, Paint()..color = glow.withValues(alpha: 0.55));
       c.drawCircle(o, r, Paint()..color = core);
-      c.drawCircle(o - Offset(r * 0.3, r * 0.3), r * 0.35, Paint()..color = Colors.white70);
+      c.drawCircle(o - Offset(r * 0.3, r * 0.3), r * 0.38, Paint()..color = Colors.white.withValues(alpha: 0.85));
     }
+  }
+
+  void _text(Canvas c, String t, Offset center, double size, Color color, {bool outline = true}) {
+    if (outline) {
+      final tp2 = TextPainter(
+        text: TextSpan(
+          text: t,
+          style: TextStyle(
+            fontSize: size,
+            fontWeight: FontWeight.w900,
+            foreground: Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = math.max(2.0, size * 0.14)
+              ..color = Colors.black.withValues(alpha: color.a * 0.9),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp2.paint(c, center - Offset(tp2.width / 2, tp2.height / 2));
+    }
+    final tp = TextPainter(
+      text: TextSpan(text: t, style: TextStyle(color: color, fontSize: size, fontWeight: FontWeight.w900)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(c, center - Offset(tp.width / 2, tp.height / 2));
   }
 
   void _floats(Canvas c, double s) {
     for (final f in g.floats) {
       final a = (1 - f.t / 0.9).clamp(0.0, 1.0);
-      final tp = TextPainter(
-        text: TextSpan(
-          text: f.s,
-          style: TextStyle(
-            color: Color(f.color).withValues(alpha: a),
-            fontSize: s * (f.big ? 0.42 : 0.3),
-            fontWeight: FontWeight.bold,
-            shadows: const [Shadow(blurRadius: 2)],
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(c, Offset(f.x * s - tp.width / 2, f.y * s - tp.height / 2));
+      final pop = f.t < 0.1 ? 1 + (0.1 - f.t) * 4 : 1.0;
+      _text(c, f.s, Offset(f.x * s, f.y * s), s * (f.big ? 0.42 : 0.3) * pop, Color(f.color).withValues(alpha: a));
     }
   }
 
   void _heart(Canvas c, Offset o, double r) {
-    final bob = math.sin(g.time * 4) * r * 0.2;
+    final bob = math.sin(g.time * 4) * r * 0.25;
+    o = o.translate(0, bob);
+    c.drawCircle(o, r * 1.8, Paint()..color = const Color(0x33FF1744));
     final p = Path()
-      ..moveTo(o.dx, o.dy + r * 0.9 + bob)
-      ..cubicTo(o.dx - r * 1.6, o.dy - r * 0.2 + bob, o.dx - r * 0.6, o.dy - r * 1.2 + bob, o.dx, o.dy - r * 0.4 + bob)
-      ..cubicTo(o.dx + r * 0.6, o.dy - r * 1.2 + bob, o.dx + r * 1.6, o.dy - r * 0.2 + bob, o.dx, o.dy + r * 0.9 + bob);
+      ..moveTo(o.dx, o.dy + r * 0.9)
+      ..cubicTo(o.dx - r * 1.6, o.dy - r * 0.2, o.dx - r * 0.6, o.dy - r * 1.2, o.dx, o.dy - r * 0.4)
+      ..cubicTo(o.dx + r * 0.6, o.dy - r * 1.2, o.dx + r * 1.6, o.dy - r * 0.2, o.dx, o.dy + r * 0.9);
     c.drawPath(p, Paint()..color = const Color(0xFFFF1744));
+    c.drawCircle(o + Offset(-r * 0.45, -r * 0.35), r * 0.2, Paint()..color = Colors.white70);
+  }
+
+  void _vignette(Canvas c, Size size) {
+    final rect = Offset.zero & size;
+    c.drawRect(
+        rect,
+        Paint()
+          ..shader = const RadialGradient(radius: 0.85, colors: [Color(0x00000000), Color(0x00000000), Color(0x77000000)], stops: [0, 0.6, 1])
+              .createShader(rect));
+    final low = g.st.hp < g.st.maxHp * 0.3 && g.phase == RgPhase.play;
+    final hurt = (g.hurtT / 0.35).clamp(0.0, 1.0);
+    final lowA = low ? 0.25 + 0.2 * math.sin(g.time * 6) : 0.0;
+    final a = math.max(hurt * 0.55, lowA);
+    if (a > 0.01) {
+      c.drawRect(
+          rect,
+          Paint()
+            ..shader = RadialGradient(
+              radius: 0.8,
+              colors: [const Color(0x00FF1744), Color.fromRGBO(255, 23, 68, a)],
+              stops: const [0.55, 1],
+            ).createShader(rect));
+    }
+  }
+
+  void _banner(Canvas c, Size size, double s) {
+    final t = g.roomTime;
+    if (t > 2.2) return;
+    final a = t < 0.3 ? t / 0.3 : (t > 1.7 ? (2.2 - t) / 0.5 : 1.0);
+    final center = Offset(size.width / 2, size.height * 0.42);
+    if (g.isBossRoom) {
+      final band = Rect.fromCenter(center: center, width: size.width, height: s * 1.6);
+      c.drawRect(
+          band,
+          Paint()
+            ..shader = LinearGradient(colors: [
+              const Color(0x00000000),
+              Colors.black.withValues(alpha: 0.75 * a),
+              const Color(0x00000000),
+            ]).createShader(band));
+      _text(c, '⚠ 頭目出現 ⚠', center.translate(0, -s * 0.35), s * 0.32, const Color(0xFFFF5252).withValues(alpha: a));
+      _text(c, g.boss?.name ?? '', center.translate(0, s * 0.25), s * 0.6, const Color(0xFFFFD54F).withValues(alpha: a));
+    } else {
+      _text(c, '${g.chapter + 1}-${g.room + 1}', center, s * 0.7, Colors.white.withValues(alpha: a * 0.85));
+      if (g.wavesLeft > 0 && g.room > 0) {
+        _text(c, '還有 ${g.wavesLeft} 波增援', center.translate(0, s * 0.65), s * 0.28, const Color(0xFFB388FF).withValues(alpha: a));
+      }
+    }
   }
 
   void _joystick(Canvas c) {
     final (o, n) = joy();
     if (o == null || n == null) return;
-    c.drawCircle(o, 40, Paint()..color = const Color(0x22FFFFFF));
-    c.drawCircle(
-        o,
-        40,
-        Paint()
-          ..color = const Color(0x55FFFFFF)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2);
+    c.drawCircle(o, 42, Paint()..color = const Color(0x22FFFFFF));
+    c.drawCircle(o, 42, Paint()
+      ..color = const Color(0x66FFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2);
     var d = n - o;
-    if (d.distance > 40) d = d / d.distance * 40;
-    c.drawCircle(o + d, 16, Paint()..color = const Color(0x88FFFFFF));
+    if (d.distance > 42) d = d / d.distance * 42;
+    c.drawCircle(o + d, 18, Paint()..color = const Color(0x99FFFFFF));
+    c.drawCircle(o + d, 18, Paint()
+      ..color = const Color(0xCCFFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5);
   }
 
   @override
