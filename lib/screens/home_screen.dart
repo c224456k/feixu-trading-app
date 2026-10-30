@@ -13,6 +13,7 @@ import 'casino_screen.dart';
 import 'hero_screen.dart';
 import 'leaderboard_screen.dart';
 import 'td_screen.dart';
+import 'archer_rogue_screen.dart';
 import 'magic_tower_screen.dart';
 import 'volley_screen.dart';
 import 'fx_screen.dart';
@@ -168,6 +169,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             icon: const Icon(Icons.domain),
             tooltip: '魔塔（試玩）',
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ArcherRogueScreen()),
+            ),
+            icon: const Icon(Icons.gps_fixed),
+            tooltip: '弓箭肉鴿（試玩）',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
