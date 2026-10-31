@@ -5,13 +5,20 @@ import 'dart:math' as math;
 const int rgCols = 9;
 const int rgRows = 15;
 const double rgDt = 1 / 60;
-const int rgChapters = 5;
+const int rgChapters = 20;
 const int rgRoomsPerChapter = 5; // 0~3 一般房，4 頭目房
 
-const rgChapterNames = ['翠綠草原', '幽暗洞窟', '亡者墓地', '熔岩地獄', '魔王城'];
-const rgChapterBands = [0, 1, 2, 6, 9]; // MonsterPainter 的區域配色
-const _hpMul = [1.0, 1.75, 2.7, 3.9, 5.3];
-const _dmgMul = [1.0, 1.2, 1.42, 1.68, 1.95];
+// 20 關 = 5 種場景 × 4 階（每 5 關一輪，越後面越強；第 5、10、15、20 關是魔龍）
+const rgChapterNames = [
+  '翠綠草原', '幽暗洞窟', '亡者墓地', '熔岩地獄', '魔王城・城門', //
+  '黃昏草原', '深淵洞窟', '腐朽墓地', '煉獄火山', '魔王城・外廷', //
+  '暴風草原', '水晶洞窟', '冥王墓地', '焦土熔爐', '魔王城・迴廊', //
+  '血月草原', '虛空洞窟', '死神墓地', '終焉熔岩', '魔王城・王座',
+];
+const rgThemeBands = [0, 1, 2, 6, 9]; // MonsterPainter 的區域配色（依場景）
+// 每關怪物血量／傷害倍率（用 bot 校準過）
+double rgHpMul(int c) => 1.0 + 0.75 * c + 0.16 * c * c;
+double rgDmgMul(int c) => 1.0 + 0.2 * c + 0.01 * c * c;
 const _mobHpMul = 1.3; // 小怪額外倍率（頭目不吃）
 const _mobDmgMul = 1.25;
 const _roomWaves = [0, 1, 1, 2]; // 各一般房的增援波數（剩 1 隻時從傳送門冒出來）
@@ -31,10 +38,10 @@ const rgSkillDefs = <RgSkillDef>[
   RgSkillDef('pierce', '穿透', '🗡️', '箭穿過敵人，每穿一隻傷害 -33%', 1),
   RgSkillDef('rico', '彈射', '💫', '命中後彈向附近的敵人（傷害 -30%）', 2),
   RgSkillDef('wall', '反彈牆', '🧱', '箭碰到牆壁或岩石會反彈 2 次', 1),
-  RgSkillDef('atk', '攻擊強化', '⚔️', '攻擊力 +22%', 5),
-  RgSkillDef('spd', '攻速強化', '⚡', '攻擊速度 +20%', 4),
-  RgSkillDef('crit', '暴擊強化', '🎯', '暴擊率 +10%、暴擊傷害 +30%', 4),
-  RgSkillDef('hp', '生命強化', '❤️', '生命上限 +20%（同時回復這麼多）', 5),
+  RgSkillDef('atk', '攻擊強化', '⚔️', '攻擊力 +22%', 12),
+  RgSkillDef('spd', '攻速強化', '⚡', '攻擊速度 +20%', 6),
+  RgSkillDef('crit', '暴擊強化', '🎯', '暴擊率 +10%、暴擊傷害 +30%', 6),
+  RgSkillDef('hp', '生命強化', '❤️', '生命上限 +20%（同時回復這麼多）', 12),
   RgSkillDef('heal', '恢復', '💚', '立即回復 40% 生命', 99),
   RgSkillDef('vamp', '吸血', '🩸', '每擊殺一隻回復 2.5% 生命', 2),
   RgSkillDef('fire', '火焰箭', '🔥', '命中燃燒 2 秒（每秒 30% 攻擊力）', 1),
@@ -715,8 +722,36 @@ class RgGame {
     }
   }
 
-  double get hpMul => _hpMul[chapter];
-  double get dmgMul => _dmgMul[chapter];
+  double get hpMul => rgHpMul(chapter);
+  double get dmgMul => rgDmgMul(chapter);
+  int get theme => chapter % 5;
+  int get tier => chapter ~/ 5;
+  int revives = 0;
+
+  /// 這一關這一間的地圖（奇數階左右鏡像）
+  List<String> _rawMap(int r) {
+    final m = rgMaps[theme][r];
+    if (tier.isOdd) return [for (final row in m) row.split('').reversed.join()];
+    return m;
+  }
+
+  /// 花寶石原地復活：滿血、清掉敵方子彈、2.5 秒無敵
+  void revive() {
+    if (phase != RgPhase.dead) return;
+    revives++;
+    st.hp = st.maxHp;
+    inv = 2.5;
+    bl.removeWhere((b) => !b.mine);
+    zones.clear();
+    for (final e in en) {
+      if (e.boss) continue;
+      final d = math.sqrt(_d2(e.x, e.y, px, py));
+      if (d < 2.5) e.stuck = 0.6; // 讓貼身的怪先退開一下
+    }
+    floats.add(RgFloat(px, py - 0.6, '復活！', 0xFF40C4FF, big: true));
+    fx.add(RgFx(2, px, py, 0, 0, 0.9, 1, 0xFF40C4FF));
+    phase = RgPhase.play;
+  }
   bool get isBossRoom => room == rgRoomsPerChapter - 1;
   RgEnemy? get boss {
     for (final e in en) {
@@ -727,7 +762,7 @@ class RgGame {
 
   void loadRoom(int r) {
     room = r;
-    grid = [for (final row in rgMaps[chapter][r]) row.replaceAll(RegExp('[a-zA-Z]'), '.')];
+    grid = [for (final row in _rawMap(r)) row.replaceAll(RegExp('[a-zA-Z]'), '.')];
     en = [];
     bl = [];
     zones = [];
@@ -736,7 +771,7 @@ class RgGame {
     fx = [];
     gems = [];
     portals = [];
-    wavesLeft = r < _roomWaves.length ? _roomWaves[r] : 0;
+    wavesLeft = r < _roomWaves.length ? _roomWaves[r] + (tier >= 2 && r > 0 ? 1 : 0) : 0;
     hurtT = 0;
     _volleys.clear();
     cleared = false;
@@ -749,7 +784,7 @@ class RgGame {
     faceY = -1;
     inv = 1.0; // 進房短暫無敵
     shootCd = 0.4;
-    final rows = rgMaps[chapter][r];
+    final rows = _rawMap(r);
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
         final ch = rows[y][x];
@@ -762,8 +797,21 @@ class RgGame {
       }
     }
     // 精英怪：每間 1 隻，第 3 關起後兩間 2 隻
+    // 高階關卡：每間多幾隻進階怪（位置用關卡＋房間當種子，固定）
+    if (!isBossRoom && tier > 0) {
+      final rr = math.Random(chapter * 31 + r);
+      const adv = ['o', 'g', 'd', 'f', 'm', 'k', 'w'];
+      var added = 0;
+      for (var k = 0; k < 60 && added < tier + (r >= 2 ? 1 : 0); k++) {
+        final x = rr.nextInt(rgCols), y = 1 + rr.nextInt(7);
+        if (grid[y][x] != '.') continue;
+        if (en.any((e) => _d2(e.x, e.y, x + 0.5, y + 0.5) < 1.2)) continue;
+        spawn(adv[rr.nextInt(math.min(adv.length, 3 + tier * 2))], x + 0.5, y + 0.5);
+        added++;
+      }
+    }
     if (!isBossRoom && !(chapter == 0 && r == 0)) {
-      final n = chapter >= 2 && r >= 2 ? 2 : 1;
+      final n = (theme >= 2 && r >= 2 ? 2 : 1) + tier ~/ 2;
       final pool = List.of(en)..shuffle(rng);
       for (final e in pool.take(n)) {
         _makeElite(e);
@@ -783,20 +831,21 @@ class RgGame {
 
   List<String> get _chapterPool {
     final set = <String>{};
-    for (final m in rgMaps[chapter].take(rgRoomsPerChapter - 1)) {
+    for (final m in rgMaps[theme].take(rgRoomsPerChapter - 1)) {
       for (final row in m) {
         for (final ch in row.split('')) {
           if (_types.containsKey(ch)) set.add(ch);
         }
       }
     }
+    if (tier > 0) set.addAll(['o', 'g', 'd', 'f', 'm', 'k', 'w'].take(1 + tier * 2));
     return set.toList()..sort();
   }
 
   void _spawnWave() {
     wavesLeft--;
     final pool = _chapterPool;
-    final n = 3 + (chapter >= 2 ? 1 : 0);
+    final n = 3 + (theme >= 2 ? 1 : 0) + tier;
     for (var i = 0; i < n; i++) {
       for (var k = 0; k < 40; k++) {
         final x = 0.6 + rng.nextDouble() * (rgCols - 1.2), y = 0.6 + rng.nextDouble() * 8.5;
@@ -810,16 +859,16 @@ class RgGame {
   RgEnemy spawn(String ch, double x, double y) {
     final t = _types[ch]!;
     final e = RgEnemy(ch, t.name, t.kind, false, t.fly, x, y, t.r, t.hp * hpMul * _mobHpMul, t.speed,
-        t.contact * dmgMul * _mobDmgMul, t.bdmg * dmgMul * _mobDmgMul, (t.xp * (1 + 0.25 * chapter)).round(), rng.nextDouble() * 10);
+        t.contact * dmgMul * _mobDmgMul, t.bdmg * dmgMul * _mobDmgMul, (t.xp * (1 + 0.1 * chapter)).round(), rng.nextDouble() * 10);
     e.t = -rng.nextDouble() * 0.8; // 錯開節奏
     en.add(e);
     return e;
   }
 
   void _spawnBoss(double x, double y) {
-    final b = _bosses[chapter];
+    final b = _bosses[theme];
     final e = RgEnemy(b.$1, b.$2, b.$3, true, b.$4, x, y, b.$5, b.$6 * hpMul, 1.0, 140 * dmgMul, 100 * dmgMul,
-        (90 * (1 + 0.25 * chapter)).round(), 0);
+        (90 * (1 + 0.1 * chapter)).round(), 0);
     e.t = -1.2;
     en.add(e);
   }
@@ -1051,9 +1100,14 @@ class RgGame {
   /// 關卡通關後進下一關（回復 20% 生命）
   void nextChapter() {
     if (chapter >= rgChapters - 1) return;
+    startChapter(chapter + 1, nextStats());
+  }
+
+  /// 下一關開場的狀態（回復 20% 生命），過關時回報給伺服器存起來
+  RgStats nextStats() {
     final s = st.copy();
     s.hp = math.min(s.maxHp, s.hp + s.maxHp * 0.2);
-    startChapter(chapter + 1, s);
+    return s;
   }
 
   void chooseAngel(bool heal) {
@@ -1370,7 +1424,7 @@ class RgGame {
       e.spawnT += dt;
       return;
     }
-    final edt = dt * (e.slowT > 0 ? 0.75 : 1.0) * (e.elite ? 1.3 : 1.0); // 減速時動作節奏也變慢、精英較快
+    final edt = dt * (e.slowT > 0 ? 0.75 : 1.0) * (e.elite ? 1.3 : 1.0) * (e.boss ? 1 + 0.12 * tier : 1.0); // 減速變慢、精英與高階頭目較快
     e.t += edt;
 
     // 碰撞傷害
@@ -1379,7 +1433,7 @@ class RgGame {
       if (_d2(e.x, e.y, px, py) < rr * rr) _hurt(e.contact, e.name);
     }
 
-    final c = chapter;
+    final c = theme + tier; // 攻擊花樣的等級
     switch (e.type) {
       case 's':
         _chase(e, e.speed * spd, dt);
@@ -1589,7 +1643,7 @@ class RgGame {
     if (e.st == 0) {
       _wanderMove(e, 0.6 * spd, dt);
       if (e.y > 6) e.ang = -math.pi / 2;
-      if (e.t > 1.0) _setSt(e, 1);
+      if (e.t > 1.5) _setSt(e, 1); // 休息久一點，給玩家輸出空檔
       return;
     }
     if (p == 0) {
@@ -1614,7 +1668,10 @@ class RgGame {
     } else {
       if (e.t > 0.5) {
         _ring(e, 12, 3.2, e.bdmg, off: rng.nextDouble());
-        if (_alive('k') < 3) _summonAt('k', e, 2);
+        if (_alive('k') < 2 && e.sx < 3) {
+          e.sx++; // 整場最多召喚 3 次，避免無限小兵擋箭
+          _summonAt('k', e, 2);
+        }
         _endPattern(e);
       }
     }

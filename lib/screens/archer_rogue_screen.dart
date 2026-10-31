@@ -1,19 +1,15 @@
-import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api_client.dart';
 import '../widgets/monster_art.dart';
 import 'archer_rogue_logic.dart';
 
-// 弓箭肉鴿（試玩）：前端單機、不碰遊戲幣。規則在 archer_rogue_logic.dart，這裡只負責輸入、畫面與存檔。
-
-const _saveKey = 'archer_rogue_save_v1';
-const _bestKey = 'archer_rogue_best_v1';
+// 弓箭肉鴿：遊戲在前端跑（規則在 archer_rogue_logic.dart），每天一局、復活扣水晶、過關回報與 20 關獎金走伺服器（rogue_game.py）。
 
 const _floorColors = [
   (Color(0xFF7CB342), Color(0xFF689F38)), // 草原
@@ -41,9 +37,17 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   double _acc = 0;
   bool _started = false;
   bool _paused = false;
-  Map<String, dynamic>? _save;
-  int _best = 0;
   RgPhase _shownPhase = RgPhase.play;
+  // 伺服器
+  final _api = ApiClient();
+  Map<String, dynamic>? _state;
+  String? _error;
+  bool _busy = false;
+  int? _runId;
+  int _crystals = 0;
+  int _reported = -1; // 已回報過關的關卡
+  String? _reportMsg;
+  int _reward = 0;
   // 搖桿（arena 座標，像素）
   Offset? _joyOrigin;
   Offset? _joyNow;
@@ -52,7 +56,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
-    _loadSave();
+    _loadState();
   }
 
   @override
@@ -63,50 +67,135 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     super.dispose();
   }
 
-  Future<void> _loadSave() async {
+  Map<String, dynamic>? get _run => _state?['run'] as Map<String, dynamic>?;
+  int get _reviveCost => (_state?['revive_cost'] as num?)?.toInt() ?? 300;
+
+  Future<void> _loadState() async {
+    setState(() => _error = null);
     try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(_saveKey);
+      final s = await _api.rogueState();
+      if (!mounted) return;
       setState(() {
-        _save = raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
-        _best = sp.getInt(_bestKey) ?? 0;
+        _state = s;
+        _crystals = (s['crystals'] as num?)?.toInt() ?? 0;
       });
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
   }
 
-  Future<void> _writeSave() async {
+  /// 呼叫伺服器；ok=false 時跳訊息並回傳 null
+  Future<Map<String, dynamic>?> _call(Future<Map<String, dynamic>> Function() f) async {
+    if (_busy) return null;
+    setState(() => _busy = true);
     try {
-      final sp = await SharedPreferences.getInstance();
-      if (_g.phase == RgPhase.victory) {
-        await sp.remove(_saveKey);
-        _save = null;
-      } else {
-        _save = {'chapter': _g.chapter, 'stats': _g.snapshot.toJson()};
-        await sp.setString(_saveKey, jsonEncode(_save));
+      final r = await f();
+      if (r['crystals'] != null) _crystals = (r['crystals'] as num).toInt();
+      if (r['ok'] != true) {
+        _toast(r['message']?.toString() ?? '失敗');
+        return null;
       }
-      final cleared = _g.phase == RgPhase.victory ? rgChapters : _g.chapter;
-      if (cleared > _best) {
-        _best = cleared;
-        await sp.setInt(_bestKey, _best);
-      }
-    } catch (_) {}
+      return r;
+    } catch (e) {
+      _toast('$e');
+      return null;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  void _newRun() {
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _startRun() async {
+    final r = await _call(_api.rogueStart);
+    if (r == null) return _loadState();
+    _runId = ((r['run'] as Map)['id'] as num).toInt();
     _g.newRun();
+    _enterGame();
+  }
+
+  Future<void> _resumeRun() async {
+    final run = _run;
+    if (run == null) return;
+    final id = (run['id'] as num).toInt();
+    final r = await _call(() => _api.rogueResume(id));
+    if (r == null) return _loadState();
+    _runId = id;
+    final ch = (r['chapter'] as num).toInt();
+    final stats = r['stats'];
+    if (ch == 0 || stats == null) {
+      _g.newRun();
+    } else {
+      _g.startChapter(ch, RgStats.fromJson(Map<String, dynamic>.from(stats as Map)));
+    }
+    _g.revives = (run['revives'] as num).toInt() + ((r['paid'] as num?)?.toInt() ?? 0) ~/ _reviveCost;
+    _enterGame();
+  }
+
+  void _enterGame() {
     _started = true;
     _paused = false;
-    _writeSave();
+    _reported = _g.chapter - 1;
+    _reportMsg = null;
+    _reward = 0;
     _sync();
   }
 
-  void _continueRun() {
-    final s = _save;
-    if (s == null) return;
-    _g.startChapter((s['chapter'] as num).toInt(), RgStats.fromJson(Map<String, dynamic>.from(s['stats'] as Map)));
-    _started = true;
-    _paused = false;
+  void _backToMenu() {
+    _started = false;
+    _runId = null;
+    _loadState();
     _sync();
+  }
+
+  /// 過關（或全破）時回報伺服器
+  Future<void> _report() async {
+    final id = _runId;
+    if (id == null || _reported >= _g.chapter) return;
+    final ch = _g.chapter;
+    _reported = ch;
+    _reportMsg = '記錄中…';
+    final stats = (_g.phase == RgPhase.victory ? _g.st : _g.nextStats()).toJson();
+    try {
+      final r = await _api.rogueProgress(id, ch, stats);
+      if (r['ok'] == true) {
+        _reward = (r['reward'] as num?)?.toInt() ?? 0;
+        _reportMsg = null;
+      } else {
+        _reportMsg = '⚠️ ${r['message']}';
+      }
+    } catch (e) {
+      _reported = ch - 1; // 讓玩家可以重試
+      _reportMsg = '⚠️ 連線失敗：$e';
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _nextChapter() async {
+    final id = _runId;
+    if (id == null) return;
+    final r = await _call(() => _api.rogueBegin(id));
+    if (r == null) return;
+    _g.nextChapter();
+    _sync();
+  }
+
+  Future<void> _revive() async {
+    final id = _runId;
+    if (id == null) return;
+    final r = await _call(() => _api.rogueRevive(id));
+    if (r == null) return;
+    _g.revive();
+    _sync();
+  }
+
+  Future<void> _giveUp() async {
+    final id = _runId;
+    if (id != null) await _call(() => _api.rogueGiveUp(id));
+    _backToMenu();
   }
 
   void _sync() {
@@ -154,7 +243,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     }
     if (n > 0) _repaint.value++;
     if (_g.phase != _shownPhase || _g.chapter != chapterBefore) {
-      if (_g.phase == RgPhase.victory) _writeSave();
+      if (_g.phase == RgPhase.chapterDone || _g.phase == RgPhase.victory) _report();
       _sync();
     }
   }
@@ -182,7 +271,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       child: Scaffold(
         backgroundColor: const Color(0xFF14161C),
         appBar: AppBar(
-          title: const Text('弓箭肉鴿（試玩）'),
+          title: const Text('弓箭肉鴿'),
           actions: [
             if (_started)
               IconButton(
@@ -198,52 +287,102 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   }
 
   Widget _menu() {
-    final s = _save;
+    final st = _state;
+    final run = _run;
+    final active = run != null && run['status'] == 'active';
+    final canStart = st?['can_start'] == true;
+    final reward = (st?['reward'] as num?)?.toInt() ?? 500000;
+    String status;
+    if (run == null) {
+      status = '今天還沒挑戰';
+    } else if (active) {
+      status = '進行中：已通過 ${run['cleared']} / $rgChapters 關（復活 ${run['revives']} 次）';
+    } else if (run['today'] == true) {
+      status = switch (run['status']) {
+        'won' => '🏆 今天已經全破！（復活 ${run['revives']} 次）明天再來',
+        _ => '今天的挑戰結束：通過 ${run['cleared']} / $rgChapters 關，明天再來',
+      };
+    } else {
+      status = '今天還沒挑戰';
+    }
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 440),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('🏹 弓箭肉鴿', style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 6),
+              Text('通過全部 $rgChapters 關獎金 ${_fmtMoney(reward)} 元', style: const TextStyle(color: Colors.amberAccent, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
-              const Text(
-                '• 拖曳畫面（或 WASD／方向鍵）移動，移動時不會射擊\n'
-                '• 停下來就會自動射最近的敵人\n'
-                '• 清完房間撿經驗、升級時三選一技能\n'
-                '• 每關 4 個房間 + 頭目，共 5 關；技能會一路帶下去\n'
-                '• 死掉要從那一關的第 1 間重來（技能回到進關時）',
-                style: TextStyle(color: Colors.white70, height: 1.7),
+              Text(
+                '• 拖曳畫面（或 WASD／方向鍵）移動，移動時不會射擊；停下來自動射最近的敵人\n'
+                '• 清完房間撿經驗、升級時三選一技能，技能整局累積\n'
+                '• 每關 4 個房間 + 頭目，共 $rgChapters 關，難度非常高\n'
+                '• 每天只能挑戰一局\n'
+                '• 死掉可以花 $_reviveCost 水晶原地滿血復活；不復活整局結束\n'
+                '• 打到一半關掉網頁，回來要花 $_reviveCost 水晶從那一關開頭重來',
+                style: const TextStyle(color: Colors.white70, height: 1.7),
               ),
-              const SizedBox(height: 8),
-              Text('最佳紀錄：通過 $_best / $rgChapters 關', style: const TextStyle(color: Colors.amberAccent)),
-              const SizedBox(height: 24),
-              if (s != null) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: const Color(0xFF263238), borderRadius: BorderRadius.circular(10)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('💎', style: TextStyle(fontSize: 16)),
+                    const SizedBox(width: 6),
+                    Text('水晶 $_crystals（可復活 ${_crystals ~/ _reviveCost} 次）', style: const TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (st != null) Text(status, style: const TextStyle(color: Colors.white), textAlign: TextAlign.center),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: const TextStyle(color: Colors.redAccent), textAlign: TextAlign.center),
+                TextButton(onPressed: _loadState, child: const Text('重試')),
+              ],
+              const SizedBox(height: 20),
+              if (st == null && _error == null) const CircularProgressIndicator(),
+              if (active)
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: _continueRun,
+                    onPressed: _busy ? null : _resumeRun,
                     icon: const Icon(Icons.play_arrow),
-                    label: Text('繼續：第 ${(s['chapter'] as num).toInt() + 1} 關 ${rgChapterNames[(s['chapter'] as num).toInt()]}'),
+                    label: Text(run['in_chapter'] == true
+                        ? '繼續第 ${(run['cleared'] as num).toInt() + 1} 關（花 $_reviveCost 水晶重來這關）'
+                        : '繼續：第 ${(run['cleared'] as num).toInt() + 1} 關'),
                   ),
                 ),
-                const SizedBox(height: 12),
-              ],
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _newRun,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('新遊戲'),
+              if (canStart)
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _startRun,
+                    icon: const Icon(Icons.flag),
+                    label: const Text('開始今天的挑戰'),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  static String _fmtMoney(int n) {
+    final s = n.toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+      b.write(s[i]);
+    }
+    return b.toString();
   }
 
   Widget _game() {
@@ -483,6 +622,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
           ],
         ));
       case RgPhase.dead:
+        final canRevive = _crystals >= _reviveCost;
         return _dim(Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -491,12 +631,24 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
             const SizedBox(height: 6),
             Text('第 ${_g.chapter + 1} 關 ${_g.isBossRoom ? '頭目房' : '第 ${_g.room + 1} 間'}・被 ${_g.lastHitBy ?? '?'} 打倒',
                 style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 4),
+            Text('💎 水晶 $_crystals・這局已復活 ${_g.revives} 次', style: const TextStyle(color: Colors.lightBlueAccent)),
             const SizedBox(height: 18),
-            _choiceButton('🔁 從第 ${_g.chapter + 1} 關重來', () => _g.retryChapter()),
+            _asyncButton(canRevive ? '💎 花 $_reviveCost 水晶原地復活' : '水晶不足（要 $_reviveCost）', canRevive ? _revive : null),
             const SizedBox(height: 10),
-            _choiceButton('🏠 回主選單', () {
-              _started = false;
-              _loadSave();
+            _asyncButton('🏳️ 放棄（今天的挑戰結束）', () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('確定放棄？'),
+                  content: Text('今天就不能再玩了（目前通過 ${_g.chapter} 關）。'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+                    FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('放棄')),
+                  ],
+                ),
+              );
+              if (ok == true) await _giveUp();
             }),
           ],
         ));
@@ -507,12 +659,20 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
             const Text('🏆', style: TextStyle(fontSize: 48)),
             Text('第 ${_g.chapter + 1} 關 通關！', style: const TextStyle(color: Colors.amberAccent, fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
-            Text('下一關：${rgChapterNames[_g.chapter + 1]}（進關回復 20% 生命）', style: const TextStyle(color: Colors.white70)),
+            Text('下一關：第 ${_g.chapter + 2} 關 ${rgChapterNames[_g.chapter + 1]}（進關回復 20% 生命）', style: const TextStyle(color: Colors.white70)),
+            if (_reportMsg != null) ...[
+              const SizedBox(height: 6),
+              Text(_reportMsg!, style: const TextStyle(color: Colors.orangeAccent)),
+            ],
             const SizedBox(height: 18),
-            _choiceButton('▶ 前往第 ${_g.chapter + 2} 關', () {
-              _g.nextChapter();
-              _writeSave();
-            }),
+            if (_reported < _g.chapter)
+              _asyncButton('🔄 重新記錄過關', () async {
+                await _report();
+              })
+            else
+              _asyncButton('▶ 前往第 ${_g.chapter + 2} 關', _reportMsg == null ? _nextChapter : null),
+            const SizedBox(height: 10),
+            _asyncButton('🏠 先休息（之後從下一關繼續）', _reportMsg == null ? () async => _backToMenu() : null),
           ],
         ));
       case RgPhase.victory:
@@ -520,20 +680,36 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('👑', style: TextStyle(fontSize: 56)),
-            const Text('全破！魔龍被你打倒了', style: TextStyle(color: Colors.amberAccent, fontSize: 24, fontWeight: FontWeight.bold)),
+            Text('全破 $rgChapters 關！', style: const TextStyle(color: Colors.amberAccent, fontSize: 26, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
-            Text('等級 ${_g.st.level}・擊殺 ${_g.kills}', style: const TextStyle(color: Colors.white70)),
+            Text('等級 ${_g.st.level}・擊殺 ${_g.kills}・復活 ${_g.revives} 次', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 10),
+            if (_reward > 0)
+              Text('💰 獲得獎金 ${_fmtMoney(_reward)} 元！', style: const TextStyle(color: Colors.greenAccent, fontSize: 20, fontWeight: FontWeight.bold))
+            else
+              Text(_reportMsg ?? '記錄中…', style: const TextStyle(color: Colors.orangeAccent)),
             const SizedBox(height: 18),
-            _choiceButton('🏠 回主選單', () {
-              _started = false;
-              _loadSave();
-            }),
+            if (_reported < _g.chapter) _asyncButton('🔄 重新記錄', () async => _report()),
+            _asyncButton('🏠 回主選單', () async => _backToMenu()),
           ],
         ));
       case RgPhase.play:
         return const SizedBox.shrink();
     }
   }
+
+  Widget _asyncButton(String label, Future<void> Function()? onTap) => SizedBox(
+        width: 280,
+        child: FilledButton(
+          onPressed: onTap == null || _busy
+              ? null
+              : () async {
+                  await onTap();
+                  if (mounted) setState(() {});
+                },
+          child: Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: Text(label, textAlign: TextAlign.center)),
+        ),
+      );
 
   Widget _choiceButton(String label, VoidCallback onTap) => SizedBox(
         width: 260,
@@ -658,7 +834,7 @@ class _ArenaPainter extends CustomPainter {
 
   // ---------- 靜態地板 ----------
   void _staticFloor(Canvas c, double s, Size size) {
-    final ch = g.chapter;
+    final ch = g.theme;
     final (a, b) = _floorColors[ch];
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
@@ -837,7 +1013,7 @@ class _ArenaPainter extends CustomPainter {
 
   // ---------- 動態 ----------
   void _liquids(Canvas c, double s) {
-    final lava = g.chapter >= 3;
+    final lava = g.theme >= 3;
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
         if (g.grid[y][x] != '~') continue;
@@ -919,14 +1095,14 @@ class _ArenaPainter extends CustomPainter {
 
   // 環境粒子：草原螢火蟲、熔岩火星、魔王城紫光（用時間公式算，不存狀態）
   void _ambient(Canvas c, double s, Size size) {
-    final col = switch (g.chapter) {
+    final col = switch (g.theme) {
       0 => const Color(0xFFF0F4C3),
       1 => const Color(0xFFFFE0B2),
       2 => const Color(0xFFB2EBF2),
       3 => const Color(0xFFFF9100),
       _ => const Color(0xFFE1BEE7),
     };
-    final rising = g.chapter >= 3;
+    final rising = g.theme >= 3;
     for (var i = 0; i < 14; i++) {
       final sp = 0.15 + _hash(i, 1, 7) * 0.25;
       final ph = (g.time * sp + _hash(i, 2, 7)) % 1;
@@ -1049,7 +1225,7 @@ class _ArenaPainter extends CustomPainter {
     c.translate(o.dx - sz / 2, o.dy - sz / 2 - sz * 0.08);
     MonsterPainter(
       kind: e.kind,
-      band: rgChapterBands[g.chapter],
+      band: rgThemeBands[g.theme],
       boss: e.boss,
       flash: e.flash > 0 ? 0.8 : 0,
       opacity: fade,

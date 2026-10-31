@@ -265,6 +265,27 @@ class ApiClient {
       '/api/hero/equip', {'inv_id': invId, if (slot != null) 'slot': slot}, (j) => j as Map<String, dynamic>,
       withAuth: true);
 
+  // 弓箭肉鴿
+  Future<Map<String, dynamic>> rogueState() => _get('/api/rogue/state', (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> rogueStart() => _post('/api/rogue/start', {}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> rogueBegin(int runId) =>
+      _post('/api/rogue/begin', {'run_id': runId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> rogueProgress(int runId, int chapter, Map<String, dynamic> stats) => _post(
+      '/api/rogue/progress', {'run_id': runId, 'chapter': chapter, 'stats': stats}, (j) => j as Map<String, dynamic>,
+      withAuth: true);
+
+  Future<Map<String, dynamic>> rogueRevive(int runId) =>
+      _post('/api/rogue/revive', {'run_id': runId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> rogueGiveUp(int runId) =>
+      _post('/api/rogue/give_up', {'run_id': runId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
+  Future<Map<String, dynamic>> rogueResume(int runId) =>
+      _post('/api/rogue/resume', {'run_id': runId}, (j) => j as Map<String, dynamic>, withAuth: true);
+
   Future<Map<String, dynamic>> fetchTowerState() =>
       _get('/api/tower/state', (j) => j as Map<String, dynamic>, withAuth: true);
 

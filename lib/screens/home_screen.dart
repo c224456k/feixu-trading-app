@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
               MaterialPageRoute(builder: (_) => const ArcherRogueScreen()),
             ),
             icon: const Icon(Icons.gps_fixed),
-            tooltip: '弓箭肉鴿（試玩）',
+            tooltip: '弓箭肉鴿',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
