@@ -104,6 +104,7 @@ class RgEnemy {
   double wander = 0;
   double stuck = 0;
   double burnT = 0, burnDps = 0, slowT = 0, frozeT = 0;
+  double frozeCd = 0; // 凍結過後一段時間不會再被凍（不然射速快會一直凍住）
   int poison = 0;
   double flash = 0;
   double orbCd = 0;
@@ -112,6 +113,7 @@ class RgEnemy {
   double spawnT = 0; // 出場淡入，0.5 秒內不會動
   int id = 0;
   double nx = 0, ny = 0; // 合作模式客人端：房主傳來的位置（畫面平滑追過去）
+  double gx = 0, gy = 0, gvx = 0, gvy = 0, gT = -1; // 合作模式客人端：上一張畫面的位置/時間，和前後兩張算出的速度
   final double seed;
   RgEnemy(this.type, this.name, this.kind, this.boss, this.fly, this.x, this.y, this.r, this.hp, this.speed, this.contact,
       this.bdmg, this.xp, this.seed)
@@ -143,6 +145,7 @@ class RgBullet {
   bool split;
   int style; // 0 箭 1 紅球 2 紫球 3 大石 4 火球
   int owner; // 箭是哪位玩家射的（合作模式）
+  int id = 0; // 合作模式傳畫面時才編號，客人端用來對應同一顆子彈
   RgBullet(this.x, this.y, this.vx, this.vy, this.r, this.dmg, this.mine,
       {this.life = 6, this.pierce = 0, this.rico = 0, this.wall = 0, this.split = false, this.style = 1, this.owner = 0});
 }
@@ -694,6 +697,11 @@ class RgGame {
   RgHero get me => heroes[local];
   bool get coop => heroes.length > 1;
   int roomSeq = 0; // 每次換房間/重來 +1（客人端用來知道要跳到房主給的位置）
+  double netClock = 0; // 合作模式：一直往前走的時鐘（暫停也走），客人端用來估畫面延遲多久
+  int _bid = 0;
+  double? _clkOff; // 客人端：房主時鐘 − 自己時鐘 的估計（取最新鮮的那幾張畫面）
+  double _sinceSnap = 0;
+  final Set<int> _deadB = {}; // 客人端自己判定撞牆消失的子彈，下一張畫面不要再生回來
   int _nextId = 0;
   List<String> grid = rgMaps[0][0];
   double get px => h.x;
@@ -1004,6 +1012,7 @@ class RgGame {
   // ---------------- 主迴圈 ----------------
   /// mx,my：搖桿方向（長度 0~1）
   void step(double mx, double my) {
+    netClock += rgDt;
     _step(mx, my);
     h = me;
   }
@@ -1397,7 +1406,10 @@ class RgGame {
     }
     if (st.lv('ice') > 0) {
       e.slowT = 1.5;
-      if (!e.boss && rng.nextDouble() < 0.15) e.frozeT = 1.0;
+      if (!e.boss && rng.nextDouble() < 0.15 && e.frozeCd <= 0) {
+        e.frozeT = e.elite ? 0.6 : 1.0;
+        e.frozeCd = e.frozeT + 3;
+      }
     }
     if (st.lv('poison') > 0 && e.poison < 5) e.poison++;
   }
@@ -1607,6 +1619,7 @@ class RgGame {
     }
     if (e.poison > 0) e.hp -= st.atk * 0.06 * e.poison * dt;
     if (e.slowT > 0) e.slowT -= dt;
+    if (e.frozeCd > 0) e.frozeCd -= dt;
     if (e.frozeT > 0) {
       e.frozeT -= dt;
       return;
@@ -1995,6 +2008,7 @@ class RgGame {
 
   Map<String, dynamic> snap() => {
         'ph': phase.index,
+        'n': _r2(netClock),
         'c': chapter,
         'r': room,
         'q': roomSeq,
@@ -2016,7 +2030,8 @@ class RgGame {
              _r2(e.spawnT), _r2(e.seed)]
         ],
         'b': [
-          for (final b in bl) [_r2(b.x), _r2(b.y), _r2(b.vx), _r2(b.vy), _r2(b.r), b.style, b.mine ? 1 : 0, _r2(b.life)]
+          for (final b in bl)
+            [_r2(b.x), _r2(b.y), _r2(b.vx), _r2(b.vy), _r2(b.r), b.style, b.mine ? 1 : 0, _r2(b.life), b.id == 0 ? b.id = ++_bid : b.id]
         ],
         'z': [for (final z in zones) [_r2(z.x), _r2(z.y), _r2(z.r), _r2(z.t), _r2(z.total)]],
         'p': [for (final p in portals) [_r2(p.x), _r2(p.y), _r2(p.t), p.elite ? 1 : 0, p.ch]],
@@ -2041,6 +2056,13 @@ class RgGame {
       grid = [for (final row in _rawMap(r)) row.replaceAll(RegExp('[a-zA-Z]'), '.')];
     }
     roomSeq = q;
+    // 這張畫面比「現在」晚了多久：網路忽快忽慢時，晚到的畫面要多往前推一點，才不會一下前一下後
+    final hostT = _d(m['n'] ?? netClock); // 舊版房主沒有時鐘
+    final off = hostT - netClock;
+    final prevOff = _clkOff;
+    _clkOff = prevOff == null || off > prevOff || newRoom || prevOff - off > 2 ? off : prevOff + (off - prevOff) * 0.03;
+    final age = (netClock + _clkOff! - hostT).clamp(0.0, 0.3);
+    _sinceSnap = 0;
     phase = RgPhase.values[(m['ph'] as num).toInt()];
     cleared = m['cl'] == 1;
     time = _d(m['t']);
@@ -2093,8 +2115,24 @@ class RgGame {
           fx.add(RgFx(0, e.x, e.y, math.cos(an) * v, math.sin(an) * v, 0.25, 0.06, 0xFFFFFFFF));
         }
       }
-      e.nx = _d(a[2]);
-      e.ny = _d(a[3]);
+      final sx = _d(a[2]), sy = _d(a[3]);
+      final gap = hostT - e.gT;
+      if (e.gT >= 0 && gap > 0.01 && gap < 0.5) {
+        e.gvx = (sx - e.gx) / gap;
+        e.gvy = (sy - e.gy) / gap;
+        if (e.gvx * e.gvx + e.gvy * e.gvy > 14 * 14) e.gvx = e.gvy = 0; // 瞬移／衝刺結束：不要外推
+      } else {
+        e.gvx = e.gvy = 0;
+      }
+      e.gT = hostT;
+      e.gx = sx;
+      e.gy = sy;
+      e.nx = sx + e.gvx * age;
+      e.ny = sy + e.gvy * age;
+      if (_d2(e.x, e.y, e.nx, e.ny) > 3 * 3) {
+        e.x = e.nx;
+        e.y = e.ny;
+      }
       e.r = _d(a[4]);
       e.hp = hp;
       e.maxHp = _d(a[6]);
@@ -2125,13 +2163,39 @@ class RgGame {
       }
     }
     en = next;
-    bl = [
-      for (final raw in m['b'] as List)
-        () {
-          final a = raw as List;
-          return RgBullet(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[3]), _d(a[4]), 0, a[6] == 1, style: (a[5] as num).toInt(), life: _d(a[7]));
-        }()
-    ];
+    // 子彈：用編號對應同一顆，位置推到「現在」，已經在飛的只微調，不整批換掉（不然會閃）
+    final oldB = {for (final b in bl) b.id: b};
+    final ids = <int>{};
+    final nb = <RgBullet>[];
+    for (final raw in m['b'] as List) {
+      final a = raw as List;
+      final id = a.length > 8 ? (a[8] as num).toInt() : -nb.length - 1, vx = _d(a[2]), vy = _d(a[3]);
+      ids.add(id);
+      if (_deadB.contains(id)) continue;
+      var tx = _d(a[0]) + vx * age, ty = _d(a[1]) + vy * age;
+      if (circleBlocked(tx, ty, _d(a[4]) * 0.6, bullet: true)) {
+        tx = _d(a[0]);
+        ty = _d(a[1]);
+      }
+      var b = newRoom ? null : oldB[id];
+      if (b == null) {
+        b = RgBullet(tx, ty, vx, vy, _d(a[4]), 0, a[6] == 1, style: (a[5] as num).toInt(), life: _d(a[7]))..id = id;
+      } else {
+        b.vx = vx;
+        b.vy = vy;
+        b.life = _d(a[7]);
+        if (_d2(b.x, b.y, tx, ty) > 1.0) {
+          b.x = tx;
+          b.y = ty;
+        } else {
+          b.x += (tx - b.x) * 0.5;
+          b.y += (ty - b.y) * 0.5;
+        }
+      }
+      nb.add(b);
+    }
+    _deadB.retainAll(ids);
+    bl = nb;
     zones = [
       for (final raw in m['z'] as List)
         (raw as List).let((a) => RgZone(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[4]), 0)..t = _d(a[3]))
@@ -2149,6 +2213,40 @@ class RgGame {
       fx.add(RgFx((a[0] as num).toInt(), _d(a[1]), _d(a[2]), 0, 0, _d(a[3]), _d(a[4]), (a[5] as num).toInt())..t = _d(a[6]));
     }
     h = me;
+  }
+
+  /// 房主重新整理網頁後：用伺服器留著的最後一張畫面接回去（技能、等級、血量都在），那一間從頭打
+  void restoreFrom(Map<String, dynamic> m) {
+    chapter = (m['c'] as num).toInt();
+    final r = (m['r'] as num).toInt();
+    final ph = RgPhase.values[(m['ph'] as num).toInt()];
+    final hs = m['h'] as List;
+    for (var i = 0; i < hs.length && i < heroes.length; i++) {
+      final a = hs[i] as List, p = heroes[i];
+      p.st = RgStats.fromJson(Map<String, dynamic>.from(a[13] as Map));
+      p.snapshot = p.st.copy();
+      p.down = false;
+      p.rescue = 0;
+      if (p.st.hp <= 0 || a[8] == 1 || ph == RgPhase.dead) p.st.hp = math.max(p.st.hp, p.st.maxHp * (ph == RgPhase.dead ? 1 : 0.3));
+      p.pendingPicks = (a[10] as num).toInt();
+      p.offer = [for (final x in a[12] as List) x as String];
+      p.needAngel = a[11] == 1;
+    }
+    angelDone = r >= rgRoomsPerChapter - 2 && ph != RgPhase.play || r >= rgRoomsPerChapter - 1;
+    netClock = _d(m['n']);
+    roomSeq = (m['q'] as num).toInt(); // loadRoom 會 +1，客人端就知道換新畫面了
+    loadRoom(r);
+    phase = switch (ph) {
+      RgPhase.dead => RgPhase.play,
+      RgPhase.pick => RgPhase.pick,
+      _ => ph,
+    };
+    if (phase == RgPhase.pick) _openPick();
+    if (phase == RgPhase.chapterDone || phase == RgPhase.victory || phase == RgPhase.angel) {
+      cleared = true; // 這間其實已經打完了
+      wavesLeft = 0;
+      en.clear();
+    }
   }
 
   RgEnemy _netEnemy(String type, double x, double y, double seed) {
@@ -2185,7 +2283,10 @@ class RgGame {
   /// 客人端：兩次 snap 之間補動畫（一幀 rgDt）
   void guestTick() {
     const dt = rgDt;
+    netClock += dt;
     if (phase != RgPhase.play) return;
+    _sinceSnap += dt;
+    final extra = _sinceSnap < 0.3; // 畫面太久沒來就別再往前猜
     time += dt;
     roomTime += dt;
     orbAng += dt * 3.2;
@@ -2194,18 +2295,29 @@ class RgGame {
       if (p.inv > 0) p.inv -= dt;
       if (p.hurtT > 0) p.hurtT -= dt;
     }
-    final k = math.min(1.0, dt * 14);
+    const k = 0.35;
     for (final e in en) {
+      if (extra) {
+        e.nx += e.gvx * dt;
+        e.ny += e.gvy * dt;
+      }
       e.x += (e.nx - e.x) * k;
       e.y += (e.ny - e.y) * k;
       e.t += dt;
       if (e.flash > 0) e.flash -= dt;
       if (e.spawnT < 0.5) e.spawnT += dt;
     }
-    for (final b in bl) {
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-    }
+    bl.removeWhere((b) {
+      final nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
+      if (circleBlocked(nx, ny, b.r * 0.6, bullet: true)) {
+        if (b.mine) return false; // 自己的箭可能會反彈，交給房主的畫面
+        _deadB.add(b.id);
+        return true;
+      }
+      b.x = nx;
+      b.y = ny;
+      return false;
+    });
     for (final z in zones) {
       z.t -= dt;
     }

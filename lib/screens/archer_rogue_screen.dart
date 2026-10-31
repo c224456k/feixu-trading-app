@@ -59,6 +59,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   int _side = -1; // -1 = 單人
   List<String> _names = const [];
   int _frame = 0;
+  bool _selfOff = false; // 自己斷線、重連中
+  bool _peerOff = false; // 隊友斷線、等他回來
   bool get _coop => _side >= 0;
 
   @override
@@ -281,6 +283,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   }
 
   void _leaveCoopGame() {
+    _net?.stayConnected = false;
+    _selfOff = _peerOff = false;
     _side = -1;
     _started = false;
     _g = RgGame();
@@ -295,17 +299,39 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   void _onCoopMsg(Map<String, dynamic> m) {
     if (!mounted) return;
     switch (m['t']) {
-      case 'start':
-        _side = (m['side'] as num).toInt();
+      case 'start' || 'resume':
+        final side = (m['side'] as num).toInt();
         _names = [for (final n in m['names'] as List) '$n'];
+        _net?.stayConnected = true;
+        _selfOff = _peerOff = false;
+        // 只是網路斷一下、畫面還在：遊戲直接接著跑
+        if (m['t'] == 'resume' && _started && _side == side) return setState(() {});
+        _side = side;
         _g = RgGame(seed: (m['seed'] as num).toInt(), players: 2)..local = _side;
         _g.heroes[1].remote = true;
         _frame = 0;
         _acc = 0;
-        if (_side == 0) _g.newRun();
+        if (_side == 0) {
+          final snap = m['snap'];
+          if (snap is Map<String, dynamic>) {
+            _g.restoreFrom(snap);
+          } else {
+            _g.newRun();
+          }
+        }
         _started = true;
         _paused = false;
         _sync();
+        if (m['t'] == 'resume') _toast(_side == 0 ? '重新連上了，從這一間重來' : '重新連上了');
+      case 'drop':
+        if (_started) setState(() => _selfOff = true);
+      case 'peer':
+        if (_started) setState(() => _peerOff = m['on'] != true);
+      case 'noroom':
+        if (_started) {
+          _toast('這場已經結束了（隊友離開或斷線太久）');
+          _leaveCoopGame();
+        }
       case 'r':
         final d = m['d'];
         if (d is Map<String, dynamic>) _onCoopData(d);
@@ -347,6 +373,10 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
 
   void _coopTick(double dt) {
     if (!_started) return;
+    if (_selfOff || _peerOff) {
+      _acc = 0; // 有人斷線：遊戲停住等他
+      return;
+    }
     _acc += math.min(dt, 0.1);
     final (mx, my) = _input();
     final chapter = _g.chapter;
@@ -556,6 +586,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                     if (_g.boss != null) Positioned(left: 8, right: 8, top: 6, child: _bossBar(_g.boss!)),
                     if (_paused) Positioned.fill(child: _pauseOverlay()),
                     if (_g.phase != RgPhase.play) Positioned.fill(child: _phaseOverlay()),
+                    if (_coop && (_selfOff || _peerOff)) Positioned.fill(child: _offlineOverlay()),
                   ],
                 ),
               ),
@@ -930,6 +961,20 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       ),
     );
   }
+
+  Widget _offlineOverlay() => _dim(Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 12),
+          Text(_selfOff ? '連線中斷，重新連線中…' : '隊友斷線了，等他回來（最多 90 秒）…',
+              style: const TextStyle(color: Colors.white, fontSize: 16)),
+          const SizedBox(height: 4),
+          const Text('遊戲先暫停，連回來會接著玩', style: TextStyle(color: Colors.white54)),
+          const SizedBox(height: 16),
+          _choiceButton('🏠 不等了，離開這場', _quitCoop),
+        ],
+      ));
 
   Widget _coopOverlay() {
     final me = _g.me;
@@ -1941,6 +1986,7 @@ class _CoopNet {
   StreamSubscription? _sub;
   bool connected = false;
   bool _closed = false;
+  bool stayConnected = false; // 遊戲中：斷線就自動重連（伺服器會留房間 90 秒）
   String? error;
   String? waiting; // 自己開的房間號碼（等人加入中）
   List<Map<String, dynamic>> rooms = [];
@@ -1965,8 +2011,13 @@ class _CoopNet {
       error = e.message;
     } catch (e) {
       error = '連不上伺服器';
+      _retry();
     }
     onChanged();
+  }
+
+  void _retry() {
+    if (stayConnected && !_closed) Future.delayed(const Duration(seconds: 2), () => _closed || connected ? null : connect());
   }
 
   void _onDone() {
@@ -1975,7 +2026,12 @@ class _CoopNet {
     waiting = null;
     _ch = null;
     error = '連線中斷了';
-    onMsg({'t': 'gone', 'msg': '連線中斷了'});
+    if (stayConnected) {
+      onMsg({'t': 'drop'});
+      _retry();
+    } else {
+      onMsg({'t': 'gone', 'msg': '連線中斷了'});
+    }
     onChanged();
   }
 
