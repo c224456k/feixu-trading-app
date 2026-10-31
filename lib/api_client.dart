@@ -469,6 +469,12 @@ class ApiClient {
     return ('$ws/ws/volley', key, token);
   }
 
+  /// 弓箭肉鴿雙人合作的 WebSocket 連線資訊（同排球，只是路徑不同）。
+  Future<(String, String, String)> rogueCoopConnectInfo() async {
+    final (url, key, token) = await volleyConnectInfo();
+    return (url.replaceFirst(RegExp(r'/ws/volley$'), '/ws/rogue2'), key, token);
+  }
+
   Future<bool> healthCheck() async {
     final base = await _baseUrl();
     try {

@@ -110,6 +110,8 @@ class RgEnemy {
   bool airborne = false;
   bool elite = false;
   double spawnT = 0; // 出場淡入，0.5 秒內不會動
+  int id = 0;
+  double nx = 0, ny = 0; // 合作模式客人端：房主傳來的位置（畫面平滑追過去）
   final double seed;
   RgEnemy(this.type, this.name, this.kind, this.boss, this.fly, this.x, this.y, this.r, this.hp, this.speed, this.contact,
       this.bdmg, this.xp, this.seed)
@@ -140,8 +142,9 @@ class RgBullet {
   final Set<RgEnemy> hit = {};
   bool split;
   int style; // 0 箭 1 紅球 2 紫球 3 大石 4 火球
+  int owner; // 箭是哪位玩家射的（合作模式）
   RgBullet(this.x, this.y, this.vx, this.vy, this.r, this.dmg, this.mine,
-      {this.life = 6, this.pierce = 0, this.rico = 0, this.wall = 0, this.split = false, this.style = 1});
+      {this.life = 6, this.pierce = 0, this.rico = 0, this.wall = 0, this.split = false, this.style = 1, this.owner = 0});
 }
 
 class RgZone {
@@ -181,6 +184,24 @@ class RgPortal {
 class RgHeart {
   double x, y;
   RgHeart(this.x, this.y);
+}
+
+/// 一位玩家（合作模式有兩位）。RgGame 裡的 px/py/st… 是「目前處理中的玩家」h 的捷徑。
+class RgHero {
+  final int idx;
+  double x = 4.5, y = 14.2, faceX = 0, faceY = -1;
+  double inv = 0, shootCd = 0, hurtT = 0;
+  bool moving = false;
+  RgStats st = RgStats();
+  RgStats snapshot = RgStats();
+  final List<double> volleys = [];
+  int pendingPicks = 0;
+  List<String> offer = [];
+  bool needAngel = false;
+  bool down = false; // 合作模式：倒地，隊友站旁邊可以扶起來
+  double rescue = 0;
+  bool remote = false; // 位置由客人端回報（房主不幫他移動）
+  RgHero(this.idx);
 }
 
 enum RgPhase { play, pick, angel, dead, chapterDone, victory }
@@ -662,13 +683,40 @@ class RgGame {
   final math.Random rng;
   int chapter = 0;
   int room = 0;
-  RgStats st = RgStats();
-  RgStats snapshot = RgStats();
+  final List<RgHero> heroes;
+  int _local = 0; // 這台裝置操作的是哪一位
+  int get local => _local;
+  set local(int v) {
+    _local = v;
+    h = heroes[v];
+  }
+  late RgHero h; // 目前處理中的玩家（敵人 AI 時＝牠的目標）；step 結束後都會回到 local
+  RgHero get me => heroes[local];
+  bool get coop => heroes.length > 1;
+  int roomSeq = 0; // 每次換房間/重來 +1（客人端用來知道要跳到房主給的位置）
+  int _nextId = 0;
   List<String> grid = rgMaps[0][0];
-  double px = 4.5, py = 14, faceX = 0, faceY = -1;
+  double get px => h.x;
+  set px(double v) => h.x = v;
+  double get py => h.y;
+  set py(double v) => h.y = v;
+  double get faceX => h.faceX;
+  set faceX(double v) => h.faceX = v;
+  double get faceY => h.faceY;
+  set faceY(double v) => h.faceY = v;
+  double get inv => h.inv;
+  set inv(double v) => h.inv = v;
+  double get shootCd => h.shootCd;
+  set shootCd(double v) => h.shootCd = v;
+  double get hurtT => h.hurtT;
+  set hurtT(double v) => h.hurtT = v;
+  bool get moving => h.moving;
+  set moving(bool v) => h.moving = v;
+  RgStats get st => h.st;
+  set st(RgStats v) => h.st = v;
+  int get pendingPicks => h.pendingPicks;
+  List<String> get offer => h.offer;
   final double pr = 0.3;
-  double inv = 0, shootCd = 0;
-  final List<double> _volleys = [];
   List<RgEnemy> en = [];
   List<RgBullet> bl = [];
   List<RgZone> zones = [];
@@ -678,51 +726,74 @@ class RgGame {
   List<RgGem> gems = [];
   List<RgPortal> portals = [];
   int wavesLeft = 0;
-  double hurtT = 0;
   bool cleared = false;
   double clearT = 0;
-  int pendingPicks = 0;
-  List<String> offer = [];
   RgPhase phase = RgPhase.play;
   double time = 0, roomTime = 0;
   double shake = 0;
   double orbAng = 0;
   bool angelDone = false;
-  bool moving = false;
   int gemsXp = 0;
   int kills = 0;
   int hitsTaken = 0;
   String? lastHitBy;
 
-  RgGame({int? seed}) : rng = math.Random(seed);
+  RgGame({int? seed, int players = 1})
+      : rng = math.Random(seed),
+        heroes = [for (var i = 0; i < players; i++) RgHero(i)] {
+    h = heroes[0];
+  }
 
   /// 新的一局：從第 1 關開始，先送一次技能三選一
   void newRun() {
-    st = RgStats();
-    startChapter(0, st);
-    pendingPicks = 1;
+    startChapterAll(0, [for (final _ in heroes) RgStats()]);
+    for (final p in heroes) {
+      p.pendingPicks = 1;
+    }
     _openPick();
   }
 
-  void startChapter(int c, RgStats s) {
+  void startChapter(int c, RgStats s) => startChapterAll(c, [for (final _ in heroes) s]);
+
+  void startChapterAll(int c, List<RgStats> ss) {
     chapter = c;
-    st = s.copy();
-    snapshot = s.copy();
+    for (final p in heroes) {
+      p.st = ss[p.idx].copy();
+      p.snapshot = ss[p.idx].copy();
+      p.pendingPicks = 0;
+      p.offer = [];
+      p.needAngel = false;
+      p.down = false;
+    }
     angelDone = false;
-    pendingPicks = 0;
     loadRoom(0);
     phase = RgPhase.play;
   }
 
   void retryChapter() {
-    startChapter(chapter, snapshot);
-    if (chapter == 0 && st.sk.isEmpty) {
-      pendingPicks = 1;
+    startChapterAll(chapter, [for (final p in heroes) p.snapshot]);
+    if (chapter == 0 && me.st.sk.isEmpty) {
+      for (final p in heroes) {
+        p.pendingPicks = 1;
+      }
       _openPick();
     }
   }
 
-  double get hpMul => rgHpMul(chapter);
+  // 合作模式怪物血量 ×1.5（兩個人打，傷害各自吃）
+  double get hpMul => rgHpMul(chapter) * (coop ? 1.5 : 1.0);
+
+  /// 合作模式全滅：兩人滿血，從這一間重來（跟單人花水晶復活一樣滿血）
+  void retryRoom() {
+    if (phase != RgPhase.dead) return;
+    for (final p in heroes) {
+      p.down = false;
+      p.rescue = 0;
+      p.st.hp = p.st.maxHp;
+    }
+    loadRoom(room);
+    phase = RgPhase.play;
+  }
   double get dmgMul => rgDmgMul(chapter);
   int get theme => chapter % 5;
   int get tier => chapter ~/ 5;
@@ -738,6 +809,8 @@ class RgGame {
   /// 花寶石原地復活：滿血、清掉敵方子彈、2.5 秒無敵
   void revive() {
     if (phase != RgPhase.dead) return;
+    h = me;
+    h.down = false;
     revives++;
     st.hp = st.maxHp;
     inv = 2.5;
@@ -772,18 +845,21 @@ class RgGame {
     gems = [];
     portals = [];
     wavesLeft = r < _roomWaves.length ? _roomWaves[r] + (tier >= 2 && r > 0 ? 1 : 0) : 0;
-    hurtT = 0;
-    _volleys.clear();
     cleared = false;
     clearT = 0;
     gemsXp = 0;
     roomTime = 0;
-    px = 4.5;
-    py = 14.2;
-    faceX = 0;
-    faceY = -1;
-    inv = 1.0; // 進房短暫無敵
-    shootCd = 0.4;
+    roomSeq++;
+    for (final p in heroes) {
+      p.x = coop ? 3.9 + 1.2 * p.idx : 4.5;
+      p.y = 14.2;
+      p.faceX = 0;
+      p.faceY = -1;
+      p.inv = 1.0; // 進房短暫無敵
+      p.shootCd = 0.4;
+      p.hurtT = 0;
+      p.volleys.clear();
+    }
     final rows = _rawMap(r);
     for (var y = 0; y < rgRows; y++) {
       for (var x = 0; x < rgCols; x++) {
@@ -849,7 +925,7 @@ class RgGame {
     for (var i = 0; i < n; i++) {
       for (var k = 0; k < 40; k++) {
         final x = 0.6 + rng.nextDouble() * (rgCols - 1.2), y = 0.6 + rng.nextDouble() * 8.5;
-        if (_d2(x, y, px, py) < 3.5 * 3.5 || circleBlocked(x, y, 0.45)) continue;
+        if (_heroNear(x, y, 3.5) || circleBlocked(x, y, 0.45)) continue;
         portals.add(RgPortal(x, y, pool[rng.nextInt(pool.length)], i == 0 && wavesLeft == 0 && chapter >= 1, 1.0 + i * 0.15));
         break;
       }
@@ -861,6 +937,7 @@ class RgGame {
     final e = RgEnemy(ch, t.name, t.kind, false, t.fly, x, y, t.r, t.hp * hpMul * _mobHpMul, t.speed,
         t.contact * dmgMul * _mobDmgMul, t.bdmg * dmgMul * _mobDmgMul, (t.xp * (1 + 0.1 * chapter)).round(), rng.nextDouble() * 10);
     e.t = -rng.nextDouble() * 0.8; // 錯開節奏
+    e.id = ++_nextId;
     en.add(e);
     return e;
   }
@@ -870,6 +947,7 @@ class RgGame {
     final e = RgEnemy(b.$1, b.$2, b.$3, true, b.$4, x, y, b.$5, b.$6 * hpMul, 1.0, 140 * dmgMul, 100 * dmgMul,
         (90 * (1 + 0.1 * chapter)).round(), 0);
     e.t = -1.2;
+    e.id = ++_nextId;
     en.add(e);
   }
 
@@ -926,18 +1004,21 @@ class RgGame {
   // ---------------- 主迴圈 ----------------
   /// mx,my：搖桿方向（長度 0~1）
   void step(double mx, double my) {
+    _step(mx, my);
+    h = me;
+  }
+
+  void _step(double mx, double my) {
     if (phase != RgPhase.play) return;
     const dt = rgDt;
     time += dt;
     roomTime += dt;
-    if (inv > 0) inv -= dt;
     if (shake > 0) shake -= dt;
     for (final f in floats) {
       f.t += dt;
       f.y -= dt * 0.8;
     }
     floats.removeWhere((f) => f.t > 0.9);
-    if (hurtT > 0) hurtT -= dt;
     for (final f in fx) {
       f.t += dt;
       f.x += f.vx * dt;
@@ -946,64 +1027,18 @@ class RgGame {
       f.vy *= 0.9;
     }
     fx.removeWhere((f) => f.t >= f.life);
-
-    // 玩家移動
-    final ml = math.sqrt(mx * mx + my * my);
-    moving = ml > 0.15;
-    if (moving) {
-      final k = math.min(1.0, ml) / ml;
-      faceX = mx / ml;
-      faceY = my / ml;
-      _move(null, mx * k * 3.6 * dt, my * k * 3.6 * dt, pr, false);
-    }
-    // 撿愛心
-    hearts.removeWhere((h) {
-      if (_d2(h.x, h.y, px, py) < 0.5 * 0.5) {
-        _healPct(0.12);
-        return true;
-      }
-      return false;
-    });
-
-    // 射擊
-    if (shootCd > 0) shootCd -= dt;
-    final tgt = _nearest(px, py);
-    if (!moving && tgt != null && shootCd <= 0) {
-      _fire(tgt);
-      shootCd = st.interval;
-      for (var i = 1; i <= st.lv('multi'); i++) {
-        _volleys.add(0.12 * i);
-      }
-    }
-    for (var i = _volleys.length - 1; i >= 0; i--) {
-      _volleys[i] -= dt;
-      if (_volleys[i] <= 0) {
-        _volleys.removeAt(i);
-        final t2 = _nearest(px, py);
-        if (t2 != null) _fire(t2);
-      }
-    }
-
-    // 旋轉刀刃
-    final orbs = 2 * st.lv('orb');
     orbAng += dt * 3.2;
-    if (orbs > 0) {
-      for (var i = 0; i < orbs; i++) {
-        final a = orbAng + 2 * math.pi * i / orbs;
-        final ox = px + math.cos(a) * 1.15, oy = py + math.sin(a) * 1.15;
-        for (final e in en) {
-          if (e.orbCd > 0 || e.hp <= 0 || e.airborne) continue;
-          if (_d2(e.x, e.y, ox, oy) < (e.r + 0.22) * (e.r + 0.22)) {
-            _hitEnemy(e, st.atk * 0.4, status: false);
-            e.orbCd = 0.35;
-          }
-        }
-      }
+    for (final p in heroes) {
+      h = p;
+      if (p.down) continue;
+      _stepHero(p.remote ? 0 : mx, p.remote ? 0 : my, dt);
     }
+    if (coop) _rescue(dt);
 
     // 敵人
     for (final e in List.of(en)) {
       if (e.hp <= 0) continue;
+      h = _targetFor(e);
       _updateEnemy(e, dt);
     }
     // 子彈
@@ -1011,7 +1046,10 @@ class RgGame {
     // 落石區
     for (final z in zones) {
       z.t -= dt;
-      if (z.t <= 0 && _d2(z.x, z.y, px, py) < (z.r + pr * 0.5) * (z.r + pr * 0.5)) _hurt(z.dmg, '落石');
+      if (z.t > 0) continue;
+      for (final p in heroes) {
+        if (_d2(z.x, z.y, p.x, p.y) < (z.r + pr * 0.5) * (z.r + pr * 0.5)) _hurtHero(p, z.dmg, '落石');
+      }
     }
     zones.removeWhere((z) => z.t <= 0);
     // 死亡結算
@@ -1036,6 +1074,12 @@ class RgGame {
 
     if (cleared) {
       for (final g in gems) {
+        h = heroes.length == 1 ? heroes[0] : (heroes.where((p) => !p.down).firstOrNull ?? heroes[0]);
+        if (coop) {
+          for (final p in heroes) {
+            if (_d2(g.x, g.y, p.x, p.y) < _d2(g.x, g.y, px, py)) h = p;
+          }
+        }
         final dx = px - g.x, dy = py - g.y;
         final d = math.sqrt(dx * dx + dy * dy) + 1e-6;
         final sp = 4 + clearT * 14;
@@ -1044,7 +1088,7 @@ class RgGame {
         g.x += g.vx * dt;
         g.y += g.vy * dt;
       }
-      gems.removeWhere((g) => _d2(g.x, g.y, px, py) < 0.3 * 0.3);
+      gems.removeWhere((g) => heroes.any((p) => _d2(g.x, g.y, p.x, p.y) < 0.3 * 0.3));
     } else {
       for (final g in gems) {
         g.x += g.vx * dt;
@@ -1055,29 +1099,135 @@ class RgGame {
     }
 
     if (!cleared && en.isEmpty && portals.isEmpty && wavesLeft == 0) {
-      final lvBefore = st.level;
       cleared = true;
       clearT = 0;
       bl.removeWhere((b) => !b.mine);
       zones.clear();
-      st.xp += gemsXp;
-      gemsXp = 0;
-      while (st.xp >= st.xpNeed) {
-        st.xp -= st.xpNeed;
-        st.level++;
-        pendingPicks++;
+      for (final p in heroes) {
+        if (p.down) _standUp(p, 0.3); // 清完房間，倒地的隊友自動站起來
+        final s = p.st, lvBefore = s.level;
+        s.xp += gemsXp;
+        while (s.xp >= s.xpNeed) {
+          s.xp -= s.xpNeed;
+          s.level++;
+          p.pendingPicks++;
+        }
+        if (s.level > lvBefore) fx.add(RgFx(2, p.x, p.y, 0, 0, 0.9, 1, 0xFFFFD54F));
       }
-      if (st.level > lvBefore) fx.add(RgFx(2, px, py, 0, 0, 0.9, 1, 0xFFFFD54F));
+      gemsXp = 0;
     }
     if (cleared) {
       clearT += dt;
-      if (clearT > 0.9 && pendingPicks > 0) {
+      if (clearT > 0.9 && heroes.any((p) => p.pendingPicks > 0)) {
         _openPick();
         return;
       }
-      // 走到上方門口
-      if (py < 0.75 && (px - 4.5).abs() < 0.9) _throughDoor();
+      // 走到上方門口（合作模式兩個人都要到）
+      if (heroes.every((p) => p.y < 0.75 && (p.x - 4.5).abs() < 0.9)) _throughDoor();
     }
+  }
+
+  void _stepHero(double mx, double my, double dt) {
+    if (inv > 0) inv -= dt;
+    if (hurtT > 0) hurtT -= dt;
+    // 玩家移動（客人的位置由網路設定，這裡不動）
+    if (!h.remote) {
+      final ml = math.sqrt(mx * mx + my * my);
+      moving = ml > 0.15;
+      if (moving) {
+        final k = math.min(1.0, ml) / ml;
+        faceX = mx / ml;
+        faceY = my / ml;
+        _move(null, mx * k * 3.6 * dt, my * k * 3.6 * dt, pr, false);
+      }
+    }
+    // 撿愛心
+    hearts.removeWhere((ht) {
+      if (_d2(ht.x, ht.y, px, py) < 0.5 * 0.5) {
+        _healPct(0.12);
+        return true;
+      }
+      return false;
+    });
+
+    // 射擊
+    if (shootCd > 0) shootCd -= dt;
+    final tgt = _nearest(px, py);
+    if (!moving && tgt != null && shootCd <= 0) {
+      _fire(tgt);
+      shootCd = st.interval;
+      for (var i = 1; i <= st.lv('multi'); i++) {
+        h.volleys.add(0.12 * i);
+      }
+    }
+    for (var i = h.volleys.length - 1; i >= 0; i--) {
+      h.volleys[i] -= dt;
+      if (h.volleys[i] <= 0) {
+        h.volleys.removeAt(i);
+        final t2 = _nearest(px, py);
+        if (t2 != null) _fire(t2);
+      }
+    }
+
+    // 旋轉刀刃
+    final orbs = 2 * st.lv('orb');
+    if (orbs > 0) {
+      for (var i = 0; i < orbs; i++) {
+        final a = orbAng + 2 * math.pi * i / orbs;
+        final ox = px + math.cos(a) * 1.15, oy = py + math.sin(a) * 1.15;
+        for (final e in en) {
+          if (e.orbCd > 0 || e.hp <= 0 || e.airborne) continue;
+          if (_d2(e.x, e.y, ox, oy) < (e.r + 0.22) * (e.r + 0.22)) {
+            _hitEnemy(e, st.atk * 0.4, status: false);
+            e.orbCd = 0.35;
+          }
+        }
+      }
+    }
+  }
+
+  /// 合作模式：倒地的玩家旁邊有隊友站 2.5 秒就站起來（40% 血）
+  void _rescue(double dt) {
+    for (final p in heroes) {
+      if (!p.down) continue;
+      final helped = heroes.any((o) => !o.down && _d2(o.x, o.y, p.x, p.y) < 1.3 * 1.3);
+      p.rescue = helped ? p.rescue + dt : math.max(0, p.rescue - dt * 0.5);
+      if (p.rescue >= 2.5) _standUp(p, 0.4);
+    }
+  }
+
+  void _standUp(RgHero p, double hpPct) {
+    p.down = false;
+    p.rescue = 0;
+    p.st.hp = math.max(p.st.hp, p.st.maxHp * hpPct);
+    p.inv = 2.0;
+    floats.add(RgFloat(p.x, p.y - 0.6, '站起來了！', 0xFF69F0AE, big: true));
+    fx.add(RgFx(2, p.x, p.y, 0, 0, 0.9, 1, 0xFF69F0AE));
+  }
+
+  /// 敵人追誰：最近、還沒倒地的玩家
+  RgHero _targetFor(RgEnemy e) {
+    if (!coop) return heroes[0];
+    RgHero? best;
+    var bd = double.infinity;
+    for (final p in heroes) {
+      if (p.down) continue;
+      final d = _d2(e.x, e.y, p.x, p.y);
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    return best ?? heroes[0];
+  }
+
+  bool _heroNear(double x, double y, double r) => heroes.any((p) => !p.down && _d2(x, y, p.x, p.y) < r * r);
+
+  void _hurtHero(RgHero p, double d, String by) {
+    final keep = h;
+    h = p;
+    _hurt(d, by);
+    h = keep;
   }
 
   void _throughDoor() {
@@ -1091,6 +1241,9 @@ class RgGame {
     }
     if (room == rgRoomsPerChapter - 2 && !angelDone) {
       angelDone = true;
+      for (final p in heroes) {
+        p.needAngel = true;
+      }
       phase = RgPhase.angel;
       return;
     }
@@ -1100,48 +1253,71 @@ class RgGame {
   /// 關卡通關後進下一關（回復 20% 生命）
   void nextChapter() {
     if (chapter >= rgChapters - 1) return;
-    startChapter(chapter + 1, nextStats());
+    startChapterAll(chapter + 1, [for (final p in heroes) _nextStatsOf(p)]);
   }
 
   /// 下一關開場的狀態（回復 20% 生命），過關時回報給伺服器存起來
-  RgStats nextStats() {
-    final s = st.copy();
+  RgStats nextStats() => _nextStatsOf(me);
+
+  RgStats _nextStatsOf(RgHero p) {
+    final s = p.st.copy();
     s.hp = math.min(s.maxHp, s.hp + s.maxHp * 0.2);
     return s;
   }
 
-  void chooseAngel(bool heal) {
-    if (phase != RgPhase.angel) return;
+  void chooseAngel(bool heal) => chooseAngelFor(local, heal);
+
+  /// 天使：每位玩家各選一次，都選完才進頭目房
+  void chooseAngelFor(int i, bool heal) {
+    if (phase != RgPhase.angel || i >= heroes.length || !heroes[i].needAngel) return;
+    final p = heroes[i];
+    p.needAngel = false;
     if (heal) {
+      h = p;
       _healPct(0.5);
-      phase = RgPhase.play;
-      loadRoom(room + 1);
+      h = me;
     } else {
-      pendingPicks++;
-      loadRoom(room + 1);
+      p.pendingPicks++;
+    }
+    if (heroes.any((o) => o.needAngel)) return;
+    loadRoom(room + 1);
+    if (heroes.any((o) => o.pendingPicks > 0)) {
       _openPick();
+    } else {
+      phase = RgPhase.play;
     }
   }
 
   void _openPick() {
-    final pool = rgSkillDefs.where((s) => st.lv(s.id) < s.max && s.id != 'heal').map((s) => s.id).toList()..shuffle(rng);
-    offer = pool.take(3).toList();
-    if (st.hp < st.maxHp * 0.5 && offer.length == 3 && rng.nextDouble() < 0.5) offer[2] = 'heal';
-    if (offer.isEmpty) offer = ['heal'];
+    for (final p in heroes) {
+      if (p.pendingPicks > 0 && p.offer.isEmpty) _genOffer(p);
+    }
     phase = RgPhase.pick;
   }
 
-  void choose(String id) {
-    if (phase != RgPhase.pick || !offer.contains(id)) return;
+  void _genOffer(RgHero p) {
+    final s = p.st;
+    final pool = rgSkillDefs.where((d) => s.lv(d.id) < d.max && d.id != 'heal').map((d) => d.id).toList()..shuffle(rng);
+    p.offer = pool.take(3).toList();
+    if (s.hp < s.maxHp * 0.5 && p.offer.length == 3 && rng.nextDouble() < 0.5) p.offer[2] = 'heal';
+    if (p.offer.isEmpty) p.offer = ['heal'];
+  }
+
+  void choose(String id) => chooseFor(local, id);
+
+  void chooseFor(int i, String id) {
+    if (phase != RgPhase.pick || i >= heroes.length) return;
+    final p = heroes[i];
+    if (p.pendingPicks <= 0 || !p.offer.contains(id)) return;
+    h = p;
     st.sk[id] = st.lv(id) + 1;
     if (id == 'hp') st.hp += rgBaseHp * 0.2;
     if (id == 'heal') _healPct(0.4);
-    pendingPicks--;
-    if (pendingPicks > 0) {
-      _openPick();
-    } else {
-      phase = RgPhase.play;
-    }
+    h = me;
+    p.pendingPicks--;
+    p.offer = [];
+    if (p.pendingPicks > 0) _genOffer(p);
+    if (heroes.every((o) => o.pendingPicks == 0)) phase = RgPhase.play;
   }
 
   void _healPct(double p) {
@@ -1195,7 +1371,7 @@ class RgGame {
 
   void _arrow(double x, double y, double a, double dmg) {
     bl.add(RgBullet(x, y, math.cos(a) * 11, math.sin(a) * 11, 0.12, dmg, true,
-        life: 2.5, pierce: st.lv('pierce') > 0 ? 9 : 0, rico: st.lv('rico'), wall: st.lv('wall') > 0 ? 2 : 0, style: 0));
+        life: 2.5, pierce: st.lv('pierce') > 0 ? 9 : 0, rico: st.lv('rico'), wall: st.lv('wall') > 0 ? 2 : 0, style: 0, owner: h.idx));
   }
 
   void _hitEnemy(RgEnemy e, double dmg, {bool status = true}) {
@@ -1229,7 +1405,11 @@ class RgGame {
   void _onKill(RgEnemy e) {
     kills++;
     gemsXp += e.xp;
-    if (st.lv('vamp') > 0) _healPct(0.025 * st.lv('vamp'));
+    for (final p in heroes) {
+      if (p.down || p.st.lv('vamp') == 0) continue;
+      h = p;
+      _healPct(0.025 * st.lv('vamp'));
+    }
     if (!e.boss && rng.nextDouble() < 0.05) hearts.add(RgHeart(e.x, e.y));
     if (e.boss) shake = 0.5;
     fx.add(RgFx(1, e.x, e.y, 0, 0, 0.35, e.r * 2.2, e.elite ? 0xFFFFD54F : 0xFFFFFFFF));
@@ -1247,7 +1427,7 @@ class RgGame {
   }
 
   void _hurt(double d, String by) {
-    if (inv > 0 || phase != RgPhase.play) return;
+    if (inv > 0 || h.down || phase != RgPhase.play) return;
     if (rng.nextDouble() < 0.12 * st.lv('dodge')) {
       floats.add(RgFloat(px, py - 0.5, '閃避', 0xFF80D8FF));
       inv = 0.25;
@@ -1263,7 +1443,16 @@ class RgGame {
     floats.add(RgFloat(px, py - 0.5, '-${dmg.round()}', 0xFFFF5252, big: true));
     if (st.hp <= 0) {
       st.hp = 0;
-      phase = RgPhase.dead;
+      if (coop) {
+        // 合作模式：先倒地，隊友來扶；兩個都倒才算死
+        h.down = true;
+        h.rescue = 0;
+        h.volleys.clear();
+        floats.add(RgFloat(px, py - 0.6, '倒地！', 0xFFFF5252, big: true));
+        if (heroes.every((p) => p.down)) phase = RgPhase.dead;
+      } else {
+        phase = RgPhase.dead;
+      }
     }
   }
 
@@ -1325,6 +1514,7 @@ class RgGame {
           if (e.hp <= 0 || e.airborne || b.hit.contains(e)) continue;
           final rr = e.r + b.r;
           if (_d2(e.x, e.y, b.x, b.y) > rr * rr) continue;
+          h = heroes[b.owner];
           _hitEnemy(e, b.dmg);
           b.hit.add(e);
           if (b.rico > 0) {
@@ -1358,9 +1548,11 @@ class RgGame {
         }
       } else {
         final rr = pr + b.r - 0.04;
-        if (_d2(px, py, b.x, b.y) < rr * rr && inv <= 0) {
-          _hurt(b.dmg, '子彈');
+        for (final p in heroes) {
+          if (p.down || p.inv > 0 || _d2(p.x, p.y, b.x, b.y) >= rr * rr) continue;
+          _hurtHero(p, b.dmg, '子彈');
           remove.add(b);
+          break;
         }
       }
     }
@@ -1393,7 +1585,7 @@ class RgGame {
   void _teleport(RgEnemy e) {
     for (var i = 0; i < 40; i++) {
       final x = 0.6 + rng.nextDouble() * (rgCols - 1.2), y = 0.6 + rng.nextDouble() * 9;
-      if (_d2(x, y, px, py) < 3.5 * 3.5) continue;
+      if (_heroNear(x, y, 3.5)) continue;
       if (circleBlocked(x, y, e.r)) continue;
       e.x = x;
       e.y = y;
@@ -1430,7 +1622,9 @@ class RgGame {
     // 碰撞傷害
     if (!e.airborne) {
       final rr = e.r + pr - 0.05;
-      if (_d2(e.x, e.y, px, py) < rr * rr) _hurt(e.contact, e.name);
+      for (final p in heroes) {
+        if (_d2(e.x, e.y, p.x, p.y) < rr * rr) _hurtHero(p, e.contact, e.name);
+      }
     }
 
     final c = theme + tier; // 攻擊花樣的等級
@@ -1781,5 +1975,261 @@ class RgGame {
     }
   }
 
+  // ---------------- 合作模式連線 ----------------
+  // 房主跑完整模擬，每 4 幀把畫面需要的東西打包（snap）傳給客人；客人自己移動自己的角色（guestMove），
+  // 把位置回報給房主（setRemote），其他東西照房主的畫，兩次 snap 之間用 guestTick 補動畫。
+
+  static double _r2(double v) => (v * 100).roundToDouble() / 100;
+
+  /// 客人回報自己的位置
+  void setRemote(int i, double x, double y, double fx, double fy, bool mv) {
+    final p = heroes[i];
+    if (p.down || phase != RgPhase.play) return;
+    if (circleBlocked(x, y, pr * 0.8)) return; // 擋在牆裡的就不收
+    p.x = x;
+    p.y = y;
+    p.faceX = fx;
+    p.faceY = fy;
+    p.moving = mv;
+  }
+
+  Map<String, dynamic> snap() => {
+        'ph': phase.index,
+        'c': chapter,
+        'r': room,
+        'q': roomSeq,
+        'cl': cleared ? 1 : 0,
+        't': _r2(time),
+        'rt': _r2(roomTime),
+        'w': wavesLeft,
+        'k': kills,
+        'oa': _r2(orbAng),
+        'h': [
+          for (final p in heroes)
+            [_r2(p.x), _r2(p.y), _r2(p.faceX), _r2(p.faceY), p.moving ? 1 : 0, _r2(p.inv), _r2(p.hurtT), _r2(p.shootCd),
+             p.down ? 1 : 0, _r2(p.rescue), p.pendingPicks, p.needAngel ? 1 : 0, p.offer, p.st.toJson()]
+        ],
+        'e': [
+          for (final e in en)
+            [e.id, e.type, _r2(e.x), _r2(e.y), _r2(e.r), e.hp.round(), e.maxHp.round(), e.st, _r2(e.t), _r2(e.ang), _r2(e.tx),
+             _r2(e.ty), (e.elite ? 1 : 0) | (e.airborne ? 2 : 0), _r2(e.flash), _r2(e.frozeT), _r2(e.slowT), _r2(e.burnT), e.poison,
+             _r2(e.spawnT), _r2(e.seed)]
+        ],
+        'b': [
+          for (final b in bl) [_r2(b.x), _r2(b.y), _r2(b.vx), _r2(b.vy), _r2(b.r), b.style, b.mine ? 1 : 0, _r2(b.life)]
+        ],
+        'z': [for (final z in zones) [_r2(z.x), _r2(z.y), _r2(z.r), _r2(z.t), _r2(z.total)]],
+        'p': [for (final p in portals) [_r2(p.x), _r2(p.y), _r2(p.t), p.elite ? 1 : 0, p.ch]],
+        'g': [for (final g in gems) [_r2(g.x), _r2(g.y), _r2(g.vx), _r2(g.vy)]],
+        'hr': [for (final x in hearts) [_r2(x.x), _r2(x.y)]],
+        'f': [for (final f in floats.take(40)) [_r2(f.x), _r2(f.y), f.s, f.color, f.big ? 1 : 0, _r2(f.t)]],
+        'x': [
+          for (final f in fx)
+            if (f.kind != 0) [f.kind, _r2(f.x), _r2(f.y), _r2(f.life), _r2(f.size), f.color, _r2(f.t)]
+        ],
+      };
+
+  static double _d(Object? v) => (v as num).toDouble();
+
+  /// 客人端：套用房主傳來的畫面
+  void applySnap(Map<String, dynamic> m) {
+    final c = (m['c'] as num).toInt(), r = (m['r'] as num).toInt(), q = (m['q'] as num).toInt();
+    final newRoom = q != roomSeq || c != chapter || r != room;
+    if (newRoom) {
+      chapter = c;
+      room = r;
+      grid = [for (final row in _rawMap(r)) row.replaceAll(RegExp('[a-zA-Z]'), '.')];
+    }
+    roomSeq = q;
+    phase = RgPhase.values[(m['ph'] as num).toInt()];
+    cleared = m['cl'] == 1;
+    time = _d(m['t']);
+    roomTime = _d(m['rt']);
+    wavesLeft = (m['w'] as num).toInt();
+    kills = (m['k'] as num).toInt();
+    orbAng = _d(m['oa']);
+    final hs = m['h'] as List;
+    for (var i = 0; i < hs.length && i < heroes.length; i++) {
+      final a = hs[i] as List, p = heroes[i];
+      final mine = i == local;
+      final down = a[8] == 1;
+      // 自己的位置自己算；換房間、倒地或差太多（被房主拉回）才用房主的
+      if (!mine || newRoom || down || p.down || _d2(p.x, p.y, _d(a[0]), _d(a[1])) > 2.5 * 2.5) {
+        p.x = _d(a[0]);
+        p.y = _d(a[1]);
+      }
+      if (!mine) {
+        p.faceX = _d(a[2]);
+        p.faceY = _d(a[3]);
+        p.moving = a[4] == 1;
+      }
+      p.inv = _d(a[5]);
+      final ht = _d(a[6]);
+      if (mine && ht > p.hurtT + 0.05) shake = 0.18;
+      p.hurtT = ht;
+      p.shootCd = _d(a[7]);
+      p.down = down;
+      p.rescue = _d(a[9]);
+      p.pendingPicks = (a[10] as num).toInt();
+      p.needAngel = a[11] == 1;
+      p.offer = [for (final x in a[12] as List) x as String];
+      p.st = RgStats.fromJson(Map<String, dynamic>.from(a[13] as Map));
+    }
+    // 敵人：用 id 對應，位置平滑追過去；血變少就噴火花、消失就爆開
+    final old = {for (final e in en) e.id: e};
+    final next = <RgEnemy>[];
+    for (final raw in m['e'] as List) {
+      final a = raw as List;
+      final id = (a[0] as num).toInt();
+      var e = old.remove(id);
+      if (e == null || newRoom) {
+        e = _netEnemy(a[1] as String, _d(a[2]), _d(a[3]), _d(a[19]));
+        e.id = id;
+      }
+      final hp = _d(a[5]);
+      if (hp < e.hp - 0.5 && fx.length < 160) {
+        for (var i = 0; i < 2; i++) {
+          final an = rng.nextDouble() * 2 * math.pi, v = 2 + rng.nextDouble() * 3;
+          fx.add(RgFx(0, e.x, e.y, math.cos(an) * v, math.sin(an) * v, 0.25, 0.06, 0xFFFFFFFF));
+        }
+      }
+      e.nx = _d(a[2]);
+      e.ny = _d(a[3]);
+      e.r = _d(a[4]);
+      e.hp = hp;
+      e.maxHp = _d(a[6]);
+      e.st = (a[7] as num).toInt();
+      e.t = _d(a[8]);
+      e.ang = _d(a[9]);
+      e.tx = _d(a[10]);
+      e.ty = _d(a[11]);
+      final fl = (a[12] as num).toInt();
+      e.elite = fl & 1 != 0;
+      e.airborne = fl & 2 != 0;
+      e.flash = _d(a[13]);
+      e.frozeT = _d(a[14]);
+      e.slowT = _d(a[15]);
+      e.burnT = _d(a[16]);
+      e.poison = (a[17] as num).toInt();
+      e.spawnT = _d(a[18]);
+      next.add(e);
+    }
+    if (!newRoom) {
+      for (final e in old.values) {
+        for (var i = 0; i < (e.boss ? 24 : 8) && fx.length < 200; i++) {
+          final an = rng.nextDouble() * 2 * math.pi, v = 1.5 + rng.nextDouble() * 4;
+          fx.add(RgFx(0, e.x, e.y, math.cos(an) * v, math.sin(an) * v, 0.5 + rng.nextDouble() * 0.3, 0.07 + rng.nextDouble() * 0.06,
+              e.boss ? 0xFFFF7043 : 0xFFCFD8DC));
+        }
+        if (e.boss) shake = 0.5;
+      }
+    }
+    en = next;
+    bl = [
+      for (final raw in m['b'] as List)
+        () {
+          final a = raw as List;
+          return RgBullet(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[3]), _d(a[4]), 0, a[6] == 1, style: (a[5] as num).toInt(), life: _d(a[7]));
+        }()
+    ];
+    zones = [
+      for (final raw in m['z'] as List)
+        (raw as List).let((a) => RgZone(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[4]), 0)..t = _d(a[3]))
+    ];
+    portals = [for (final raw in m['p'] as List) (raw as List).let((a) => RgPortal(_d(a[0]), _d(a[1]), a[4] as String, a[3] == 1, _d(a[2])))];
+    gems = [for (final raw in m['g'] as List) (raw as List).let((a) => RgGem(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[3])))];
+    hearts = [for (final raw in m['hr'] as List) (raw as List).let((a) => RgHeart(_d(a[0]), _d(a[1])))];
+    floats = [
+      for (final raw in m['f'] as List)
+        (raw as List).let((a) => RgFloat(_d(a[0]), _d(a[1]), a[2] as String, (a[3] as num).toInt(), big: a[4] == 1)..t = _d(a[5]))
+    ];
+    fx.removeWhere((f) => f.kind != 0);
+    for (final raw in m['x'] as List) {
+      final a = raw as List;
+      fx.add(RgFx((a[0] as num).toInt(), _d(a[1]), _d(a[2]), 0, 0, _d(a[3]), _d(a[4]), (a[5] as num).toInt())..t = _d(a[6]));
+    }
+    h = me;
+  }
+
+  RgEnemy _netEnemy(String type, double x, double y, double seed) {
+    final t = _types[type];
+    if (t != null) return RgEnemy(type, t.name, t.kind, false, t.fly, x, y, t.r, 1, t.speed, 0, 0, 0, seed);
+    final b = _bosses.firstWhere((b) => b.$1 == type, orElse: () => _bosses[0]);
+    return RgEnemy(b.$1, b.$2, b.$3, true, b.$4, x, y, b.$5, 1, 1, 0, 0, 0, seed);
+  }
+
+  /// 客人端：自己移動（只做地形碰撞，傷害由房主算）
+  void guestMove(double mx, double my) {
+    h = me;
+    if (phase != RgPhase.play || me.down) {
+      me.moving = false;
+      return;
+    }
+    final ml = math.sqrt(mx * mx + my * my);
+    moving = ml > 0.15;
+    if (moving) {
+      final k = math.min(1.0, ml) / ml;
+      faceX = mx / ml;
+      faceY = my / ml;
+      _move(null, mx * k * 3.6 * rgDt, my * k * 3.6 * rgDt, pr, false);
+    } else {
+      final t = _nearest(px, py);
+      if (t != null) {
+        final a = math.atan2(t.y - py, t.x - px);
+        faceX = math.cos(a);
+        faceY = math.sin(a);
+      }
+    }
+  }
+
+  /// 客人端：兩次 snap 之間補動畫（一幀 rgDt）
+  void guestTick() {
+    const dt = rgDt;
+    if (phase != RgPhase.play) return;
+    time += dt;
+    roomTime += dt;
+    orbAng += dt * 3.2;
+    if (shake > 0) shake -= dt;
+    for (final p in heroes) {
+      if (p.inv > 0) p.inv -= dt;
+      if (p.hurtT > 0) p.hurtT -= dt;
+    }
+    final k = math.min(1.0, dt * 14);
+    for (final e in en) {
+      e.x += (e.nx - e.x) * k;
+      e.y += (e.ny - e.y) * k;
+      e.t += dt;
+      if (e.flash > 0) e.flash -= dt;
+      if (e.spawnT < 0.5) e.spawnT += dt;
+    }
+    for (final b in bl) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    }
+    for (final z in zones) {
+      z.t -= dt;
+    }
+    for (final p in portals) {
+      p.t -= dt;
+    }
+    for (final f in floats) {
+      f.t += dt;
+      f.y -= dt * 0.8;
+    }
+    floats.removeWhere((f) => f.t > 0.9);
+    for (final f in fx) {
+      f.t += dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vx *= 0.9;
+      f.vy *= 0.9;
+    }
+    fx.removeWhere((f) => f.t >= f.life);
+  }
+
   static double _d2(double ax, double ay, double bx, double by) => (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
+}
+
+extension _Let<T> on T {
+  R let<R>(R Function(T) f) => f(this);
 }

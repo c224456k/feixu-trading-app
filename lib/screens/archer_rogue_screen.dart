@@ -1,9 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
 import '../widgets/monster_art.dart';
@@ -28,7 +31,7 @@ class ArcherRogueScreen extends StatefulWidget {
 }
 
 class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTickerProviderStateMixin {
-  final _g = RgGame();
+  RgGame _g = RgGame();
   final _focus = FocusNode();
   final _floorCache = _FloorCache();
   final ValueNotifier<int> _repaint = ValueNotifier(0);
@@ -51,6 +54,12 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   // 搖桿（arena 座標，像素）
   Offset? _joyOrigin;
   Offset? _joyNow;
+  // 雙人合作（試玩）：房主（side 0）跑模擬傳畫面，客人（side 1）自己移動、照畫面畫
+  _CoopNet? _net;
+  int _side = -1; // -1 = 單人
+  List<String> _names = const [];
+  int _frame = 0;
+  bool get _coop => _side >= 0;
 
   @override
   void initState() {
@@ -61,6 +70,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
 
   @override
   void dispose() {
+    _net?.close();
     _ticker.dispose();
     _repaint.dispose();
     _focus.dispose();
@@ -232,6 +242,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   void _onTick(Duration now) {
     final dt = _last == Duration.zero ? 0.0 : (now - _last).inMicroseconds / 1e6;
     _last = now;
+    if (_coop) return _coopTick(dt);
     if (!_started || _paused || _g.phase != RgPhase.play) {
       _acc = 0;
       return;
@@ -253,6 +264,119 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     }
   }
 
+  // ---------------- 雙人合作 ----------------
+  void _openCoop() {
+    final net = _CoopNet(_api, onMsg: _onCoopMsg, onChanged: () {
+      if (mounted) setState(() {});
+    });
+    setState(() => _net = net);
+    net.connect();
+  }
+
+  void _closeCoop() {
+    _net?.close();
+    _net = null;
+    _leaveCoopGame();
+    _loadState();
+  }
+
+  void _leaveCoopGame() {
+    _side = -1;
+    _started = false;
+    _g = RgGame();
+    _sync();
+  }
+
+  void _quitCoop() {
+    _net?.send({'t': 'leave'});
+    _leaveCoopGame();
+  }
+
+  void _onCoopMsg(Map<String, dynamic> m) {
+    if (!mounted) return;
+    switch (m['t']) {
+      case 'start':
+        _side = (m['side'] as num).toInt();
+        _names = [for (final n in m['names'] as List) '$n'];
+        _g = RgGame(seed: (m['seed'] as num).toInt(), players: 2)..local = _side;
+        _g.heroes[1].remote = true;
+        _frame = 0;
+        _acc = 0;
+        if (_side == 0) _g.newRun();
+        _started = true;
+        _paused = false;
+        _sync();
+      case 'r':
+        final d = m['d'];
+        if (d is Map<String, dynamic>) _onCoopData(d);
+      case 'gone':
+        if (_started) {
+          _toast('${m['msg'] ?? '隊友離開了'}，這場結束');
+          _leaveCoopGame();
+        }
+    }
+  }
+
+  static double _n(Object? v) => (v as num).toDouble();
+  static int _skillCount(RgHero p) => p.st.sk.values.fold(0, (a, b) => a + b);
+
+  void _onCoopData(Map<String, dynamic> d) {
+    if (!_started) return;
+    switch (d['k']) {
+      case 's':
+        if (_side == 1) _g.applySnap(d['s'] as Map<String, dynamic>);
+      case 'in':
+        if (_side == 0) _g.setRemote(1, _n(d['x']), _n(d['y']), _n(d['fx']), _n(d['fy']), d['mv'] == 1);
+      case 'pick':
+        // n = 客人選之前的技能總數，避免同一次選擇（網路重送／畫面還沒更新又點一次）算兩次
+        if (_side == 0 && _skillCount(_g.heroes[1]) == (d['n'] as num).toInt()) _g.chooseFor(1, d['id'] as String);
+      case 'angel':
+        if (_side == 0) _g.chooseAngelFor(1, d['heal'] == true);
+    }
+  }
+
+  void _coopPick(String id) {
+    _net?.relay({'k': 'pick', 'id': id, 'n': _skillCount(_g.me)});
+    _g.me.offer = []; // 等房主的畫面帶回下一組
+  }
+
+  void _coopAngel(bool heal) {
+    _net?.relay({'k': 'angel', 'heal': heal});
+    _g.me.needAngel = false;
+  }
+
+  void _coopTick(double dt) {
+    if (!_started) return;
+    _acc += math.min(dt, 0.1);
+    final (mx, my) = _input();
+    final chapter = _g.chapter;
+    var n = 0;
+    while (_acc >= rgDt && n < 6) {
+      _acc -= rgDt;
+      n++;
+      _frame++;
+      if (_side == 0) {
+        _g.step(mx, my);
+        if (_frame % (_g.phase == RgPhase.play ? 4 : 15) == 0) _net?.relay({'k': 's', 's': _g.snap()});
+      } else {
+        _g.guestMove(mx, my);
+        _g.guestTick();
+        final p = _g.me;
+        if (_frame % 2 == 0 && _g.phase == RgPhase.play && !p.down) {
+          double r2(double v) => (v * 100).roundToDouble() / 100;
+          _net?.relay({'k': 'in', 'x': r2(p.x), 'y': r2(p.y), 'fx': r2(p.faceX), 'fy': r2(p.faceY), 'mv': p.moving ? 1 : 0});
+        }
+      }
+    }
+    if (_acc > 0.2) _acc = 0;
+    if (n > 0) _repaint.value++;
+    if (_g.phase != _shownPhase || _g.chapter != chapter) {
+      _sync();
+    } else if (_g.phase != RgPhase.play && _frame % 15 == 0 && n > 0) {
+      setState(() {}); // 等隊友選擇時，選完要更新畫面
+    }
+  }
+
   // ---------------- 畫面 ----------------
   @override
   Widget build(BuildContext context) {
@@ -267,7 +391,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
           LogicalKeyboardKey.arrowRight,
           LogicalKeyboardKey.space,
         };
-        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyP && _started) {
+        if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.keyP && _started && !_coop) {
           setState(() => _paused = !_paused);
           return KeyEventResult.handled;
         }
@@ -276,9 +400,10 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       child: Scaffold(
         backgroundColor: const Color(0xFF14161C),
         appBar: AppBar(
-          title: const Text('弓箭肉鴿'),
+          title: Text(_coop || _net != null ? '弓箭肉鴿・雙人合作' : '弓箭肉鴿'),
+          leading: _net != null && !_started ? BackButton(onPressed: _closeCoop) : null,
           actions: [
-            if (_started)
+            if (_started && !_coop)
               IconButton(
                 onPressed: () => setState(() => _paused = !_paused),
                 icon: Icon(_paused ? Icons.play_arrow : Icons.pause),
@@ -286,7 +411,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
               ),
           ],
         ),
-        body: SafeArea(child: _started ? _game() : _menu()),
+        body: SafeArea(child: _started ? _game() : (_net != null ? _coopMenu() : _menu())),
       ),
     );
   }
@@ -373,6 +498,15 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                     label: const Text('開始今天的挑戰'),
                   ),
                 ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _openCoop,
+                  icon: const Icon(Icons.group),
+                  label: const Text('👥 雙人合作（試玩：不限次數、不扣水晶、沒有獎金）'),
+                ),
+              ),
             ],
           ),
         ),
@@ -413,7 +547,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                         onPanCancel: () => _joyOrigin = _joyNow = null,
                         child: RepaintBoundary(
                           child: CustomPaint(
-                            painter: _ArenaPainter(_g, _floorCache, _repaint, () => (_joyOrigin, _joyNow)),
+                            painter: _ArenaPainter(_g, _floorCache, _repaint, () => (_joyOrigin, _joyNow), names: _coop ? _names : null),
                             size: Size(w, h),
                           ),
                         ),
@@ -498,6 +632,25 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                 Expanded(child: _bar(st.xp / st.xpNeed, const [Color(0xFF80D8FF), Color(0xFF0288D1)], null, height: 7)),
               ],
             ),
+            if (_coop)
+              for (final p in _g.heroes)
+                if (p != _g.me) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 70,
+                        child: Text(_names.length > p.idx ? _names[p.idx] : '隊友',
+                            overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF82B1FF), fontSize: 11)),
+                      ),
+                      Expanded(
+                        child: _bar(p.st.hp / p.st.maxHp, const [Color(0xFF82B1FF), Color(0xFF1565C0)],
+                            p.down ? '倒地！快去扶' : 'Lv${p.st.level}  ${p.st.hp.round()} / ${p.st.maxHp.round()}',
+                            height: 12),
+                      ),
+                    ],
+                  ),
+                ],
             if (st.sk.isNotEmpty) ...[
               const SizedBox(height: 6),
               SizedBox(
@@ -601,6 +754,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       );
 
   Widget _phaseOverlay() {
+    if (_coop) return _coopOverlay();
     switch (_g.phase) {
       case RgPhase.pick:
         return _dim(Column(
@@ -705,6 +859,165 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     }
   }
 
+  Widget _coopMenu() {
+    final net = _net!;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('👥 雙人合作', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 4),
+              const Text('試玩版：不限次數、不扣水晶、沒有獎金', style: TextStyle(color: Colors.amberAccent)),
+              const SizedBox(height: 14),
+              const Text(
+                '• 兩個人一起打 $rgChapters 關，技能各自選，怪物血量 ×1.5\n'
+                '• 倒地時隊友站在旁邊 2.5 秒可以扶起來；清完房間也會自動站起來\n'
+                '• 兩個人都倒地＝全滅，房主可以免費從那一間重來\n'
+                '• 兩個人都走到門口才會進下一間\n'
+                '• 遊戲在房主的裝置上跑，房主網路要穩',
+                style: TextStyle(color: Colors.white70, height: 1.7),
+              ),
+              const SizedBox(height: 20),
+              if (net.error != null) ...[
+                Text(net.error!, style: const TextStyle(color: Colors.redAccent), textAlign: TextAlign.center),
+                if (!net.connected) TextButton(onPressed: net.connect, child: const Text('重新連線')),
+              ],
+              if (!net.connected && net.error == null) const CircularProgressIndicator(),
+              if (net.connected && net.waiting != null) ...[
+                Text('房間 #${net.waiting} 等待隊友加入…', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                const SizedBox(height: 12),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () {
+                    net.send({'t': 'leave'});
+                    setState(() => net.waiting = null);
+                  },
+                  child: const Text('取消'),
+                ),
+              ],
+              if (net.connected && net.waiting == null) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => net.send({'t': 'create'}),
+                    icon: const Icon(Icons.add),
+                    label: const Text('開新房間（我當房主）'),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Align(alignment: Alignment.centerLeft, child: Text('等待中的房間', style: TextStyle(color: Colors.white54))),
+                const SizedBox(height: 6),
+                if (net.rooms.isEmpty) const Text('目前沒有人開房，開一間叫朋友加入吧', style: TextStyle(color: Colors.white38)),
+                for (final r in net.rooms)
+                  Card(
+                    color: const Color(0xFF263238),
+                    child: ListTile(
+                      leading: const Text('🏹', style: TextStyle(fontSize: 22)),
+                      title: Text('${r['host']} 的房間', style: const TextStyle(color: Colors.white)),
+                      subtitle: Text('#${r['id']}', style: const TextStyle(color: Colors.white38)),
+                      trailing: FilledButton(onPressed: () => net.send({'t': 'join', 'room': r['id']}), child: const Text('加入')),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _coopOverlay() {
+    final me = _g.me;
+    final host = _side == 0;
+    Widget wait(String s) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            Text(s, style: const TextStyle(color: Colors.white70)),
+          ],
+        );
+    final quit = _choiceButton('🏠 離開這場', _quitCoop);
+    switch (_g.phase) {
+      case RgPhase.pick:
+        if (me.pendingPicks > 0 && me.offer.isNotEmpty) {
+          return _dim(Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(me.st.sk.isEmpty ? '選一個起始技能' : '升級！選一個技能',
+                  style: const TextStyle(color: Colors.amberAccent, fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 14),
+              for (final id in me.offer) _skillCard(id),
+            ],
+          ));
+        }
+        return _dim(wait('等待隊友選技能…'));
+      case RgPhase.angel:
+        if (!me.needAngel) return _dim(wait('等待隊友選祝福…'));
+        void angel(bool heal) => host ? _g.chooseAngel(heal) : _coopAngel(heal);
+        return _dim(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('😇', style: TextStyle(fontSize: 48)),
+            const Text('天使出現了', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text('前方就是頭目，選一個祝福（各選各的）', style: TextStyle(color: Colors.white70)),
+            const SizedBox(height: 16),
+            _choiceButton('💚 回復 50% 生命', () => angel(true)),
+            const SizedBox(height: 10),
+            _choiceButton('✨ 額外技能（三選一）', () => angel(false)),
+          ],
+        ));
+      case RgPhase.dead:
+        return _dim(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('💀', style: TextStyle(fontSize: 48)),
+            const Text('全滅了', style: TextStyle(color: Colors.redAccent, fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('第 ${_g.chapter + 1} 關 ${_g.isBossRoom ? '頭目房' : '第 ${_g.room + 1} 間'}', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 18),
+            if (host) _choiceButton('🔄 從這一間重來（免費，兩人滿血）', _g.retryRoom) else wait('等待房主決定要不要重來…'),
+            const SizedBox(height: 10),
+            quit,
+          ],
+        ));
+      case RgPhase.chapterDone:
+        return _dim(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🏆', style: TextStyle(fontSize: 48)),
+            Text('第 ${_g.chapter + 1} 關 通關！', style: const TextStyle(color: Colors.amberAccent, fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('下一關：第 ${_g.chapter + 2} 關 ${rgChapterNames[_g.chapter + 1]}（進關回復 20% 生命）', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 18),
+            if (host) _choiceButton('▶ 前往第 ${_g.chapter + 2} 關', _g.nextChapter) else wait('等待房主前往下一關…'),
+            const SizedBox(height: 10),
+            quit,
+          ],
+        ));
+      case RgPhase.victory:
+        return _dim(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('👑', style: TextStyle(fontSize: 56)),
+            Text('兩人合作全破 $rgChapters 關！', style: const TextStyle(color: Colors.amberAccent, fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('等級 ${me.st.level}・擊殺 ${_g.kills}', style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 18),
+            quit,
+          ],
+        ));
+      case RgPhase.play:
+        return const SizedBox.shrink();
+    }
+  }
+
   Widget _asyncButton(String label, Future<void> Function()? onTap) => SizedBox(
         width: 280,
         child: FilledButton(
@@ -740,7 +1053,11 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
-            _g.choose(id);
+            if (_side == 1) {
+              _coopPick(id);
+            } else {
+              _g.choose(id);
+            }
             _sync();
           },
           child: Container(
@@ -792,7 +1109,8 @@ class _ArenaPainter extends CustomPainter {
   final RgGame g;
   final _FloorCache cache;
   final (Offset?, Offset?) Function() joy;
-  _ArenaPainter(this.g, this.cache, Listenable repaint, this.joy) : super(repaint: repaint);
+  final List<String>? names; // 合作模式：頭上顯示名字
+  _ArenaPainter(this.g, this.cache, Listenable repaint, this.joy, {this.names}) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -803,7 +1121,7 @@ class _ArenaPainter extends CustomPainter {
       final k = g.shake * 10;
       canvas.translate(math.sin(g.time * 90) * k, math.cos(g.time * 77) * k);
     }
-    final key = '${g.chapter}/${g.room}/${size.width.toStringAsFixed(1)}';
+    final key = '${g.chapter}/${g.room}/${g.roomSeq}/${size.width.toStringAsFixed(1)}';
     if (cache.key != key || cache.pic == null) {
       final rec = ui.PictureRecorder();
       _staticFloor(Canvas(rec), s, size);
@@ -823,12 +1141,16 @@ class _ArenaPainter extends CustomPainter {
     }
     _gems(canvas, s);
     final sorted = List.of(g.en)..sort((a, b) => a.y.compareTo(b.y));
+    final py = g.me.y;
     for (final e in sorted) {
-      if (e.y <= g.py) _enemy(canvas, e, s);
+      if (e.y <= py) _enemy(canvas, e, s);
     }
-    _player(canvas, s);
+    for (final p in g.heroes) {
+      if (p != g.me) _player(canvas, s, p);
+    }
+    _player(canvas, s, g.me);
     for (final e in sorted) {
-      if (e.y > g.py) _enemy(canvas, e, s);
+      if (e.y > py) _enemy(canvas, e, s);
     }
     _fx(canvas, s);
     _bullets(canvas, s);
@@ -1268,17 +1590,23 @@ class _ArenaPainter extends CustomPainter {
     }
   }
 
-  void _player(Canvas c, double s) {
-    final o0 = Offset(g.px * s, g.py * s);
+  void _player(Canvas c, double s, RgHero p) {
+    final o0 = Offset(p.x * s, p.y * s);
     final r = g.pr * s;
+    final blue = p.idx == 1; // 合作模式第二位玩家：藍色披風
+    final name = names != null && p.idx < names!.length ? names![p.idx] : null;
+    if (p.down) {
+      _downHero(c, s, p, o0, r, name);
+      return;
+    }
     // 腳下光圈
     c.drawOval(Rect.fromCenter(center: o0 + Offset(0, r * 0.85), width: r * 2.8, height: r * 1.0),
         Paint()
-          ..color = const Color(0xFF64FFDA).withValues(alpha: 0.35)
+          ..color = (blue ? const Color(0xFF82B1FF) : const Color(0xFF64FFDA)).withValues(alpha: p == g.me ? 0.55 : 0.3)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2);
     // 旋轉刀刃
-    final orbs = 2 * g.st.lv('orb');
+    final orbs = 2 * p.st.lv('orb');
     for (var i = 0; i < orbs; i++) {
       final a = g.orbAng + 2 * math.pi * i / orbs;
       final p = o0 + Offset(math.cos(a), math.sin(a)) * 1.15 * s;
@@ -1297,46 +1625,46 @@ class _ArenaPainter extends CustomPainter {
       c.drawPath(blade, Paint()..color = const Color(0xFF80DEEA));
       c.restore();
     }
-    if (g.inv > 0 && g.hurtT > 0 && (g.time * 20).floor().isOdd && g.phase == RgPhase.play) return;
-    final bob = g.moving ? math.sin(g.time * 16).abs() * r * 0.25 : 0.0;
+    if (p.inv > 0 && p.hurtT > 0 && (g.time * 20).floor().isOdd && g.phase == RgPhase.play) return;
+    final bob = p.moving ? math.sin(g.time * 16).abs() * r * 0.25 : 0.0;
     final o = o0.translate(0, -bob);
     c.drawOval(Rect.fromCenter(center: o0 + Offset(0, r * 0.85), width: r * 1.8, height: r * 0.6), Paint()..color = const Color(0x66000000));
-    final fa = math.atan2(g.faceY, g.faceX);
+    final fa = math.atan2(p.faceY, p.faceX);
     // 披風（往面向的反方向飄）
-    final back = Offset(-g.faceX, -g.faceY);
-    final sway = math.sin(g.time * (g.moving ? 14 : 3)) * r * 0.15;
+    final back = Offset(-p.faceX, -p.faceY);
+    final sway = math.sin(g.time * (p.moving ? 14 : 3)) * r * 0.15;
     final cape = Path()
       ..moveTo(o.dx - r * 0.75, o.dy - r * 0.2)
       ..quadraticBezierTo(o.dx + back.dx * r * 1.4 - r * 0.6 + sway, o.dy + back.dy * r * 0.6 + r * 1.0,
           o.dx + back.dx * r * 0.9 + sway, o.dy + r * 1.05)
       ..quadraticBezierTo(o.dx + back.dx * r * 1.4 + r * 0.6 + sway, o.dy + back.dy * r * 0.6 + r * 1.0, o.dx + r * 0.75, o.dy - r * 0.2)
       ..close();
-    c.drawPath(cape, Paint()..color = const Color(0xFF1B5E20));
+    c.drawPath(cape, Paint()..color = blue ? const Color(0xFF0D47A1) : const Color(0xFF1B5E20));
     // 身體
     c.drawOval(Rect.fromCenter(center: o + Offset(0, r * 0.25), width: r * 1.5, height: r * 1.3),
-        Paint()..shader = const LinearGradient(colors: [Color(0xFF66BB6A), Color(0xFF2E7D32)]).createShader(Rect.fromCircle(center: o, radius: r)));
+        Paint()..shader = LinearGradient(colors: blue ? const [Color(0xFF64B5F6), Color(0xFF1565C0)] : const [Color(0xFF66BB6A), Color(0xFF2E7D32)]).createShader(Rect.fromCircle(center: o, radius: r)));
     c.drawLine(o + Offset(-r * 0.6, r * 0.25), o + Offset(r * 0.6, r * 0.25), Paint()
       ..color = const Color(0xFF6D4C41)
       ..strokeWidth = r * 0.18);
     // 頭＋兜帽
     final head = o + Offset(0, -r * 0.45);
-    c.drawCircle(head, r * 0.62, Paint()..color = const Color(0xFF2E7D32));
-    c.drawCircle(head + Offset(g.faceX * r * 0.12, g.faceY * r * 0.08 + r * 0.05), r * 0.45, Paint()..color = const Color(0xFFFFCC80));
+    c.drawCircle(head, r * 0.62, Paint()..color = blue ? const Color(0xFF1565C0) : const Color(0xFF2E7D32));
+    c.drawCircle(head + Offset(p.faceX * r * 0.12, p.faceY * r * 0.08 + r * 0.05), r * 0.45, Paint()..color = const Color(0xFFFFCC80));
     final hood = Path()
       ..moveTo(head.dx - r * 0.66, head.dy + r * 0.05)
       ..quadraticBezierTo(head.dx - r * 0.5, head.dy - r * 0.8, head.dx + r * 0.15, head.dy - r * 1.05)
       ..quadraticBezierTo(head.dx + r * 0.3, head.dy - r * 0.6, head.dx + r * 0.66, head.dy + r * 0.05)
       ..quadraticBezierTo(head.dx, head.dy - r * 0.45, head.dx - r * 0.66, head.dy + r * 0.05);
-    c.drawPath(hood, Paint()..color = const Color(0xFF388E3C));
+    c.drawPath(hood, Paint()..color = blue ? const Color(0xFF1E88E5) : const Color(0xFF388E3C));
     c.drawCircle(head + Offset(r * 0.18, -r * 1.0), r * 0.1, Paint()..color = const Color(0xFFFF5252));
-    if (g.faceY < 0.6) {
-      final eye = Offset(g.faceX, g.faceY) * r * 0.15;
+    if (p.faceY < 0.6) {
+      final eye = Offset(p.faceX, p.faceY) * r * 0.15;
       for (final dx in [-0.17, 0.17]) {
         c.drawCircle(head + Offset(dx * r, r * 0.05) + eye, r * 0.075, Paint()..color = const Color(0xFF3E2723));
       }
     }
     // 弓：快射擊時拉弦
-    final pull = g.moving ? 0.0 : (1 - (g.shootCd / g.st.interval).clamp(0.0, 1.0));
+    final pull = p.moving ? 0.0 : (1 - (p.shootCd / p.st.interval).clamp(0.0, 1.0));
     c.save();
     c.translate(o.dx, o.dy + r * 0.1);
     c.rotate(fa);
@@ -1365,9 +1693,31 @@ class _ArenaPainter extends CustomPainter {
     final w = s * 0.95;
     final hb = Rect.fromLTWH(o0.dx - w / 2, o0.dy + r * 1.4, w, s * 0.11);
     c.drawRRect(RRect.fromRectAndRadius(hb.inflate(1), const Radius.circular(3)), Paint()..color = Colors.black87);
-    final frac = (g.st.hp / g.st.maxHp).clamp(0.0, 1.0);
+    final frac = (p.st.hp / p.st.maxHp).clamp(0.0, 1.0);
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(hb.left, hb.top, w * frac, hb.height), const Radius.circular(2)),
         Paint()..color = frac < 0.3 ? const Color(0xFFFF5252) : const Color(0xFF00E676));
+      if (name != null) _text(c, name, o0.translate(0, -r * 2.3), s * 0.2, blue ? const Color(0xFF82B1FF) : const Color(0xFFB9F6CA));
+  }
+
+  /// 合作模式倒地：躺著、灰色，旁邊一圈是隊友扶起來的進度
+  void _downHero(Canvas c, double s, RgHero p, Offset o, double r, String? name) {
+    c.drawOval(Rect.fromCenter(center: o + Offset(0, r * 0.4), width: r * 2.4, height: r * 1.1), Paint()..color = const Color(0xAA607D8B));
+    c.drawCircle(o + Offset(-r * 0.9, r * 0.2), r * 0.5, Paint()..color = const Color(0xFF90A4AE));
+    final k = (p.rescue / 2.5).clamp(0.0, 1.0);
+    final ring = Rect.fromCircle(center: o, radius: s * 1.3);
+    c.drawCircle(o, s * 1.3, Paint()
+      ..color = const Color(0x5569F0AE)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2);
+    if (k > 0) {
+      c.drawArc(ring, -math.pi / 2, 2 * math.pi * k, false, Paint()
+        ..color = const Color(0xFF69F0AE)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4);
+    }
+    final blink = 0.6 + 0.4 * math.sin(g.time * 6);
+    _text(c, '救我！', o.translate(0, -r * 2.0), s * 0.28, Color.fromRGBO(255, 82, 82, blink));
+    if (name != null) _text(c, name, o.translate(0, r * 1.6), s * 0.2, Colors.white70);
   }
 
   void _gems(Canvas c, double s) {
@@ -1402,7 +1752,7 @@ class _ArenaPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = s * 0.08 * (1 - k) + 1);
         case 2:
-          final pos = Offset(g.px * s, g.py * s);
+          final pos = Offset(f.x * s, f.y * s);
           final col2 = Rect.fromCenter(center: pos.translate(0, -s * 1.5), width: s * (1.2 - k * 0.6), height: s * 3.5);
           c.drawRect(
               col2,
@@ -1580,4 +1930,84 @@ class _ArenaPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ArenaPainter old) => true;
+}
+
+/// 雙人合作的 WebSocket（/ws/rogue2）：大廳、開房、配對，之後只轉送 {t:r, d} 給對方
+class _CoopNet {
+  final ApiClient api;
+  final void Function(Map<String, dynamic>) onMsg;
+  final VoidCallback onChanged;
+  WebSocketChannel? _ch;
+  StreamSubscription? _sub;
+  bool connected = false;
+  bool _closed = false;
+  String? error;
+  String? waiting; // 自己開的房間號碼（等人加入中）
+  List<Map<String, dynamic>> rooms = [];
+  _CoopNet(this.api, {required this.onMsg, required this.onChanged});
+
+  Future<void> connect() async {
+    error = null;
+    onChanged();
+    try {
+      final (url, key, token) = await api.rogueCoopConnectInfo();
+      final ch = WebSocketChannel.connect(Uri.parse(url));
+      await ch.ready;
+      if (_closed) {
+        ch.sink.close();
+        return;
+      }
+      _ch = ch;
+      _sub = ch.stream.listen(_onRaw, onDone: _onDone, onError: (_) => _onDone());
+      send({'t': 'auth', 'key': key, 'token': token});
+      connected = true;
+    } on ApiException catch (e) {
+      error = e.message;
+    } catch (e) {
+      error = '連不上伺服器';
+    }
+    onChanged();
+  }
+
+  void _onDone() {
+    if (_closed) return;
+    connected = false;
+    waiting = null;
+    _ch = null;
+    error = '連線中斷了';
+    onMsg({'t': 'gone', 'msg': '連線中斷了'});
+    onChanged();
+  }
+
+  void _onRaw(dynamic raw) {
+    final m = jsonDecode(raw as String) as Map<String, dynamic>;
+    switch (m['t']) {
+      case 'lobby':
+        rooms = [for (final r in m['rooms'] as List) Map<String, dynamic>.from(r as Map)];
+        onChanged();
+      case 'waiting':
+        waiting = '${m['room']}';
+        onChanged();
+      case 'start':
+        waiting = null;
+      case 'err':
+        error = m['msg'] as String?;
+        onChanged();
+    }
+    onMsg(m);
+  }
+
+  void send(Map<String, dynamic> m) {
+    try {
+      _ch?.sink.add(jsonEncode(m));
+    } catch (_) {}
+  }
+
+  void relay(Map<String, dynamic> d) => send({'t': 'r', 'd': d});
+
+  void close() {
+    _closed = true;
+    _sub?.cancel();
+    _ch?.sink.close();
+  }
 }
