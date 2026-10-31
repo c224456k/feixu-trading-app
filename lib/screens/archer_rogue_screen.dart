@@ -68,7 +68,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   }
 
   Map<String, dynamic>? get _run => _state?['run'] as Map<String, dynamic>?;
-  int get _reviveCost => (_state?['revive_cost'] as num?)?.toInt() ?? 300;
+  int get _reviveCost => (_state?['revive_cost'] as num?)?.toInt() ?? 300; // 第一次復活的價格
+  int _nextCost = 300; // 這一局下一次復活的價格（每次 ×2，伺服器算）
 
   Future<void> _loadState() async {
     setState(() => _error = null);
@@ -78,6 +79,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       setState(() {
         _state = s;
         _crystals = (s['crystals'] as num?)?.toInt() ?? 0;
+        final run = s['run'] as Map<String, dynamic>?;
+        _nextCost = (run?['next_revive_cost'] as num?)?.toInt() ?? _reviveCost;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -91,6 +94,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     try {
       final r = await f();
       if (r['crystals'] != null) _crystals = (r['crystals'] as num).toInt();
+      if (r['next_revive_cost'] != null) _nextCost = (r['next_revive_cost'] as num).toInt();
       if (r['ok'] != true) {
         _toast(r['message']?.toString() ?? '失敗');
         return null;
@@ -113,6 +117,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     final r = await _call(_api.rogueStart);
     if (r == null) return _loadState();
     _runId = ((r['run'] as Map)['id'] as num).toInt();
+    _nextCost = _reviveCost;
     _g.newRun();
     _enterGame();
   }
@@ -131,7 +136,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     } else {
       _g.startChapter(ch, RgStats.fromJson(Map<String, dynamic>.from(stats as Map)));
     }
-    _g.revives = (run['revives'] as num).toInt() + ((r['paid'] as num?)?.toInt() ?? 0) ~/ _reviveCost;
+    _g.revives = (r['revives'] as num?)?.toInt() ?? (run['revives'] as num).toInt();
     _enterGame();
   }
 
@@ -322,8 +327,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                 '• 清完房間撿經驗、升級時三選一技能，技能整局累積\n'
                 '• 每關 4 個房間 + 頭目，共 $rgChapters 關，難度非常高\n'
                 '• 每天只能挑戰一局\n'
-                '• 死掉可以花 $_reviveCost 水晶原地滿血復活；不復活整局結束\n'
-                '• 打到一半關掉網頁，回來要花 $_reviveCost 水晶從那一關開頭重來',
+                '• 死掉可以花水晶原地滿血復活，同一局越復活越貴：$_reviveCost → ${_reviveCost * 2} → ${_reviveCost * 4} …（每次加倍）；不復活整局結束\n'
+                '• 打到一半關掉網頁，回來要花一次復活的水晶從那一關開頭重來（也算進加倍）',
                 style: const TextStyle(color: Colors.white70, height: 1.7),
               ),
               const SizedBox(height: 14),
@@ -335,7 +340,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                   children: [
                     const Text('💎', style: TextStyle(fontSize: 16)),
                     const SizedBox(width: 6),
-                    Text('水晶 $_crystals（可復活 ${_crystals ~/ _reviveCost} 次）', style: const TextStyle(color: Colors.white)),
+                    Text('水晶 ${_fmtMoney(_crystals)}', style: const TextStyle(color: Colors.white)),
                   ],
                 ),
               ),
@@ -355,7 +360,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                     onPressed: _busy ? null : _resumeRun,
                     icon: const Icon(Icons.play_arrow),
                     label: Text(run['in_chapter'] == true
-                        ? '繼續第 ${(run['cleared'] as num).toInt() + 1} 關（花 $_reviveCost 水晶重來這關）'
+                        ? '繼續第 ${(run['cleared'] as num).toInt() + 1} 關（花 ${_fmtMoney(_nextCost)} 水晶重來這關）'
                         : '繼續：第 ${(run['cleared'] as num).toInt() + 1} 關'),
                   ),
                 ),
@@ -622,7 +627,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
           ],
         ));
       case RgPhase.dead:
-        final canRevive = _crystals >= _reviveCost;
+        final canRevive = _crystals >= _nextCost;
         return _dim(Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -632,9 +637,11 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
             Text('第 ${_g.chapter + 1} 關 ${_g.isBossRoom ? '頭目房' : '第 ${_g.room + 1} 間'}・被 ${_g.lastHitBy ?? '?'} 打倒',
                 style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 4),
-            Text('💎 水晶 $_crystals・這局已復活 ${_g.revives} 次', style: const TextStyle(color: Colors.lightBlueAccent)),
+            Text('💎 水晶 ${_fmtMoney(_crystals)}・這局已復活 ${_g.revives} 次', style: const TextStyle(color: Colors.lightBlueAccent)),
             const SizedBox(height: 18),
-            _asyncButton(canRevive ? '💎 花 $_reviveCost 水晶原地復活' : '水晶不足（要 $_reviveCost）', canRevive ? _revive : null),
+            _asyncButton(canRevive ? '💎 花 ${_fmtMoney(_nextCost)} 水晶原地復活' : '水晶不足（要 ${_fmtMoney(_nextCost)}）', canRevive ? _revive : null),
+            const SizedBox(height: 4),
+            Text('下一次復活會變成 ${_fmtMoney(_nextCost * 2)}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
             const SizedBox(height: 10),
             _asyncButton('🏳️ 放棄（今天的挑戰結束）', () async {
               final ok = await showDialog<bool>(
