@@ -352,7 +352,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       case 's':
         if (_side == 1) _g.applySnap(d['s'] as Map<String, dynamic>);
       case 'in':
-        if (_side == 0) _g.setRemote(1, _n(d['x']), _n(d['y']), _n(d['fx']), _n(d['fy']), d['mv'] == 1);
+        if (_side == 0) _g.setRemote(1, _n(d['x']), _n(d['y']), _n(d['fx']), _n(d['fy']), d['mv'] == 1, seq: (d['q'] as num?)?.toInt());
       case 'pick':
         // n = 客人選之前的技能總數，避免同一次選擇（網路重送／畫面還沒更新又點一次）算兩次
         if (_side == 0 && _skillCount(_g.heroes[1]) == (d['n'] as num).toInt()) _g.chooseFor(1, d['id'] as String);
@@ -394,7 +394,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
         final p = _g.me;
         if (_frame % 2 == 0 && _g.phase == RgPhase.play && !p.down) {
           double r2(double v) => (v * 100).roundToDouble() / 100;
-          _net?.relay({'k': 'in', 'x': r2(p.x), 'y': r2(p.y), 'fx': r2(p.faceX), 'fy': r2(p.faceY), 'mv': p.moving ? 1 : 0});
+          _net?.relay({'k': 'in', 'x': r2(p.x), 'y': r2(p.y), 'fx': r2(p.faceX), 'fy': r2(p.faceY), 'mv': p.moving ? 1 : 0, 'q': _g.roomSeq});
         }
       }
     }

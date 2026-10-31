@@ -676,10 +676,10 @@ const _types = {
 // 各關頭目：type、名稱、美術、會飛、半徑、血量
 const _bosses = [
   ('B1', '史萊姆王', 0, false, 0.85, 4300.0),
-  ('B2', '狼王', 4, false, 0.8, 4200.0),
-  ('B3', '骷髏王', 3, false, 0.8, 4400.0),
-  ('B4', '熔岩魔像', 7, false, 0.95, 6200.0),
-  ('B5', '魔龍', 8, true, 0.95, 5600.0),
+  ('B2', '狼王', 4, false, 0.8, 4800.0),
+  ('B3', '骷髏王', 3, false, 0.8, 5000.0),
+  ('B4', '熔岩魔像', 7, false, 0.95, 6800.0),
+  ('B5', '魔龍', 8, true, 0.95, 6400.0),
 ];
 
 class RgGame {
@@ -1470,6 +1470,7 @@ class RgGame {
 
   // ---------------- 子彈 ----------------
   void _shoot(RgEnemy e, double a, double speed, double dmg, {double r = 0.14, int style = 1, bool split = false, double life = 7}) {
+    if (e.boss) speed *= 1 + 0.06 * tier; // 後面的頭目子彈比較快
     bl.add(RgBullet(e.x + math.cos(a) * e.r * 0.6, e.y + math.sin(a) * e.r * 0.6, math.cos(a) * speed, math.sin(a) * speed,
         r, dmg, false,
         style: style, split: split, life: life));
@@ -1655,7 +1656,9 @@ class RgGame {
             e.ang = _aim(e);
           }
         } else if (e.t > 0.6) {
-          if (c >= 2 || e.elite) {
+          if (tier >= 3) {
+            _fan(e, 5, 0.7, 6.0, e.bdmg, at: e.ang);
+          } else if (c >= 2 || e.elite) {
             _fan(e, 3, 0.4, 6.0, e.bdmg, at: e.ang);
           } else {
             _shoot(e, e.ang, 6.0, e.bdmg);
@@ -1673,14 +1676,17 @@ class RgGame {
           if (e.t > 0.55) _setSt(e, 2);
         } else {
           final blocked = _move(e, math.cos(e.ang) * 8.5 * spd * dt, math.sin(e.ang) * 8.5 * spd * dt, e.r, false);
-          if (blocked || e.t > 0.45) _setSt(e, 0);
+          if (blocked || e.t > 0.45) {
+            if (tier >= 3) _fan(e, 3, 0.5, 4.5, e.bdmg); // 最後幾關：衝完回頭咬一口
+            _setSt(e, 0);
+          }
         }
       case 'k':
         if (e.st == 0) {
           _chase(e, e.speed * spd, dt);
           if (e.t > 2.0) _setSt(e, 1);
         } else if (e.t > 0.4) {
-          _fan(e, c >= 3 ? 5 : 3, c >= 3 ? 0.8 : 0.4, 4.5, e.bdmg);
+          _fan(e, (c >= 3 ? 5 : 3) + (tier >= 2 ? 2 : 0), c >= 3 ? 0.8 : 0.4, 4.5, e.bdmg);
           _setSt(e, 0);
         }
       case 'm':
@@ -1689,6 +1695,7 @@ class RgGame {
           if (e.t > 2.4) _setSt(e, 1);
         } else if (e.t > 0.5) {
           _ring(e, c >= 3 ? 12 : 10, 3.0, e.bdmg, off: rng.nextDouble());
+          if (tier >= 3) _fan(e, 3, 0.35, 5.0, e.bdmg, style: 2);
           _teleport(e);
           _setSt(e, 0);
         }
@@ -1697,7 +1704,8 @@ class RgGame {
           _chase(e, e.speed * spd, dt);
           if (e.t > 3.2) _setSt(e, 1);
         } else if (e.t > 0.7) {
-          _ring(e, 14, 3.6, e.bdmg, off: rng.nextDouble());
+          _ring(e, tier >= 2 ? 18 : 14, 3.6, e.bdmg, off: rng.nextDouble());
+          if (tier >= 3) _fan(e, 3, 0.4, 5.0, e.bdmg);
           _setSt(e, 0);
         }
       case 'g':
@@ -1705,7 +1713,13 @@ class RgGame {
           _chase(e, e.speed * spd, dt);
           if (e.t > 2.6) _setSt(e, 1);
         } else if (e.t > 0.5) {
-          _shoot(e, _aim(e), 3.0, e.bdmg, r: 0.32, style: 3, split: true, life: 1.5);
+          if (tier >= 3) {
+            for (final k in [-0.25, 0.25]) {
+              _shoot(e, _aim(e) + k, 3.0, e.bdmg, r: 0.32, style: 3, split: true, life: 1.5);
+            }
+          } else {
+            _shoot(e, _aim(e), 3.0, e.bdmg, r: 0.32, style: 3, split: true, life: 1.5);
+          }
           _setSt(e, 0);
         }
       case 'd':
@@ -1720,7 +1734,7 @@ class RgGame {
         } else if (e.t > 0.22 * e.combo) {
           _fan(e, 5, 0.9, 4.2, e.bdmg, style: 2);
           e.combo++;
-          if (e.combo >= 3) _setSt(e, 0);
+          if (e.combo >= (tier >= 2 ? 4 : 3)) _setSt(e, 0);
         }
       case 'f':
         if (e.st == 0) {
@@ -1733,7 +1747,11 @@ class RgGame {
             e.combo = 0;
           }
         } else if (e.t > 0.4 + 0.15 * e.combo) {
-          _shoot(e, _aim(e), 6.5, e.bdmg, style: 4);
+          if (tier >= 2) {
+            _fan(e, 3, 0.3, 6.5, e.bdmg, style: 4);
+          } else {
+            _shoot(e, _aim(e), 6.5, e.bdmg, style: 4);
+          }
           e.combo++;
           if (e.combo >= 3) _setSt(e, 0);
         }
@@ -1816,18 +1834,19 @@ class RgGame {
     switch (e.st) {
       case 0:
         _wanderMove(e, 0.8 * spd, dt);
-        if (e.t > 0.8) {
+        if (e.t > (frac < 0.5 ? 0.45 : 0.65)) {
           _setSt(e, 1);
           e.ang = _aim(e);
         }
       case 1:
-        if (e.t > (frac < 0.5 ? 0.32 : 0.42)) _setSt(e, 2);
+        if (e.t > (frac < 0.5 ? 0.3 : 0.4)) _setSt(e, 2);
       case 2:
-        final blocked = _move(e, math.cos(e.ang) * 10 * spd * dt, math.sin(e.ang) * 10 * spd * dt, e.r, false);
+        final blocked = _move(e, math.cos(e.ang) * 10.5 * spd * dt, math.sin(e.ang) * 10.5 * spd * dt, e.r, false);
         if (blocked || e.t > 0.42) {
           if (blocked && frac < 0.5) _ring(e, 10, 3.0, e.bdmg, off: rng.nextDouble());
+          _fan(e, frac < 0.5 ? 5 : 3, 0.7, 4.6, e.bdmg); // 每次衝完回頭吐一排
           e.combo++;
-          if (e.combo % 3 == 0) {
+          if (e.combo % (frac < 0.5 ? 4 : 3) == 0) {
             _setSt(e, 3);
           } else {
             _setSt(e, 1);
@@ -1837,6 +1856,7 @@ class RgGame {
       case 3:
         if (e.t > 0.6) {
           _ring(e, 14, 3.4, e.bdmg, off: rng.nextDouble());
+          if (frac < 0.5) _ring(e, 14, 2.4, e.bdmg, off: rng.nextDouble());
           if (_alive('b') < 4) _summonAt('b', e, 2);
           _setSt(e, 0);
         }
@@ -1850,7 +1870,7 @@ class RgGame {
     if (e.st == 0) {
       _wanderMove(e, 0.6 * spd, dt);
       if (e.y > 6) e.ang = -math.pi / 2;
-      if (e.t > 1.5) _setSt(e, 1); // 休息久一點，給玩家輸出空檔
+      if (e.t > (frac < 0.5 ? 0.8 : 1.1)) _setSt(e, 1); // 休息一下，給玩家輸出空檔
       return;
     }
     if (p == 0) {
@@ -1860,18 +1880,19 @@ class RgGame {
       if (n > e.summons) {
         e.summons = n;
         final a = e.t * 2.3;
-        _shoot(e, a, 3.0, e.bdmg, style: 2);
-        _shoot(e, a + math.pi, 3.0, e.bdmg, style: 2);
+        _shoot(e, a, 3.2, e.bdmg, style: 2);
+        _shoot(e, a + math.pi, 3.2, e.bdmg, style: 2);
         if (frac < 0.5) _shoot(e, -a + math.pi / 2, 2.6, e.bdmg, style: 2);
+        if (n % 6 == 0) _shoot(e, _aim(e), 5.0, e.bdmg); // 螺旋中夾著瞄準你的箭
       }
       if (e.t > 3.2) _endPattern(e);
     } else if (p == 1) {
       final n = (e.t / 0.45).floor();
       if (n > e.summons) {
         e.summons = n;
-        _fan(e, 7, 1.0, 4.0, e.bdmg);
+        _fan(e, frac < 0.5 ? 9 : 7, frac < 0.5 ? 1.3 : 1.0, 4.2, e.bdmg, at: _aim(e) + (n.isOdd ? 0.12 : -0.12));
       }
-      if (e.t > 0.45 * 4.5) _endPattern(e);
+      if (e.t > 0.45 * 5.5) _endPattern(e);
     } else {
       if (e.t > 0.5) {
         _ring(e, 12, 3.2, e.bdmg, off: rng.nextDouble());
@@ -1896,16 +1917,16 @@ class RgGame {
     final p = e.combo % 3;
     if (e.st == 0) {
       _chase(e, 0.5 * spd, dt);
-      if (e.t > (frac < 0.5 ? 0.7 : 1.1)) _setSt(e, p == 1 ? 3 : 1);
+      if (e.t > (frac < 0.5 ? 0.6 : 0.95)) _setSt(e, p == 1 ? 3 : 1);
       return;
     }
     if (p == 0) {
-      final n = (e.t / 0.7).floor();
+      final n = (e.t / 0.6).floor();
       if (n > e.summons) {
         e.summons = n;
-        _shoot(e, _aim(e) + (rng.nextDouble() - 0.5) * 0.3, 3.2, e.bdmg, r: 0.34, style: 3, split: true, life: 1.4);
+        _shoot(e, _aim(e) + (rng.nextDouble() - 0.5) * 0.4, 3.3, e.bdmg, r: 0.34, style: 3, split: true, life: 1.4);
       }
-      if (e.t > 0.7 * 3.5) _endPattern(e);
+      if (e.t > 0.6 * 4.5) _endPattern(e);
     } else if (p == 1) {
       // st 3 = 蓄力
       if (e.st == 3 && e.t > 0.8) {
@@ -1939,11 +1960,12 @@ class RgGame {
     }
     if (rage) {
       e.tx += dt;
-      if (e.tx > 0.36) {
+      if (e.tx > 0.3) {
         e.tx = 0;
         e.ty += 0.5;
-        _shoot(e, e.ty, 2.4, e.bdmg * 0.8, style: 4);
-        _shoot(e, e.ty + math.pi, 2.4, e.bdmg * 0.8, style: 4);
+        for (var i = 0; i < 3; i++) {
+          _shoot(e, e.ty + i * 2 * math.pi / 3, 2.4, e.bdmg * 0.8, style: 4);
+        }
       }
     }
     final p = e.combo % 3;
@@ -1952,7 +1974,7 @@ class RgGame {
         final a = _aim(e) + math.sin(time * 1.5) * 1.3;
         final far = _d2(e.x, e.y, px, py) > 16;
         _move(e, math.cos(a) * (far ? 1.2 : -0.6) * spd * dt, math.sin(a) * (far ? 1.2 : -0.6) * spd * dt, e.r, true);
-        if (e.t > (rage ? 0.6 : 1.0)) {
+        if (e.t > (rage ? 0.45 : 0.8)) {
           e.summons = 0;
           _setSt(e, p == 2 ? 5 : p + 1);
           if (p == 2) e.ang = _aim(e);
@@ -1961,7 +1983,7 @@ class RgGame {
         final n = (e.t / 0.5).floor();
         if (n > e.summons) {
           e.summons = n;
-          _fan(e, 9, 1.3, 4.2, e.bdmg, style: 4);
+          _fan(e, rage ? 11 : 9, rage ? 1.6 : 1.3, 4.4, e.bdmg, style: 4, at: _aim(e) + (n.isOdd ? 0.1 : -0.1));
         }
         if (e.t > 0.5 * 3.5) _endPattern(e);
       case 2: // 旋轉環 5 波
@@ -1970,7 +1992,7 @@ class RgGame {
           e.summons = n;
           _ring(e, 16, 3.0, e.bdmg, off: n * 0.12);
         }
-        if (e.t > 0.35 * 5.5) _endPattern(e);
+        if (e.t > 0.35 * 6.5) _endPattern(e);
       case 5: // 衝刺蓄力
         if (e.t > 0.6) _setSt(e, 6);
       case 6:
@@ -1978,7 +2000,7 @@ class RgGame {
         if (blocked || e.t > 0.55) {
           _ring(e, 12, 3.4, e.bdmg, off: rng.nextDouble(), style: 4);
           e.summons++;
-          if (e.summons >= 2) {
+          if (e.summons >= (rage ? 3 : 2)) {
             _endPattern(e);
           } else {
             _setSt(e, 5);
@@ -1994,10 +2016,10 @@ class RgGame {
 
   static double _r2(double v) => (v * 100).roundToDouble() / 100;
 
-  /// 客人回報自己的位置
-  void setRemote(int i, double x, double y, double fx, double fy, bool mv) {
+  /// seq：客人那時看到的房間編號；換房間後才到的舊位置（還在上一間的門口）不收，不然會出生在上面
+  void setRemote(int i, double x, double y, double fx, double fy, bool mv, {int? seq}) {
     final p = heroes[i];
-    if (p.down || phase != RgPhase.play) return;
+    if (p.down || phase != RgPhase.play || seq != null && seq != roomSeq) return;
     if (circleBlocked(x, y, pr * 0.8)) return; // 擋在牆裡的就不收
     p.x = x;
     p.y = y;
