@@ -143,7 +143,8 @@ class RgBullet {
   int pierce, rico, wall;
   final Set<RgEnemy> hit = {};
   bool split;
-  int style; // 0 箭 1 紅球 2 紫球 3 大石 4 火球
+  int style; // 0 箭 1 紅球 2 紫球 3 大石 4 火球 5 幽靈彈（穿牆）
+  bool get ghost => style == 5;
   int owner; // 箭是哪位玩家射的（合作模式）
   int id = 0; // 合作模式傳畫面時才編號，客人端用來對應同一顆子彈
   RgBullet(this.x, this.y, this.vx, this.vy, this.r, this.dmg, this.mine,
@@ -1249,11 +1250,13 @@ class RgGame {
       return;
     }
     if (room == rgRoomsPerChapter - 2 && !angelDone) {
+      // 頭目房前：每人送一次技能三選一（原本天使可選回血，沒人選，拿掉了）
       angelDone = true;
       for (final p in heroes) {
-        p.needAngel = true;
+        p.pendingPicks++;
       }
-      phase = RgPhase.angel;
+      loadRoom(room + 1);
+      _openPick();
       return;
     }
     loadRoom(room + 1);
@@ -1308,7 +1311,6 @@ class RgGame {
     final s = p.st;
     final pool = rgSkillDefs.where((d) => s.lv(d.id) < d.max && d.id != 'heal').map((d) => d.id).toList()..shuffle(rng);
     p.offer = pool.take(3).toList();
-    if (s.hp < s.maxHp * 0.5 && p.offer.length == 3 && rng.nextDouble() < 0.5) p.offer[2] = 'heal';
     if (p.offer.isEmpty) p.offer = ['heal'];
   }
 
@@ -1509,7 +1511,7 @@ class RgGame {
         continue;
       }
       final nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
-      if (circleBlocked(nx, ny, b.r * 0.6, bullet: true)) {
+      if (circleBlocked(nx, ny, b.r * 0.6, bullet: true, fly: b.ghost)) {
         if (b.mine && b.wall > 0) {
           b.wall--;
           if (circleBlocked(nx, b.y, b.r * 0.6, bullet: true)) b.vx = -b.vx;
@@ -1694,7 +1696,7 @@ class RgGame {
           _wanderMove(e, e.speed * spd, dt);
           if (e.t > 2.4) _setSt(e, 1);
         } else if (e.t > 0.5) {
-          _ring(e, c >= 3 ? 12 : 10, 3.0, e.bdmg, off: rng.nextDouble());
+          _ring(e, c >= 3 ? 12 : 10, 3.0, e.bdmg, off: rng.nextDouble(), style: 5); // 法師的彈會穿牆
           if (tier >= 3) _fan(e, 3, 0.35, 5.0, e.bdmg, style: 2);
           _teleport(e);
           _setSt(e, 0);
@@ -1883,7 +1885,7 @@ class RgGame {
         _shoot(e, a, 3.2, e.bdmg, style: 2);
         _shoot(e, a + math.pi, 3.2, e.bdmg, style: 2);
         if (frac < 0.5) _shoot(e, -a + math.pi / 2, 2.6, e.bdmg, style: 2);
-        if (n % 6 == 0) _shoot(e, _aim(e), 5.0, e.bdmg); // 螺旋中夾著瞄準你的箭
+        if (n % 6 == 0) _shoot(e, _aim(e), 5.0, e.bdmg, style: 5); // 螺旋中夾著瞄準你的穿牆彈
       }
       if (e.t > 3.2) _endPattern(e);
     } else if (p == 1) {
@@ -2195,7 +2197,7 @@ class RgGame {
       ids.add(id);
       if (_deadB.contains(id)) continue;
       var tx = _d(a[0]) + vx * age, ty = _d(a[1]) + vy * age;
-      if (circleBlocked(tx, ty, _d(a[4]) * 0.6, bullet: true)) {
+      if (circleBlocked(tx, ty, _d(a[4]) * 0.6, bullet: true, fly: a[5] == 5)) {
         tx = _d(a[0]);
         ty = _d(a[1]);
       }
@@ -2331,7 +2333,7 @@ class RgGame {
     }
     bl.removeWhere((b) {
       final nx = b.x + b.vx * dt, ny = b.y + b.vy * dt;
-      if (circleBlocked(nx, ny, b.r * 0.6, bullet: true)) {
+      if (circleBlocked(nx, ny, b.r * 0.6, bullet: true, fly: b.ghost)) {
         if (b.mine) return false; // 自己的箭可能會反彈，交給房主的畫面
         _deadB.add(b.id);
         return true;

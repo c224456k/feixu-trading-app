@@ -1848,6 +1848,7 @@ class _ArenaPainter extends CustomPainter {
         2 => (const Color(0xFFEA80FC), const Color(0xFFAA00FF)),
         3 => (const Color(0xFF8D6E63), const Color(0xFFFF6D00)),
         4 => (const Color(0xFFFFE082), const Color(0xFFFF3D00)),
+        5 => (const Color(0xFFE0F7FA), const Color(0xFF00E5FF)),
         _ => (const Color(0xFFFF8A80), const Color(0xFFFF1744)),
       };
       if (b.style == 4 || b.style == 3) {
@@ -1859,6 +1860,13 @@ class _ArenaPainter extends CustomPainter {
       c.drawCircle(o, r * 1.9 * pulse, Paint()..color = glow.withValues(alpha: 0.18));
       c.drawCircle(o, r * 1.35, Paint()..color = glow.withValues(alpha: 0.55));
       c.drawCircle(o, r, Paint()..color = core);
+      if (b.style == 5) {
+        // 穿牆彈：外面多一圈虛線般的亮框，一眼看得出不一樣
+        c.drawCircle(o, r * 1.6 * pulse, Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = r * 0.3
+          ..color = Colors.white.withValues(alpha: 0.7));
+      }
       c.drawCircle(o - Offset(r * 0.3, r * 0.3), r * 0.38, Paint()..color = Colors.white.withValues(alpha: 0.85));
     }
   }
