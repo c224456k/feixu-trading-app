@@ -26,6 +26,17 @@ class _Floater {
   _Floater(this.text, this.good, this.x, this.y, this.size);
 }
 
+class _Part {
+  double x, y, vx, vy, life;
+  final double max;
+  final Color color;
+  final double size;
+  _Part(this.x, this.y, this.vx, this.vy, this.max, this.color, this.size) : life = max;
+}
+
+const _monBody = [Color(0xFF558B2F), Color(0xFFD84315), Color(0xFF5E35B1), Color(0xFF37474F), Color(0xFF00897B)];
+const _monHead = [Color(0xFFAED581), Color(0xFFFFAB91), Color(0xFFB39DDB), Color(0xFF78909C), Color(0xFF80CBC4)];
+
 class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerProviderStateMixin {
   static const _saveKey = 'number_gate_unlocked_v1';
   static const _lead = 2.4;
@@ -50,6 +61,8 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
   double _shake = 0;
   double _bossFlash = 0;
   final List<_Floater> _floats = [];
+  final List<_Part> _parts = [];
+  final _rnd = math.Random(3);
   bool _over = false;
 
   @override
@@ -90,6 +103,7 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
     _lead0 = _lead;
     _target = 0.5;
     _floats.clear();
+    _parts.clear();
     _hitFlash = _shake = _bossFlash = 0;
     _over = false;
     setState(() => _inGame = true);
@@ -110,6 +124,13 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
       f.y -= dt * 0.12;
     }
     _floats.removeWhere((f) => f.t > 0.9);
+    for (final p in _parts) {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy -= 1.2 * dt; // 往玩家方向掉
+    }
+    _parts.removeWhere((p) => p.life <= 0);
     if (_keyDir != 0) _target = (_target + _keyDir * dt * 1.5).clamp(0.0, 1.0);
     if (_lead0 > 0) {
       _lead0 -= dt;
@@ -144,7 +165,15 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
           _hitFlash = 0.2;
           _shake = 0.2;
         case 'kill':
-          if (_floats.length < 40) _floats.add(_Floater('✦', true, e.x, 0.84 - e.y / ngH * 0.74, 22));
+          if (_parts.length < 220) {
+            final kind = int.tryParse(e.text) ?? 0;
+            final col = _monBody[kind];
+            for (var i = 0; i < 6; i++) {
+              final a = _rnd.nextDouble() * 2 * math.pi, v = 0.15 + _rnd.nextDouble() * 0.35;
+              _parts.add(_Part(e.x, e.y, math.cos(a) * v * 0.6, math.sin(a) * v, 0.35 + _rnd.nextDouble() * 0.3,
+                  i < 4 ? col : const Color(0xFFB71C1C), 2.0 + _rnd.nextDouble() * 3));
+            }
+          }
         case 'boss':
           _floats.add(_Floater(e.text, true, 0.5, 0.3, 30));
           _bossFlash = 0.5;
@@ -313,8 +342,6 @@ class _GatePainter extends CustomPainter {
   final _NumberGateScreenState s;
   _GatePainter(this.s, Listenable repaint) : super(repaint: repaint);
 
-  static const _monEmoji = ['🐛', '🐀', '🧌', '🦇', '🐙'];
-
   @override
   void paint(Canvas c, Size size) {
     final sim = s._sim;
@@ -330,28 +357,38 @@ class _GatePainter extends CustomPainter {
     c.save();
     if (s._shake > 0) c.translate(math.sin(s._clock * 90) * 4 * s._shake / 0.3, math.cos(s._clock * 77) * 3 * s._shake / 0.3);
 
-    // 背景（沒有格子）：漸層天空 + 路 + 往下流動的光點
+    // 背景（沒有格子）：夜空 + 馬路 + 流動的紅白護欄 + 暗角
     c.drawRect(
         Offset.zero & size,
         Paint()
-          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1A1040), Color(0xFF0E1F3D), Color(0xFF0A1A2A)])
+          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF241047), Color(0xFF16254A), Color(0xFF0C1B2E)])
               .createShader(Offset.zero & size));
     final road = Rect.fromLTWH(left, 0, roadW, size.height);
     c.drawRect(
         road,
         Paint()
-          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00FFFFFF), Color(0x14FFFFFF)])
+          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B3347), Color(0xFF3A4560)])
               .createShader(road));
-    final edge = Paint()
-      ..color = const Color(0xFF7C4DFF).withValues(alpha: 0.25)
-      ..strokeWidth = 3;
-    c.drawLine(Offset(left, 0), Offset(left, size.height), edge);
-    c.drawLine(Offset(left + roadW, 0), Offset(left + roadW, size.height), edge);
-    final flow = (sim.sc * 0.45) % 1.0;
+    // 路面的淡淡反光
+    c.drawRect(
+        Rect.fromLTWH(left + roadW * 0.3, 0, roadW * 0.4, size.height),
+        Paint()
+          ..shader = LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [Colors.white.withValues(alpha: 0), Colors.white.withValues(alpha: 0.05), Colors.white.withValues(alpha: 0)])
+              .createShader(Rect.fromLTWH(left + roadW * 0.3, 0, roadW * 0.4, size.height)));
+    // 護欄
+    final off = (sim.t * 150) % 104;
+    final bi = (sim.t * 150) ~/ 104;
+    for (var k = -2; k * 52 - 104 + off < size.height; k++) {
+      final y0 = k * 52 - 104 + off;
+      final red = (k + bi) % 2 == 0;
+      final col = red ? const Color(0xFFE53935) : const Color(0xFFECEFF1);
+      c.drawRect(Rect.fromLTWH(left - 10, y0, 10, 52), Paint()..color = col);
+      c.drawRect(Rect.fromLTWH(left + roadW, y0, 10, 52), Paint()..color = col);
+    }
     final srng = math.Random(11);
-    for (var i = 0; i < 40; i++) {
-      final px = srng.nextDouble(), py = (srng.nextDouble() + flow * (0.5 + srng.nextDouble())) % 1.0;
-      c.drawCircle(Offset(left + px * roadW, py * size.height), 1.2 + srng.nextDouble() * 1.4, Paint()..color = Colors.white.withValues(alpha: 0.05 + 0.1 * py));
+    for (var i = 0; i < 26; i++) {
+      final px = srng.nextDouble(), py = (srng.nextDouble() + sim.t * 0.25 * (0.5 + srng.nextDouble())) % 1.0;
+      c.drawCircle(Offset(left + px * roadW, py * size.height), 1.2 + srng.nextDouble() * 1.2, Paint()..color = Colors.white.withValues(alpha: 0.04 + 0.08 * py));
     }
 
     // 頭目預告的攻擊柱
@@ -420,27 +457,33 @@ class _GatePainter extends CustomPainter {
       _text(c, ngOpLabel(ld.rop, g.rv), rrect.center, 44 * k, bold: true);
     }
 
-    // 怪
+    // 怪（由遠到近畫）
     final mons = List.of(sim.mons)..sort((a, b) => b.y.compareTo(a.y));
     for (final m in mons) {
       final y = Y(m.y);
-      if (y < -40 || y > size.height + 40) continue;
+      if (y < -50 || y > size.height + 50) continue;
       final k = sc(m.y);
-      final r = m.r * roadW * k;
+      final r = m.r * roadW * k * 1.25;
       final x = X(m.x);
-      c.drawOval(Rect.fromCenter(center: Offset(x, y + r * 0.9), width: r * 2.2, height: r * 0.7), Paint()..color = Colors.black38);
-      _text(c, _monEmoji[m.kind], Offset(x, y), r * 2.3);
-      final frac = (m.hp / m.maxHp).clamp(0.0, 1.0);
-      final bw = r * 2.0;
-      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.45, bw, 5), const Radius.circular(3)), Paint()..color = Colors.black54);
-      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.45, bw * frac, 5), const Radius.circular(3)),
-          Paint()..color = Color.lerp(const Color(0xFFFF5252), const Color(0xFF69F0AE), frac)!);
-      _text(c, ngFmt(m.hp.ceil()), Offset(x, y - r * 1.45 - 10), 12 + 2 * k, bold: true);
+      _zombie(c, x, y, r, m.kind, m.id * 0.7);
+      if (m.kind == 2 || m.kind == 4) {
+        final frac = (m.hp / m.maxHp).clamp(0.0, 1.0);
+        final bw = r * 2.2;
+        c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.9, bw, 6), const Radius.circular(3)), Paint()..color = Colors.black54);
+        c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.9, bw * frac, 6), const Radius.circular(3)),
+            Paint()..color = Color.lerp(const Color(0xFFFF5252), const Color(0xFF69F0AE), frac)!);
+        _text(c, ngFmt(m.hp.ceil()), Offset(x, y - r * 1.9 - 10), 12 + 2 * k, bold: true);
+      }
     }
     for (final b in sim.buls) {
       final y = Y(b.y);
-      c.drawCircle(Offset(X(b.x), y), 7, Paint()..color = const Color(0xFFFF8A80).withValues(alpha: 0.4));
-      c.drawCircle(Offset(X(b.x), y), 4.5, Paint()..color = const Color(0xFFFF1744));
+      c.drawCircle(Offset(X(b.x), y), 8, Paint()..color = const Color(0xFFFF8A80).withValues(alpha: 0.4));
+      c.drawCircle(Offset(X(b.x), y), 5, Paint()..color = const Color(0xFFFF1744));
+    }
+    // 噴血／碎片
+    for (final p in s._parts) {
+      final a = (p.life / p.max).clamp(0.0, 1.0);
+      c.drawCircle(Offset(X(p.x), Y(p.y)), p.size * (0.5 + 0.5 * a), Paint()..color = p.color.withValues(alpha: a));
     }
 
     // 頭目
@@ -448,7 +491,7 @@ class _GatePainter extends CustomPainter {
       final y = Y(boss.y);
       final r = roadW * 0.28;
       c.drawOval(Rect.fromCenter(center: Offset(X(0.5), y + r * 0.8), width: r * 2.4, height: r * 0.6), Paint()..color = Colors.black45);
-      _text(c, boss.def.emoji, Offset(X(0.5), y), r * 1.9);
+      _bossBody(c, X(0.5), y, r, boss.def.emoji.codeUnitAt(0) % 3, boss.stopped);
       if (s._bossFlash > 0) c.drawCircle(Offset(X(0.5), y), r, Paint()..color = Colors.white.withValues(alpha: 0.25));
       final bar = Rect.fromLTWH(left + 14, 14, roadW - 28, 18);
       c.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(9)), Paint()..color = Colors.black54);
@@ -465,7 +508,7 @@ class _GatePainter extends CustomPainter {
     final px = X(sim.px);
     final cw = sim.crowdW * roadW;
     if (sim.result == 0 && s._lead0 <= 0) {
-      final endY = sim.fireTargetY >= 0 ? Y(sim.fireTargetY) + 10 : -10.0;
+      final endY = sim.fireTargetY >= 0 ? Y(sim.fireTargetY) + 10 : Y(ngRange);
       final n = math.min(10, 2 + sim.count ~/ 8);
       final phase = (s._clock * 16) % 1.0;
       for (var b = 0; b < n; b++) {
@@ -486,32 +529,28 @@ class _GatePainter extends CustomPainter {
       }
     }
 
-    // 隊伍
+    // 隊伍：一個個小士兵（有頭盔、有槍）
     final shown = math.max(0, sim.count);
-    final dots = math.min(shown, 70);
+    final dots = math.min(shown, 90);
     final rng = math.Random(5);
     final hit = s._hitFlash > 0;
-    final depth = 14 + math.sqrt(dots.toDouble()) * 7;
-    for (var i = 0; i < dots; i++) {
-      final dx = (rng.nextDouble() - 0.5) * (cw - 12);
-      final dy = rng.nextDouble() * depth;
-      final cx = px + dx, cy = playerY + dy;
-      c.drawCircle(Offset(cx, cy), 6.5, Paint()..color = hit ? const Color(0xFFFF8A80) : const Color(0xFF29B6F6));
-      c.drawCircle(Offset(cx - 2, cy - 2), 2.2, Paint()..color = Colors.white.withValues(alpha: 0.85));
-      if (dy < depth * 0.35) {
-        c.drawRect(Rect.fromCenter(center: Offset(cx + 5, cy - 8), width: 3, height: 10), Paint()..color = const Color(0xFF263238));
-      }
+    final depth = 16 + math.sqrt(dots.toDouble()) * 8;
+    final pts = <Offset>[
+      for (var i = 0; i < dots; i++) Offset((rng.nextDouble() - 0.5) * (cw - 16), rng.nextDouble() * depth),
+    ]..sort((a, b) => a.dy.compareTo(b.dy));
+    for (final q in pts) {
+      _soldier(c, px + q.dx, playerY + q.dy, hit, q.dy < depth * 0.5 && sim.result == 0 && s._lead0 <= 0, q.dx);
     }
     final label = ngFmt(shown);
-    final pill = Rect.fromCenter(center: Offset(px, playerY + depth + 28), width: 20.0 + label.length * 17, height: 34);
-    c.drawRRect(RRect.fromRectAndRadius(pill, const Radius.circular(17)), Paint()..color = const Color(0xFF0D47A1).withValues(alpha: 0.9));
+    final pill = Rect.fromCenter(center: Offset(px, playerY + depth + 34), width: 24.0 + label.length * 17, height: 36);
+    c.drawRRect(RRect.fromRectAndRadius(pill, const Radius.circular(18)), Paint()..color = const Color(0xFF0D47A1).withValues(alpha: 0.92));
     c.drawRRect(
-        RRect.fromRectAndRadius(pill, const Radius.circular(17)),
+        RRect.fromRectAndRadius(pill, const Radius.circular(18)),
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2
           ..color = const Color(0xFF82B1FF));
-    _text(c, label, pill.center, 22, bold: true, outline: false);
+    _text(c, label, pill.center, 24, bold: true, outline: false);
 
     // 飄字
     for (final f in s._floats) {
@@ -534,6 +573,111 @@ class _GatePainter extends CustomPainter {
     final prog = boss != null ? 1.0 : (sim.sc / lv.length).clamp(0.0, 1.0);
     c.drawRect(Rect.fromLTWH(0, 0, size.width, 5), Paint()..color = Colors.white10);
     c.drawRect(Rect.fromLTWH(0, 0, size.width * prog, 5), Paint()..color = Colors.amberAccent);
+  }
+
+  void _soldier(Canvas c, double cx, double cy, bool hit, bool firing, double seed) {
+    final body = hit ? const Color(0xFFFF8A80) : const Color(0xFF1E88E5);
+    // 腳
+    c.drawRect(Rect.fromLTWH(cx - 4, cy + 7, 3, 5), Paint()..color = const Color(0xFF263238));
+    c.drawRect(Rect.fromLTWH(cx + 1, cy + 7, 3, 5), Paint()..color = const Color(0xFF263238));
+    // 身體
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(cx, cy + 3), width: 10, height: 11), const Radius.circular(3)), Paint()..color = body);
+    // 槍
+    c.drawRect(Rect.fromLTWH(cx + 2, cy - 11, 3.2, 13), Paint()..color = const Color(0xFF37474F));
+    c.drawRect(Rect.fromLTWH(cx + 2, cy - 11, 1.2, 13), Paint()..color = const Color(0xFF90A4AE));
+    // 頭＋頭盔
+    c.drawCircle(Offset(cx - 0.5, cy - 4), 4.6, Paint()..color = const Color(0xFFFFCC80));
+    c.drawArc(Rect.fromCircle(center: Offset(cx - 0.5, cy - 4.5), radius: 5.2), math.pi, math.pi, true, Paint()..color = hit ? const Color(0xFFD84315) : const Color(0xFF0D47A1));
+    if (firing && ((s._clock * 30 + seed) % 1.0) < 0.55) {
+      c.drawCircle(Offset(cx + 3.6, cy - 13), 3.6, Paint()..color = const Color(0xFFFFF176).withValues(alpha: 0.95));
+      c.drawCircle(Offset(cx + 3.6, cy - 13), 6, Paint()..color = const Color(0xFFFFB300).withValues(alpha: 0.3));
+    }
+  }
+
+  /// 頭目：大怪物（身體、角、發光的眼睛、大嘴巴）
+  void _bossBody(Canvas c, double x, double y, double r, int style, bool angry) {
+    final base = const [Color(0xFF6A1B9A), Color(0xFFB71C1C), Color(0xFF1B5E20)][style];
+    final light = const [Color(0xFFAB47BC), Color(0xFFEF5350), Color(0xFF66BB6A)][style];
+    final bob = math.sin(s._clock * 3) * r * 0.04;
+    c.drawCircle(Offset(x, y + bob), r * 1.25, Paint()..color = base.withValues(alpha: 0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18));
+    // 手臂
+    c.drawCircle(Offset(x - r * 1.0, y + r * 0.35 + bob), r * 0.38, Paint()..color = base);
+    c.drawCircle(Offset(x + r * 1.0, y + r * 0.35 + bob), r * 0.38, Paint()..color = base);
+    // 身體
+    c.drawOval(Rect.fromCenter(center: Offset(x, y + r * 0.2 + bob), width: r * 2.1, height: r * 1.9), Paint()..color = base);
+    c.drawOval(Rect.fromCenter(center: Offset(x, y + r * 0.35 + bob), width: r * 1.4, height: r * 1.2), Paint()..color = light.withValues(alpha: 0.35));
+    // 角
+    final horn = Path()
+      ..moveTo(x - r * 0.75, y - r * 0.6 + bob)
+      ..lineTo(x - r * 1.0, y - r * 1.4 + bob)
+      ..lineTo(x - r * 0.3, y - r * 0.8 + bob)
+      ..close()
+      ..moveTo(x + r * 0.75, y - r * 0.6 + bob)
+      ..lineTo(x + r * 1.0, y - r * 1.4 + bob)
+      ..lineTo(x + r * 0.3, y - r * 0.8 + bob)
+      ..close();
+    c.drawPath(horn, Paint()..color = const Color(0xFFFFF8E1));
+    // 眼睛
+    final eye = Paint()..color = angry ? const Color(0xFFFF1744) : const Color(0xFFFFEE58);
+    c.drawCircle(Offset(x - r * 0.42, y - r * 0.12 + bob), r * 0.2, eye);
+    c.drawCircle(Offset(x + r * 0.42, y - r * 0.12 + bob), r * 0.2, eye);
+    c.drawCircle(Offset(x - r * 0.42, y - r * 0.12 + bob), r * 0.2, Paint()..color = eye.color.withValues(alpha: 0.35)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+    // 嘴
+    final mouth = Rect.fromCenter(center: Offset(x, y + r * 0.62 + bob), width: r * 1.1, height: r * 0.5 + (angry ? math.sin(s._clock * 8).abs() * r * 0.12 : 0));
+    c.drawRRect(RRect.fromRectAndRadius(mouth, Radius.circular(r * 0.2)), Paint()..color = const Color(0xFF1A0000));
+    for (var i = 0; i < 5; i++) {
+      final tx = mouth.left + mouth.width * (i + 0.5) / 5;
+      final t = Path()
+        ..moveTo(tx - r * 0.07, mouth.top)
+        ..lineTo(tx + r * 0.07, mouth.top)
+        ..lineTo(tx, mouth.top + r * 0.18)
+        ..close();
+      c.drawPath(t, Paint()..color = Colors.white);
+    }
+  }
+
+  void _zombie(Canvas c, double x, double y, double r, int kind, double ph) {
+    final bob = math.sin(s._clock * 9 + ph);
+    final body = _monBody[kind], head = _monHead[kind];
+    final dark = Paint()..color = const Color(0xFF263238);
+    c.drawOval(Rect.fromCenter(center: Offset(x, y + r * 1.25), width: r * 2.1, height: r * 0.6), Paint()..color = Colors.black38);
+    if (kind == 3) {
+      // 蝙蝠：兩片翅膀
+      final w = r * (1.6 + 0.5 * bob);
+      final path = Path()
+        ..moveTo(x, y - r * 0.2)
+        ..lineTo(x - w, y - r * 0.9)
+        ..lineTo(x - w * 0.7, y + r * 0.5)
+        ..close()
+        ..moveTo(x, y - r * 0.2)
+        ..lineTo(x + w, y - r * 0.9)
+        ..lineTo(x + w * 0.7, y + r * 0.5)
+        ..close();
+      c.drawPath(path, Paint()..color = body);
+      c.drawCircle(Offset(x, y), r * 0.6, Paint()..color = head);
+      c.drawCircle(Offset(x - r * 0.2, y - r * 0.05), r * 0.1, Paint()..color = const Color(0xFFFF1744));
+      c.drawCircle(Offset(x + r * 0.2, y - r * 0.05), r * 0.1, Paint()..color = const Color(0xFFFF1744));
+      return;
+    }
+    // 腿
+    c.drawRect(Rect.fromLTWH(x - r * 0.5, y + r * 0.55 + bob * r * 0.1, r * 0.38, r * 0.7), dark);
+    c.drawRect(Rect.fromLTWH(x + r * 0.12, y + r * 0.55 - bob * r * 0.1, r * 0.38, r * 0.7), dark);
+    // 手臂往前（往下）伸
+    final sw = bob * r * 0.12;
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - r * 0.95, y - r * 0.15 + sw, r * 0.3, r * 1.0), Radius.circular(r * 0.12)), Paint()..color = head);
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x + r * 0.65, y - r * 0.15 - sw, r * 0.3, r * 1.0), Radius.circular(r * 0.12)), Paint()..color = head);
+    // 身體
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(x, y + r * 0.2), width: r * 1.35, height: r * 1.3), Radius.circular(r * 0.3)), Paint()..color = body);
+    // 頭
+    c.drawCircle(Offset(x, y - r * 0.7), r * 0.66, Paint()..color = head);
+    c.drawCircle(Offset(x - r * 0.24, y - r * 0.78), r * 0.12, Paint()..color = const Color(0xFFD50000));
+    c.drawCircle(Offset(x + r * 0.24, y - r * 0.78), r * 0.12, Paint()..color = const Color(0xFFD50000));
+    c.drawRect(Rect.fromLTWH(x - r * 0.28, y - r * 0.45, r * 0.56, r * 0.1), dark);
+    if (kind == 2) {
+      // 坦克：肩甲
+      c.drawCircle(Offset(x - r * 0.75, y - r * 0.1), r * 0.3, Paint()..color = const Color(0xFF455A64));
+      c.drawCircle(Offset(x + r * 0.75, y - r * 0.1), r * 0.3, Paint()..color = const Color(0xFF455A64));
+    }
   }
 
   void _text(Canvas c, String t, Offset center, double size, {Color color = Colors.white, bool bold = false, bool outline = true}) {

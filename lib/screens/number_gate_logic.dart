@@ -15,6 +15,7 @@ const double ngH = 1.7; // 畫面深度（x 的範圍是 0~1，y 是離玩家多
 const double ngGateSpeed = 0.45; // 門往下走的速度
 const double ngMoveSpeed = 1.9; // 玩家左右移動最大速度
 const double ngBossY = 1.05; // 頭目停的位置
+const double ngRange = 1.15; // 射程：再遠的怪只能看著牠走過來
 const int ngLevels = 30;
 
 String ngFmt(int n) {
@@ -46,7 +47,7 @@ String ngOpLabel(NgOp op, int v) => switch (op) {
 bool ngOpGood(NgOp op) => op == NgOp.add || op == NgOp.mul;
 
 /// 隊伍寬度（也是子彈掃射的寬度）
-double ngCrowdW(int count) => math.min(0.44, 0.06 + 0.014 * math.sqrt(count.toDouble()));
+double ngCrowdW(int count) => math.min(0.5, 0.14 + 0.02 * math.sqrt(count.toDouble()));
 
 // ---------------------------------------------------------------- 關卡腳本
 class NgSpawn {
@@ -98,7 +99,7 @@ class NgLevel {
 double ngBossScale = 1.15;
 
 /// 每一關怪和頭目血量的倍率（用 bot 實際玩校準過：前面 bot 全過、後面只剩一兩成，一路往下代表越來越難）
-List<double> ngTune = [for (var i = 0; i < ngLevels; i++) 1.5 * (1 + i / (ngLevels - 1))];
+List<double> ngTune = [for (var i = 0; i < ngLevels; i++) 1.1 * (1 + i / (ngLevels - 1))];
 
 class _Cfg {
   final int idx;
@@ -107,7 +108,7 @@ class _Cfg {
   int get gates => 3 + idx ~/ 4;
   double get gateInt => 9.5 - 2.0 * t01;
   static const firstGate = 6.0;
-  double get spawnInt => 1.0 - 0.45 * t01;
+  double get spawnInt => 0.30 - 0.14 * t01; // 平均每隻怪相隔幾秒（一直來）
   double get ease => idx <= 3 ? 0.7 : 1.0;
   double get hpF => (0.30 + 0.60 * t01) * ease * ngTune[idx - 1]; // 怪流的總血量＝你火力的幾成（越高越吃緊）
   double get armorF => (0.40 + 0.75 * t01) * ease;
@@ -166,37 +167,37 @@ NgLevel ngLevel(int idx) {
     gates.add(NgGateDef(tg, NgOp.mul, lm, c.armorF * armorMul, op, v, rf));
   }
 
-  // 怪：一直來
+  // 怪：一直來（小殭屍成群衝過來，時不時一大波）
   var s = 1.0;
+  var nextBurst = 3.5;
+  double hpFor(double mul) => c.hpF * mul * (0.7 + 0.6 * rng.nextDouble());
   while (s < length) {
-    double hpFor(double mul) => c.hpF * mul * (0.7 + 0.6 * rng.nextDouble());
-    final p = rng.nextDouble();
-    if (p < 0.2 && idx >= 2) {
-      // 一排：3~5 隻橫著來
-      final n = 3 + rng.nextInt(3);
-      final x0 = 0.15 + 0.7 * rng.nextDouble() * 0.4;
+    if (s >= nextBurst) {
+      final n = 7 + rng.nextInt(6) + idx ~/ 4;
+      final cx = 0.2 + 0.6 * rng.nextDouble();
       for (var k = 0; k < n; k++) {
-        spawns.add(NgSpawn(s, (x0 + k * 0.17).clamp(0.06, 0.94), 0, hpFor(0.7)));
+        spawns.add(NgSpawn(s + k * 0.05, (cx + (rng.nextDouble() - 0.5) * 0.3).clamp(0.05, 0.95), 0, hpFor(0.8)));
       }
-      s += c.spawnInt * n * 0.55;
+      nextBurst = s + 4.5 + 2.5 * rng.nextDouble();
+      s += n * 0.05 + c.spawnInt;
       continue;
     }
     final w = rng.nextDouble();
     int kind = 0;
-    if (w < 0.45) {
+    if (w < 0.60) {
       kind = 0;
-    } else if (w < 0.65 && idx >= 2) {
+    } else if (w < 0.75 && idx >= 2) {
       kind = 1;
-    } else if (w < 0.80 && idx >= 4) {
+    } else if (w < 0.83 && idx >= 4) {
       kind = 3;
-    } else if (w < 0.92 && idx >= 3) {
+    } else if (w < 0.91 && idx >= 3) {
       kind = 2;
-    } else if (idx >= 8) {
+    } else if (w >= 0.95 && idx >= 8) {
       kind = 4;
     }
-    final mul = switch (kind) { 1 => 0.5, 2 => 4.0, 3 => 0.8, 4 => 1.2, _ => 1.0 };
-    spawns.add(NgSpawn(s, 0.08 + 0.84 * rng.nextDouble(), kind, hpFor(mul)));
-    s += c.spawnInt * (0.6 + 0.8 * rng.nextDouble());
+    final mul = switch (kind) { 1 => 0.6, 2 => 6.0, 3 => 0.8, 4 => 1.5, _ => 1.0 };
+    spawns.add(NgSpawn(s, 0.06 + 0.88 * rng.nextDouble(), kind, hpFor(mul)));
+    s += c.spawnInt * (0.7 + 0.6 * rng.nextDouble());
   }
   spawns.sort((a, b) => a.t.compareTo(b.t));
 
@@ -325,8 +326,8 @@ class NgSim {
     events.add(NgEvt('lose', px, 0, w, false));
   }
 
-  double _speedOf(int kind) => switch (kind) { 1 => 0.5, 2 => 0.16, 3 => 0.36, 4 => 0.3, _ => 0.28 };
-  double _radiusOf(int kind) => switch (kind) { 1 => 0.035, 2 => 0.075, 3 => 0.04, 4 => 0.05, _ => 0.045 };
+  double _speedOf(int kind) => switch (kind) { 1 => 0.45, 2 => 0.14, 3 => 0.3, 4 => 0.26, _ => 0.23 };
+  double _radiusOf(int kind) => switch (kind) { 1 => 0.03, 2 => 0.07, 3 => 0.035, 4 => 0.045, _ => 0.034 };
 
   void step(double dt, double targetX) {
     if (result != 0) return;
@@ -348,7 +349,7 @@ class NgSim {
         final d = lv.gates[_ng++];
         final rf = ref;
         final rv = (d.rop == NgOp.add || d.rop == NgOp.sub) ? math.max(3, (d.rfrac * rf).round()) : d.rv;
-        gates.add(NgGateLive(d, d.armorFrac * rf * ngK * (ngH / ngGateSpeed) * 0.85, rv));
+        gates.add(NgGateLive(d, d.armorFrac * rf * ngK * (ngRange / ngGateSpeed) * 0.85, rv));
       }
       if (_nb < lv.bosses.length && lv.bosses[_nb].t <= sc && mons.length < 3 + 1000) {
         final d = lv.bosses[_nb++];
@@ -370,6 +371,11 @@ class NgSim {
       }
       if (m.kind == 3) m.x = (m.x + math.cos(t * 2.2 + m.ph) * 0.22 * dt).clamp(0.04, 0.96);
       if (m.kind == 1) m.x = (m.x + math.sin(t * 3.0 + m.ph) * 0.16 * dt).clamp(0.04, 0.96);
+      if (m.kind == 0 || m.kind == 2) {
+        // 殭屍會慢慢往你的隊伍靠攏
+        final dx = px - m.x;
+        m.x += dx.clamp(-0.1 * dt, 0.1 * dt);
+      }
     }
     for (final b in buls) {
       b.y -= 0.7 * dt;
@@ -387,12 +393,12 @@ class NgSim {
     final targets = <({double y, int kind, int i})>[]; // kind 0 怪 1 鎖住的門 2 頭目
     for (var i = 0; i < mons.length; i++) {
       final m = mons[i];
-      if (m.y > 0.02 && (m.x - px).abs() <= bw + m.r) targets.add((y: m.y, kind: 0, i: i));
+      if (m.y > 0.02 && m.y <= ngRange && (m.x - px).abs() <= bw + m.r) targets.add((y: m.y, kind: 0, i: i));
     }
     if (px < 0.5) {
       for (var i = 0; i < gates.length; i++) {
         final g = gates[i];
-        if (!g.crossed && g.armor > 0 && g.y > 0.02 && g.y < ngH) targets.add((y: g.y, kind: 1, i: i));
+        if (!g.crossed && g.armor > 0 && g.y > 0.02 && g.y <= ngRange) targets.add((y: g.y, kind: 1, i: i));
       }
     }
     if (bs != null && (bs.hp > 0) && (px - 0.5).abs() <= bw + 0.3) targets.add((y: bs.y, kind: 2, i: 0));
@@ -421,7 +427,7 @@ class NgSim {
     for (final m in mons) {
       if (m.hp <= 0) {
         kills++;
-        events.add(NgEvt('kill', m.x, m.y, '', true));
+        events.add(NgEvt('kill', m.x, m.y, '${m.kind}', true));
       }
     }
     mons.removeWhere((m) => m.hp <= 0);
