@@ -699,6 +699,10 @@ class RgGame {
   bool get coop => heroes.length > 1;
   int roomSeq = 0; // 每次換房間/重來 +1（客人端用來知道要跳到房主給的位置）
   double netClock = 0; // 合作模式：一直往前走的時鐘（暫停也走），客人端用來估畫面延遲多久
+  // 合作模式：客人有沒有被打到由客人自己判定（看自己畫面上的子彈），房主不用延遲的位置判，才不會「明明躲開還被打」
+  bool guestJudgesHits = false;
+  final List<Map<String, dynamic>> outHits = []; // 客人端：判定到的受傷，畫面那邊送給房主
+  double _hitCd = 0; // 客人端：剛回報過受傷，房主的無敵時間還沒傳回來前先別重複回報
   int _bid = 0;
   double? _clkOff; // 客人端：房主時鐘 − 自己時鐘 的估計（取最新鮮的那幾張畫面）
   double _sinceSnap = 0;
@@ -1058,6 +1062,7 @@ class RgGame {
       z.t -= dt;
       if (z.t > 0) continue;
       for (final p in heroes) {
+        if (_skipHit(p)) continue;
         if (_d2(z.x, z.y, p.x, p.y) < (z.r + pr * 0.5) * (z.r + pr * 0.5)) _hurtHero(p, z.dmg, '落石');
       }
     }
@@ -1232,6 +1237,15 @@ class RgGame {
   }
 
   bool _heroNear(double x, double y, double r) => heroes.any((p) => !p.down && _d2(x, y, p.x, p.y) < r * r);
+
+  bool _skipHit(RgHero p) => guestJudgesHits && p.remote;
+
+  /// 房主：客人回報自己被打到（bid＝打到他的子彈，房主這邊也拿掉）
+  void remoteHit(int i, double d, String by, int? bid) {
+    if (i >= heroes.length || phase != RgPhase.play) return;
+    if (bid != null) bl.removeWhere((b) => b.id == bid);
+    _hurtHero(heroes[i], d.clamp(0.0, 1e6), by);
+  }
 
   void _hurtHero(RgHero p, double d, String by) {
     final keep = h;
@@ -1564,7 +1578,7 @@ class RgGame {
       } else {
         final rr = pr + b.r - 0.04;
         for (final p in heroes) {
-          if (p.down || p.inv > 0 || _d2(p.x, p.y, b.x, b.y) >= rr * rr) continue;
+          if (p.down || p.inv > 0 || _skipHit(p) || _d2(p.x, p.y, b.x, b.y) >= rr * rr) continue;
           _hurtHero(p, b.dmg, '子彈');
           remove.add(b);
           break;
@@ -1639,7 +1653,7 @@ class RgGame {
     if (!e.airborne) {
       final rr = e.r + pr - 0.05;
       for (final p in heroes) {
-        if (_d2(e.x, e.y, p.x, p.y) < rr * rr) _hurtHero(p, e.contact, e.name);
+        if (!_skipHit(p) && _d2(e.x, e.y, p.x, p.y) < rr * rr) _hurtHero(p, e.contact, e.name);
       }
     }
 
@@ -2051,13 +2065,14 @@ class RgGame {
           for (final e in en)
             [e.id, e.type, _r2(e.x), _r2(e.y), _r2(e.r), e.hp.round(), e.maxHp.round(), e.st, _r2(e.t), _r2(e.ang), _r2(e.tx),
              _r2(e.ty), (e.elite ? 1 : 0) | (e.airborne ? 2 : 0), _r2(e.flash), _r2(e.frozeT), _r2(e.slowT), _r2(e.burnT), e.poison,
-             _r2(e.spawnT), _r2(e.seed)]
+             _r2(e.spawnT), _r2(e.seed), e.contact.round()]
         ],
         'b': [
           for (final b in bl)
-            [_r2(b.x), _r2(b.y), _r2(b.vx), _r2(b.vy), _r2(b.r), b.style, b.mine ? 1 : 0, _r2(b.life), b.id == 0 ? b.id = ++_bid : b.id]
+            [_r2(b.x), _r2(b.y), _r2(b.vx), _r2(b.vy), _r2(b.r), b.style, b.mine ? 1 : 0, _r2(b.life), b.id == 0 ? b.id = ++_bid : b.id,
+             b.mine ? 0 : b.dmg.round()]
         ],
-        'z': [for (final z in zones) [_r2(z.x), _r2(z.y), _r2(z.r), _r2(z.t), _r2(z.total)]],
+        'z': [for (final z in zones) [_r2(z.x), _r2(z.y), _r2(z.r), _r2(z.t), _r2(z.total), z.dmg.round()]],
         'p': [for (final p in portals) [_r2(p.x), _r2(p.y), _r2(p.t), p.elite ? 1 : 0, p.ch]],
         'g': [for (final g in gems) [_r2(g.x), _r2(g.y), _r2(g.vx), _r2(g.vy)]],
         'hr': [for (final x in hearts) [_r2(x.x), _r2(x.y)]],
@@ -2174,6 +2189,7 @@ class RgGame {
       e.burnT = _d(a[16]);
       e.poison = (a[17] as num).toInt();
       e.spawnT = _d(a[18]);
+      if (a.length > 20) e.contact = _d(a[20]);
       next.add(e);
     }
     if (!newRoom) {
@@ -2203,7 +2219,8 @@ class RgGame {
       }
       var b = newRoom ? null : oldB[id];
       if (b == null) {
-        b = RgBullet(tx, ty, vx, vy, _d(a[4]), 0, a[6] == 1, style: (a[5] as num).toInt(), life: _d(a[7]))..id = id;
+        b = RgBullet(tx, ty, vx, vy, _d(a[4]), a.length > 9 ? _d(a[9]) : 0, a[6] == 1, style: (a[5] as num).toInt(), life: _d(a[7]))
+          ..id = id;
       } else {
         b.vx = vx;
         b.vy = vy;
@@ -2222,7 +2239,7 @@ class RgGame {
     bl = nb;
     zones = [
       for (final raw in m['z'] as List)
-        (raw as List).let((a) => RgZone(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[4]), 0)..t = _d(a[3]))
+        (raw as List).let((a) => RgZone(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[4]), a.length > 5 ? _d(a[5]) : 0)..t = _d(a[3]))
     ];
     portals = [for (final raw in m['p'] as List) (raw as List).let((a) => RgPortal(_d(a[0]), _d(a[1]), a[4] as String, a[3] == 1, _d(a[2])))];
     gems = [for (final raw in m['g'] as List) (raw as List).let((a) => RgGem(_d(a[0]), _d(a[1]), _d(a[2]), _d(a[3])))];
@@ -2304,6 +2321,13 @@ class RgGame {
     }
   }
 
+  bool _guestHit(double d, String by, {int? bid}) {
+    if (me.down || me.inv > 0 || _hitCd > 0 || d <= 0) return false;
+    _hitCd = 0.6;
+    outHits.add({'d': d.round(), 'by': by, if (bid != null) 'b': bid});
+    return true;
+  }
+
   /// 客人端：兩次 snap 之間補動畫（一幀 rgDt）
   void guestTick() {
     const dt = rgDt;
@@ -2344,7 +2368,9 @@ class RgGame {
     });
     for (final z in zones) {
       z.t -= dt;
+      if (z.t <= 0 && z.t > -dt && _d2(z.x, z.y, me.x, me.y) < (z.r + pr * 0.5) * (z.r + pr * 0.5)) _guestHit(z.dmg, '落石');
     }
+    zones.removeWhere((z) => z.t <= 0);
     for (final p in portals) {
       p.t -= dt;
     }
@@ -2353,6 +2379,27 @@ class RgGame {
       f.y -= dt * 0.8;
     }
     floats.removeWhere((f) => f.t > 0.9);
+    // 自己有沒有被打到：照自己畫面上看到的判定
+    if (_hitCd > 0) _hitCd -= dt;
+    if (guestJudgesHits) {
+      final rr = pr - 0.04;
+      for (final b in List.of(bl)) {
+        if (b.mine || _d2(me.x, me.y, b.x, b.y) >= (rr + b.r) * (rr + b.r)) continue;
+        if (_guestHit(b.dmg, '子彈', bid: b.id)) {
+          bl.remove(b);
+          _deadB.add(b.id);
+        }
+        break;
+      }
+      for (final e in en) {
+        if (e.airborne || e.spawnT < 0.5 || e.frozeT > 0) continue; // 跟房主一樣：凍住的怪不會撞人
+        final r2 = e.r + pr - 0.05;
+        if (_d2(e.x, e.y, me.x, me.y) < r2 * r2) {
+          _guestHit(e.contact, e.name);
+          break;
+        }
+      }
+    }
     for (final f in fx) {
       f.t += dt;
       f.x += f.vx * dt;

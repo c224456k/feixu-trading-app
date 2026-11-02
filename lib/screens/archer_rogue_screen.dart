@@ -61,6 +61,7 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
   int _frame = 0;
   bool _selfOff = false; // 自己斷線、重連中
   bool _peerOff = false; // 隊友斷線、等他回來
+  int? _rtt; // 跟隊友來回一趟的延遲（ms）
   bool get _coop => _side >= 0;
 
   @override
@@ -309,6 +310,8 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
         _side = side;
         _g = RgGame(seed: (m['seed'] as num).toInt(), players: 2)..local = _side;
         _g.heroes[1].remote = true;
+        _g.guestJudgesHits = _side == 1; // 房主等客人說他會自己判定（'in' 帶 gh）才交給他，舊版客人不會漏算傷害
+        _rtt = null;
         _frame = 0;
         _acc = 0;
         if (_side == 0) {
@@ -351,7 +354,15 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
     switch (d['k']) {
       case 's':
         if (_side == 1) _g.applySnap(d['s'] as Map<String, dynamic>);
+      case 'hit':
+        if (_side == 0) _g.remoteHit(1, _n(d['d']), '${d['by'] ?? '怪物'}', (d['b'] as num?)?.toInt());
+      case 'pg':
+        _net?.relay({'k': 'po', 'ts': d['ts']});
+      case 'po':
+        final ts = d['ts'];
+        if (ts is num) setState(() => _rtt = DateTime.now().millisecondsSinceEpoch - ts.toInt());
       case 'in':
+        if (_side == 0 && d['gh'] == 1) _g.guestJudgesHits = true;
         if (_side == 0) _g.setRemote(1, _n(d['x']), _n(d['y']), _n(d['fx']), _n(d['fy']), d['mv'] == 1, seq: (d['q'] as num?)?.toInt());
       case 'pick':
         // n = 客人選之前的技能總數，避免同一次選擇（網路重送／畫面還沒更新又點一次）算兩次
@@ -385,16 +396,21 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
       _acc -= rgDt;
       n++;
       _frame++;
+      if (_frame % 90 == 0) _net?.relay({'k': 'pg', 'ts': DateTime.now().millisecondsSinceEpoch});
       if (_side == 0) {
         _g.step(mx, my);
         if (_frame % (_g.phase == RgPhase.play ? 4 : 15) == 0) _net?.relay({'k': 's', 's': _g.snap()});
       } else {
         _g.guestMove(mx, my);
         _g.guestTick();
+        for (final h in _g.outHits) {
+          _net?.relay({'k': 'hit', ...h});
+        }
+        _g.outHits.clear();
         final p = _g.me;
         if (_frame % 2 == 0 && _g.phase == RgPhase.play && !p.down) {
           double r2(double v) => (v * 100).roundToDouble() / 100;
-          _net?.relay({'k': 'in', 'x': r2(p.x), 'y': r2(p.y), 'fx': r2(p.faceX), 'fy': r2(p.faceY), 'mv': p.moving ? 1 : 0, 'q': _g.roomSeq});
+          _net?.relay({'k': 'in', 'x': r2(p.x), 'y': r2(p.y), 'fx': r2(p.faceX), 'fy': r2(p.faceY), 'mv': p.moving ? 1 : 0, 'q': _g.roomSeq, 'gh': 1});
         }
       }
     }
@@ -674,6 +690,18 @@ class _ArcherRogueScreenState extends State<ArcherRogueScreen> with SingleTicker
                         child: Text(_names.length > p.idx ? _names[p.idx] : '隊友',
                             overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF82B1FF), fontSize: 11)),
                       ),
+                      if (_rtt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Text('${_rtt}ms',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: _rtt! < 120
+                                      ? const Color(0xFF69F0AE)
+                                      : _rtt! < 250
+                                          ? Colors.amberAccent
+                                          : Colors.redAccent)),
+                        ),
                       Expanded(
                         child: _bar(p.st.hp / p.st.maxHp, const [Color(0xFF82B1FF), Color(0xFF1565C0)],
                             p.down ? '倒地！快去扶' : 'Lv${p.st.level}  ${p.st.hp.round()} / ${p.st.maxHp.round()}',
