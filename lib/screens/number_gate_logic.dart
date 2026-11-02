@@ -1,85 +1,21 @@
 import 'dart:math' as math;
 
-/// 數字門：玩家在最下面一直機槍掃射前方，往前跑，穿過數字門改人數，路上有小怪和頭目。
-/// - 人數＝火力：每人每秒 ngK 點傷害，打你站的那條道上最前面的小怪（子彈到下一排門為止）
-/// - 小怪在牠撞到你時還活著、而且在你這條道，就咬掉等於「剩餘血量」的人數；別條道的小怪不會咬你
-/// - 兩排之間最多換一次道（點左右半邊／←→），所以眼前最大的門常常把你帶去很爛的位置
-/// - 頭目：畫面停住，限時打完血條；牠會預告攻擊的道（顯示紅色），要換道閃開，被打到掉 25% 人數
-/// 關卡由編號當種子固定產生，產生時用同一套模擬器驗證「有解、每排挑最大會輸、一直站同一道會輸」。
+/// 數字門（仿 FB 廣告那種）：沒有格子，手指左右拖動整隊人，前面一直自動掃射。
+/// - 怪從前面一直來；撞到你的隊伍（隊伍寬度隨人數變寬）就咬掉人數；躲開的怪會從旁邊過去
+/// - 人數＝火力（每人每秒 ngK 傷害），子彈打隊伍正前方最近的東西，打死了溢出的火力繼續打下一個
+/// - 很久才出現一對加減乘除的大門；左邊那扇是「鎖住的大門」：要把裝甲血條打光才會開，開了是大獎（×3~×5），
+///   沒打開就衝過去會被鎖住、人數砍半。右邊是一般的門（+ − × ÷）
+/// - 中途和最後有頭目：怪停止出現，限時打血條，牠會預告攻擊的位置（紅色柱子），要閃開
+/// 沒有格子所以不能像之前用演算法證明有解，難度靠 bot 實際玩來校準（見 scratchpad ng/bot.dart）。
 enum NgOp { add, sub, mul, div }
 
 const int ngCap = 1000000000;
-const double ngK = 3.0; // 每人每秒傷害
-const double ngDt = 1 / 60;
-
-class NgGate {
-  final NgOp op;
-  final int v;
-  const NgGate(this.op, this.v);
-
-  int apply(int c) {
-    switch (op) {
-      case NgOp.add:
-        return math.min(ngCap, c + v);
-      case NgOp.sub:
-        return c - v;
-      case NgOp.mul:
-        return math.min(ngCap, c * v);
-      case NgOp.div:
-        return c ~/ v;
-    }
-  }
-
-  String get label => switch (op) {
-        NgOp.add => '+$v',
-        NgOp.sub => '−$v',
-        NgOp.mul => '×$v',
-        NgOp.div => '÷$v',
-      };
-
-  bool get isGood => op == NgOp.add || op == NgOp.mul;
-}
-
-class NgMon {
-  final int lane;
-  final double arrive; // 這一段開始後幾秒撞到玩家
-  final int hp;
-  final String emoji;
-  const NgMon(this.lane, this.arrive, this.hp, this.emoji);
-}
-
-class NgRow {
-  final List<NgGate>? gates; // 一排門（null＝頭目）
-  final List<NgMon> mons; // 門前面的小怪（依 arrive 排序）
-  final int bossHp;
-  final double bossLimit; // 頭目停下來後的限時（秒）
-  final double bossPeriod; // 頭目每隔幾秒預告一次攻擊
-  final String emoji;
-  final bool isFinal;
-  const NgRow.seg(List<NgGate> g, this.mons)
-      : gates = g,
-        bossHp = 0,
-        bossLimit = 0,
-        bossPeriod = 0,
-        emoji = '',
-        isFinal = false;
-  const NgRow.boss(this.bossHp, this.emoji, this.bossLimit, this.bossPeriod, {this.isFinal = false})
-      : gates = null,
-        mons = const [];
-  bool get isBoss => gates == null;
-}
-
-class NgLevel {
-  final int index;
-  final int lanes;
-  final double interval; // 一段（兩排門之間）的秒數
-  final int start;
-  final List<NgRow> rows;
-  final int best; // 最佳走法的剩餘人數
-  const NgLevel(this.index, this.lanes, this.interval, this.start, this.rows, this.best);
-}
-
-const ngLevels = 30;
+const double ngK = 4.0; // 每人每秒傷害
+const double ngH = 1.7; // 畫面深度（x 的範圍是 0~1，y 是離玩家多遠）
+const double ngGateSpeed = 0.45; // 門往下走的速度
+const double ngMoveSpeed = 1.9; // 玩家左右移動最大速度
+const double ngBossY = 1.05; // 頭目停的位置
+const int ngLevels = 30;
 
 String ngFmt(int n) {
   if (n >= 100000000) return '${(n / 1e8).toStringAsFixed(1)}億';
@@ -87,431 +23,515 @@ String ngFmt(int n) {
   return '$n';
 }
 
-// ---------------------------------------------------------------- 模擬
-class NgEvt {
-  final String kind; // gate bite kill boss slam hit win lose
-  final int lane;
-  final String text;
-  final bool good;
-  const NgEvt(this.kind, this.lane, this.text, this.good);
+int _apply(NgOp op, int v, int c) {
+  switch (op) {
+    case NgOp.add:
+      return math.min(ngCap, c + v);
+    case NgOp.sub:
+      return c - v;
+    case NgOp.mul:
+      return math.min(ngCap, c * v);
+    case NgOp.div:
+      return c ~/ v;
+  }
 }
 
-/// 一場跑關的模擬（畫面用，也給求解器逐段模擬用）。固定步長 ngDt。
-class NgRun {
+String ngOpLabel(NgOp op, int v) => switch (op) {
+      NgOp.add => '+${ngFmt(v)}',
+      NgOp.sub => '−${ngFmt(v)}',
+      NgOp.mul => '×$v',
+      NgOp.div => '÷$v',
+    };
+
+bool ngOpGood(NgOp op) => op == NgOp.add || op == NgOp.mul;
+
+/// 隊伍寬度（也是子彈掃射的寬度）
+double ngCrowdW(int count) => math.min(0.44, 0.06 + 0.014 * math.sqrt(count.toDouble()));
+
+// ---------------------------------------------------------------- 關卡腳本
+class NgSpawn {
+  final double t; // 腳本時間
+  final double x;
+  final int kind; // 0 史萊姆 1 快跑 2 坦克 3 蝙蝠 4 吐彈怪
+  final double frac; // 血量＝frac × 當時的參考人數 × 火力 × 出怪間隔（出現時才算，所以不會被選哪道門的運氣左右）
+  const NgSpawn(this.t, this.x, this.kind, this.frac);
+}
+
+class NgGateDef {
+  final double t;
+  final NgOp lop; // 左邊：鎖住的大門
+  final int lv;
+  final double armorFrac; // 裝甲血量＝armorFrac × 參考人數 × 火力 × 門走過來的秒數
+  final NgOp rop; // 右邊：一般的門
+  final int rv; // × ÷ 用
+  final double rfrac; // + − 用：數值＝rfrac × 參考人數
+  const NgGateDef(this.t, this.lop, this.lv, this.armorFrac, this.rop, this.rv, this.rfrac);
+}
+
+class NgBossDef {
+  final double t;
+  final double frac; // 血量＝frac × 參考人數 × 火力 × 限時
+  final String emoji;
+  final double limit;
+  final double period;
+  final bool isFinal;
+  const NgBossDef(this.t, this.frac, this.emoji, this.limit, this.period, this.isFinal);
+}
+
+class NgLevel {
+  final int index;
+  final int start;
+  final List<NgSpawn> spawns;
+  final List<NgGateDef> gates;
+  final List<NgBossDef> bosses;
+  final double length; // 腳本總長（秒，不含頭目戰）
+  final double spawnInt;
+  final double gateInt;
+  const NgLevel(this.index, this.start, this.spawns, this.gates, this.bosses, this.length, this.spawnInt, this.gateInt);
+
+  /// 預期進度的人數：順利的話每過一道門約 ×mG
+  double nominal(double sc) =>
+      10.0 * math.pow(_Cfg.mG, math.max(0.0, (sc - (_Cfg.firstGate + ngH / ngGateSpeed - gateInt)) / gateInt)).toDouble();
+}
+
+/// 頭目血量倍率（校準用）
+double ngBossScale = 1.15;
+
+/// 每一關怪和頭目血量的倍率（用 bot 實際玩校準過：前面 bot 全過、後面只剩一兩成，一路往下代表越來越難）
+List<double> ngTune = [for (var i = 0; i < ngLevels; i++) 1.5 * (1 + i / (ngLevels - 1))];
+
+class _Cfg {
+  final int idx;
+  final double t01;
+  _Cfg(this.idx) : t01 = (idx - 1) / (ngLevels - 1);
+  int get gates => 3 + idx ~/ 4;
+  double get gateInt => 9.5 - 2.0 * t01;
+  static const firstGate = 6.0;
+  double get spawnInt => 1.0 - 0.45 * t01;
+  double get ease => idx <= 3 ? 0.7 : 1.0;
+  double get hpF => (0.30 + 0.60 * t01) * ease * ngTune[idx - 1]; // 怪流的總血量＝你火力的幾成（越高越吃緊）
+  double get armorF => (0.40 + 0.75 * t01) * ease;
+  double get bossF => (0.30 + 0.5 * t01) / 0.7 * ease * ngBossScale; // 頭目：全力開火要用掉限時的 (0.3~0.8) 倍，閃躲和被打掉的人數都會讓它變長
+  double get bossLimit => 15 - 5 * t01;
+  double get bossPeriod => 2.4 - 1.1 * t01;
+  static const mG = 1.9; // 只走右邊的門的話，每過一道門人數大約 ×1.9（打開鎖住的大門會更快）
+}
+
+const _bossEmojis = ['👹', '🐉', '👑', '😈', '🦖'];
+
+NgLevel ngLevel(int idx) {
+  final c = _Cfg(idx);
+  final rng = math.Random(idx * 7919 + 13);
+  final spawns = <NgSpawn>[];
+  final gates = <NgGateDef>[];
+  final cross = ngH / ngGateSpeed; // 門從出現走到玩家要幾秒
+  final length = _Cfg.firstGate + (c.gates - 1) * c.gateInt + cross + 3;
+  final midT = _Cfg.firstGate + (c.gates ~/ 2) * c.gateInt + cross * 0.5;
+
+  // 門：右邊是一般的門，左邊是鎖住的大門（裝甲血條要打光才開）
+  // A 右邊還不錯（×2、×3、+）→ 左邊可挑戰可不挑戰；B 右邊是爛門（÷2、−），只能去打左邊（裝甲比較薄）；C 右邊很棒
+  var lastBad = false;
+  for (var g = 0; g < c.gates; g++) {
+    final tg = _Cfg.firstGate + g * c.gateInt;
+    final r = rng.nextDouble();
+    NgOp op;
+    int v = 0;
+    double rf = 0;
+    var armorMul = 1.0;
+    if (r < 0.22 && !lastBad && g > 0) {
+      lastBad = true;
+      armorMul = 0.6;
+      if (rng.nextBool()) {
+        op = NgOp.div;
+        v = 2;
+      } else {
+        op = NgOp.sub;
+        rf = 0.4 + 0.3 * rng.nextDouble();
+      }
+    } else {
+      lastBad = false;
+      final q = rng.nextDouble();
+      if (q < 0.45) {
+        op = NgOp.mul;
+        v = 2;
+      } else if (q < 0.62) {
+        op = NgOp.mul;
+        v = 3;
+      } else {
+        op = NgOp.add;
+        rf = 0.9 + 0.9 * rng.nextDouble();
+      }
+    }
+    final lm = idx < 10 ? 3 : (idx < 20 ? 4 : 5);
+    gates.add(NgGateDef(tg, NgOp.mul, lm, c.armorF * armorMul, op, v, rf));
+  }
+
+  // 怪：一直來
+  var s = 1.0;
+  while (s < length) {
+    double hpFor(double mul) => c.hpF * mul * (0.7 + 0.6 * rng.nextDouble());
+    final p = rng.nextDouble();
+    if (p < 0.2 && idx >= 2) {
+      // 一排：3~5 隻橫著來
+      final n = 3 + rng.nextInt(3);
+      final x0 = 0.15 + 0.7 * rng.nextDouble() * 0.4;
+      for (var k = 0; k < n; k++) {
+        spawns.add(NgSpawn(s, (x0 + k * 0.17).clamp(0.06, 0.94), 0, hpFor(0.7)));
+      }
+      s += c.spawnInt * n * 0.55;
+      continue;
+    }
+    final w = rng.nextDouble();
+    int kind = 0;
+    if (w < 0.45) {
+      kind = 0;
+    } else if (w < 0.65 && idx >= 2) {
+      kind = 1;
+    } else if (w < 0.80 && idx >= 4) {
+      kind = 3;
+    } else if (w < 0.92 && idx >= 3) {
+      kind = 2;
+    } else if (idx >= 8) {
+      kind = 4;
+    }
+    final mul = switch (kind) { 1 => 0.5, 2 => 4.0, 3 => 0.8, 4 => 1.2, _ => 1.0 };
+    spawns.add(NgSpawn(s, 0.08 + 0.84 * rng.nextDouble(), kind, hpFor(mul)));
+    s += c.spawnInt * (0.6 + 0.8 * rng.nextDouble());
+  }
+  spawns.sort((a, b) => a.t.compareTo(b.t));
+
+  // 頭目
+  final bosses = <NgBossDef>[];
+  if (idx >= 3) {
+    bosses.add(NgBossDef(midT, c.bossF * 0.8, _bossEmojis[0], c.bossLimit, c.bossPeriod, false));
+  }
+  bosses.add(NgBossDef(length, c.bossF, _bossEmojis[1 + rng.nextInt(_bossEmojis.length - 1)], c.bossLimit, c.bossPeriod, true));
+  return NgLevel(idx, 10, spawns, gates, bosses, length, c.spawnInt, c.gateInt);
+}
+
+// ---------------------------------------------------------------- 模擬
+class NgMon {
+  int id = 0;
+  double x, y, hp, maxHp, r, speed, ph, cd = 0;
+  final int kind;
+  NgMon(this.x, this.y, this.hp, this.kind, this.r, this.speed, this.ph) : maxHp = hp;
+  NgMon copy() => NgMon(x, y, hp, kind, r, speed, ph)
+    ..id = id
+    ..maxHp = maxHp
+    ..cd = cd;
+}
+
+class NgBul {
+  double x, y;
+  NgBul(this.x, this.y);
+}
+
+class NgGateLive {
+  final NgGateDef def;
+  double y = ngH + 0.1;
+  final double armorMax;
+  double armor;
+  int rv; // 右邊門的數值（+ − 在出現時依人數算）
+  bool crossed = false;
+  NgGateLive(this.def, double a, this.rv)
+      : armor = a,
+        armorMax = a;
+  NgGateLive copy() => NgGateLive(def, armorMax, rv)
+    ..y = y
+    ..armor = armor
+    ..crossed = crossed;
+}
+
+class NgBoss {
+  final NgBossDef def;
+  final double maxHp;
+  double hp;
+  double y = ngH + 0.3;
+  double fight = 0; // 停下來之後的秒數
+  double slamAt = -1; // 預告落下的 fight 時間
+  List<double> slamX = [];
+  int slams = 0;
+  NgBoss(this.def, this.hp) : maxHp = hp;
+  NgBoss copy() => NgBoss(def, maxHp)
+    ..hp = hp
+    ..y = y
+    ..fight = fight
+    ..slamAt = slamAt
+    ..slamX = List.of(slamX)
+    ..slams = slams;
+  bool get stopped => y <= ngBossY + 1e-6;
+}
+
+class NgEvt {
+  final String kind; // gate lock bite kill boss slam hit armor win lose
+  final double x;
+  final double y;
+  final String text;
+  final bool good;
+  const NgEvt(this.kind, this.x, this.y, this.text, this.good);
+}
+
+class NgSim {
   final NgLevel lv;
-  final bool perfect; // true＝求解器用：頭目的攻擊當作全部閃掉
-  int row;
-  double ts = 0; // 這一排（段）開始後經過的秒數
-  int lane;
+  double sc = 0; // 腳本時間（頭目戰時暫停）
+  double t = 0; // 真實經過時間
+  double px = 0.5;
   int count;
-  bool shifted = false;
-  double shiftCd = 0;
   int result = 0; // 0 進行中 1 過關 2 失敗
   String why = '';
-  List<double> mhp = [];
-  List<bool> gone = [];
-  double bossHp = 0;
+  List<NgMon> mons = [];
+  List<NgBul> buls = [];
+  List<NgGateLive> gates = [];
+  NgBoss? boss;
+  int _ns = 0, _ng = 0, _nb = 0, _id = 0;
   final List<NgEvt> events = [];
-  // 頭目攻擊
-  double slamAt = -1; // 預告的落下時間（頭目戰時間 bt）
-  List<int> slamLanes = [];
-  int slams = 0;
-  int? targetMon; // 目前在打哪隻（畫面畫子彈用），null＝沒有
-  bool bossFight = false; // 頭目已經停下來
-  int _bossLane = 0; // 進頭目戰時站的道；打倒後陣型回到這條道（閃避換道不影響後面的路線）
+  // 畫面用
+  double fireTargetY = -1; // 子彈打到哪（畫面 y 值，<0＝沒目標打到頂）
+  int kills = 0;
+  int bites = 0;
 
-  NgRun(this.lv, {this.perfect = false, this.row = 0, required this.lane, required this.count}) {
-    _load();
+  NgSim(this.lv) : count = lv.start;
+
+  NgSim._copy(NgSim o)
+      : lv = o.lv,
+        sc = o.sc,
+        t = o.t,
+        px = o.px,
+        count = o.count,
+        result = o.result,
+        mons = [for (final m in o.mons) m.copy()],
+        buls = [for (final b in o.buls) NgBul(b.x, b.y)],
+        gates = [for (final g in o.gates) g.copy()],
+        boss = o.boss?.copy(),
+        _ns = o._ns,
+        _ng = o._ng,
+        _nb = o._nb,
+        _id = o._id;
+
+  NgSim copy() => NgSim._copy(this);
+
+  /// 參考人數：現在的人數，但限制在預期進度的 0.4~3 倍（人太少不會變簡單，太多也不會無限變難）
+  double get ref {
+    final nom = lv.nominal(sc);
+    return math.max(nom * 0.4, math.min(count.toDouble(), nom * 3));
   }
 
-  NgRow get cur => lv.rows[row];
-  double get T => lv.interval;
-
-  void _load() {
-    ts = 0;
-    shifted = false;
-    slamAt = -1;
-    slamLanes = [];
-    slams = 0;
-    bossFight = false;
-    final r = cur;
-    if (r.isBoss) {
-      _bossLane = lane;
-      bossHp = r.bossHp.toDouble();
-      mhp = [];
-      gone = [];
-    } else {
-      mhp = [for (final m in r.mons) m.hp.toDouble()];
-      gone = [for (final _ in r.mons) false];
-    }
-  }
-
-  /// 換道。回傳是否成功（兩排之間只能一次；頭目停下來之後改成有冷卻）
-  bool shift(int d) {
-    final n = lane + d;
-    if (result != 0 || n < 0 || n >= lv.lanes) return false;
-    if (bossFight) {
-      if (shiftCd > 0) return false;
-      shiftCd = 0.25;
-    } else {
-      if (shifted) return false;
-      shifted = true;
-    }
-    lane = n;
-    return true;
-  }
+  double get crowdW => ngCrowdW(count);
+  bool get bossActive => boss != null;
 
   void _lose(String w) {
     result = 2;
     why = w;
-    events.add(NgEvt('lose', lane, w, false));
+    events.add(NgEvt('lose', px, 0, w, false));
   }
 
-  void step(double dt) {
+  double _speedOf(int kind) => switch (kind) { 1 => 0.5, 2 => 0.16, 3 => 0.36, 4 => 0.3, _ => 0.28 };
+  double _radiusOf(int kind) => switch (kind) { 1 => 0.035, 2 => 0.075, 3 => 0.04, 4 => 0.05, _ => 0.045 };
+
+  void step(double dt, double targetX) {
     if (result != 0) return;
-    final r = cur;
-    ts += dt;
-    if (shiftCd > 0) shiftCd -= dt;
-    final f = count * ngK * dt;
-    targetMon = null;
-    if (r.isBoss) {
-      final was = bossFight;
-      bossFight = ts >= T;
-      if (bossFight && !was) _bossLane = lane; // 頭目停下來那一刻站的道
-      bossHp -= f;
-      if (bossHp <= 0) {
-        events.add(NgEvt('boss', lane, '${r.emoji} 倒下了', true));
-        if (!r.isFinal) count = math.max(1, (count * 0.6).floor()); // 打頭目折損四成人
-        lane = _bossLane;
-        _nextRow();
-        return;
+    t += dt;
+    // 移動
+    final tx = targetX.clamp(0.04, 0.96);
+    final d = (tx - px).clamp(-ngMoveSpeed * dt, ngMoveSpeed * dt);
+    px = (px + d).clamp(0.04, 0.96);
+
+    // 腳本推進（頭目戰時停住）
+    if (!bossActive) {
+      sc += dt;
+      while (_ns < lv.spawns.length && lv.spawns[_ns].t <= sc) {
+        final s = lv.spawns[_ns++];
+        final m = NgMon(s.x, ngH + 0.05, math.max(3.0, s.frac * ref * ngK * lv.spawnInt), s.kind, _radiusOf(s.kind), _speedOf(s.kind), (s.x * 37 + s.t) % 6.28)..id = ++_id;
+        mons.add(m);
       }
-      if (bossFight) {
-        final bt = ts - T;
-        if (bt > r.bossLimit) {
-          _lose('${r.emoji} 沒在時間內打倒，被壓垮了');
-          return;
+      while (_ng < lv.gates.length && lv.gates[_ng].t <= sc) {
+        final d = lv.gates[_ng++];
+        final rf = ref;
+        final rv = (d.rop == NgOp.add || d.rop == NgOp.sub) ? math.max(3, (d.rfrac * rf).round()) : d.rv;
+        gates.add(NgGateLive(d, d.armorFrac * rf * ngK * (ngH / ngGateSpeed) * 0.85, rv));
+      }
+      if (_nb < lv.bosses.length && lv.bosses[_nb].t <= sc && mons.length < 3 + 1000) {
+        final d = lv.bosses[_nb++];
+        boss = NgBoss(d, d.frac * ref * ngK * d.limit * 0.7);
+      }
+    }
+
+    // 怪移動
+    for (final m in mons) {
+      if (m.kind == 4 && m.y <= 1.0) {
+        // 吐彈怪停在前面，定時往下吐
+        m.cd -= dt;
+        if (m.cd <= 0) {
+          m.cd = 1.7;
+          buls.add(NgBul(m.x, m.y - 0.04));
         }
-        if (!perfect) _slams(r, bt);
+      } else {
+        m.y -= m.speed * dt;
       }
-      return;
+      if (m.kind == 3) m.x = (m.x + math.cos(t * 2.2 + m.ph) * 0.22 * dt).clamp(0.04, 0.96);
+      if (m.kind == 1) m.x = (m.x + math.sin(t * 3.0 + m.ph) * 0.16 * dt).clamp(0.04, 0.96);
     }
-    // 開火：打你這條道最前面的活小怪
-    for (var i = 0; i < r.mons.length; i++) {
-      if (gone[i] || r.mons[i].lane != lane) continue;
-      targetMon = i;
-      mhp[i] -= f;
-      if (mhp[i] <= 0) {
-        gone[i] = true;
-        targetMon = null;
-        events.add(NgEvt('kill', r.mons[i].lane, r.mons[i].emoji, true));
+    for (final b in buls) {
+      b.y -= 0.7 * dt;
+    }
+    for (final g in gates) {
+      g.y -= ngGateSpeed * dt;
+    }
+    final bs = boss;
+    if (bs != null && !bs.stopped) bs.y = math.max(ngBossY, bs.y - 0.7 * dt);
+
+    // 開火：隊伍正前方（寬度＝隊伍寬）最近的東西先吃，打死了溢出的火力繼續打
+    final bw = crowdW / 2;
+    var power = count * ngK * dt;
+    fireTargetY = -1;
+    final targets = <({double y, int kind, int i})>[]; // kind 0 怪 1 鎖住的門 2 頭目
+    for (var i = 0; i < mons.length; i++) {
+      final m = mons[i];
+      if (m.y > 0.02 && (m.x - px).abs() <= bw + m.r) targets.add((y: m.y, kind: 0, i: i));
+    }
+    if (px < 0.5) {
+      for (var i = 0; i < gates.length; i++) {
+        final g = gates[i];
+        if (!g.crossed && g.armor > 0 && g.y > 0.02 && g.y < ngH) targets.add((y: g.y, kind: 1, i: i));
       }
-      break;
     }
-    // 小怪抵達
-    for (var i = 0; i < r.mons.length; i++) {
-      if (gone[i] || ts < r.mons[i].arrive) continue;
-      gone[i] = true;
-      if (r.mons[i].lane == lane) {
-        final loss = mhp[i].ceil();
-        count -= loss;
-        events.add(NgEvt('bite', lane, '−${ngFmt(loss)}', false));
-        if (count <= 0) {
-          count = 0;
-          _lose('${r.mons[i].emoji} 沒打死，咬掉了 ${ngFmt(loss)} 人，全軍覆沒');
-          return;
+    if (bs != null && (bs.hp > 0) && (px - 0.5).abs() <= bw + 0.3) targets.add((y: bs.y, kind: 2, i: 0));
+    targets.sort((a, b) => a.y.compareTo(b.y));
+    for (final tg in targets) {
+      if (power <= 0) break;
+      fireTargetY = tg.y;
+      if (tg.kind == 0) {
+        final m = mons[tg.i];
+        final use = math.min(power, m.hp);
+        m.hp -= use;
+        power -= use;
+      } else if (tg.kind == 1) {
+        final g = gates[tg.i];
+        final use = math.min(power, g.armor);
+        g.armor -= use;
+        power -= use;
+        if (g.armor <= 0) events.add(NgEvt('armor', 0.25, g.y, '解鎖！', true));
+      } else {
+        final use = math.min(power, bs!.hp);
+        bs.hp -= use;
+        power -= use;
+      }
+    }
+    // 死掉的怪
+    for (final m in mons) {
+      if (m.hp <= 0) {
+        kills++;
+        events.add(NgEvt('kill', m.x, m.y, '', true));
+      }
+    }
+    mons.removeWhere((m) => m.hp <= 0);
+
+    // 撞到隊伍
+    final front = 0.045;
+    for (var i = mons.length - 1; i >= 0; i--) {
+      final m = mons[i];
+      if (m.y <= front) {
+        if ((m.x - px).abs() <= bw + m.r) {
+          final loss = math.max(1, math.min(m.hp.ceil(), (count * 0.45).ceil()));
+          count -= loss;
+          bites++;
+          events.add(NgEvt('bite', px, 0, '−${ngFmt(loss)}', false));
+          mons.removeAt(i);
+          if (count <= 0) {
+            count = 0;
+            _lose('被怪物淹沒了');
+            return;
+          }
+        } else if (m.y < -0.15) {
+          mons.removeAt(i);
         }
       }
     }
+    // 吐的彈
+    for (var i = buls.length - 1; i >= 0; i--) {
+      final b = buls[i];
+      if (b.y <= front) {
+        if ((b.x - px).abs() <= bw + 0.025) {
+          final loss = math.max(1, (count * 0.06).ceil());
+          count -= loss;
+          events.add(NgEvt('hit', px, 0, '−${ngFmt(loss)}', false));
+          if (count <= 0) {
+            count = 0;
+            _lose('被子彈打垮了');
+            return;
+          }
+        }
+        buls.removeAt(i);
+      }
+    }
+
     // 穿過門
-    if (ts >= T - 1e-9) {
-      final g = r.gates![lane];
-      final after = g.apply(count);
-      if (after <= 0) {
-        _lose('穿過 ${g.label}：${ngFmt(count)} 變成 0，全軍覆沒');
+    for (final g in gates) {
+      if (g.crossed || g.y > 0.02) continue;
+      g.crossed = true;
+      if (px < 0.5) {
+        if (g.armor > 0) {
+          count = math.max(1, (count * 0.5).ceil());
+          events.add(NgEvt('lock', px, 0, '鎖住了！−50%', false));
+        } else {
+          count = _apply(g.def.lop, g.def.lv, count);
+          events.add(NgEvt('gate', px, 0, ngOpLabel(g.def.lop, g.def.lv), true));
+        }
+      } else {
+        final after = _apply(g.def.rop, g.rv, count);
+        events.add(NgEvt('gate', px, 0, ngOpLabel(g.def.rop, g.rv), after >= count));
+        count = after;
+      }
+      if (count <= 0) {
+        count = 0;
+        _lose('人數歸零');
         return;
       }
-      events.add(NgEvt('gate', lane, g.label, after >= count));
-      count = after;
-      _nextRow();
     }
-  }
+    gates.removeWhere((g) => g.y < -0.3);
 
-  void _slams(NgRow r, double bt) {
-    if (slamAt < 0) {
-      // 下一次預告：每 period 秒一次，預告後 0.9 秒落下，瞄準你現在站的道
-      if (bt >= slams * r.bossPeriod + 0.5) {
-        slamAt = bt + 0.9;
-        final lanes = <int>{lane};
-        if (lv.index >= 10) lanes.add(lane > 0 ? lane - 1 : lane + 1); // 後期一次打兩道
-        if (lv.index >= 22 && lv.lanes >= 4) lanes.add(lane < lv.lanes - 1 ? lane + 1 : lane - 1);
-        slamLanes = lanes.toList();
-        events.add(NgEvt('slam', lane, '預告', false));
+    // 頭目
+    if (bs != null) {
+      if (bs.hp <= 0) {
+        events.add(NgEvt('boss', 0.5, bs.y, '${bs.def.emoji} 倒下了', true));
+        boss = null;
+        if (bs.def.isFinal) {
+          result = 1;
+          events.add(const NgEvt('win', 0.5, 0, '過關', true));
+        }
+        return;
       }
-    } else if (bt >= slamAt) {
-      if (slamLanes.contains(lane)) {
-        final loss = math.max(1, (count * 0.25).ceil());
-        count -= loss;
-        events.add(NgEvt('hit', lane, '−${ngFmt(loss)}', false));
-        if (count <= 0) {
-          count = 0;
-          _lose('被 ${r.emoji} 的攻擊打垮了');
+      if (bs.stopped) {
+        bs.fight += dt;
+        if (bs.fight > bs.def.limit) {
+          _lose('${bs.def.emoji} 沒在時間內打倒，被壓垮了');
+          return;
+        }
+        if (bs.slamAt < 0) {
+          if (bs.fight >= bs.slams * bs.def.period + 0.6) {
+            bs.slamAt = bs.fight + 0.9;
+            bs.slamX = [px];
+            if (lv.index >= 10) bs.slamX.add((px + (px > 0.5 ? -0.3 : 0.3)).clamp(0.1, 0.9));
+            events.add(NgEvt('slam', px, 0, '', false));
+          }
+        } else if (bs.fight >= bs.slamAt) {
+          for (final sx in bs.slamX) {
+            if ((sx - px).abs() <= 0.1 + bw * 0.6) {
+              final loss = math.max(1, (count * 0.25).ceil());
+              count -= loss;
+              events.add(NgEvt('hit', px, 0, '−${ngFmt(loss)}', false));
+              break;
+            }
+          }
+          if (count <= 0) {
+            count = 0;
+            _lose('被 ${bs.def.emoji} 的攻擊打垮了');
+            return;
+          }
+          bs.slamAt = -1;
+          bs.slams++;
         }
       }
-      slamAt = -1;
-      slams++;
     }
   }
-
-  void _nextRow() {
-    row++;
-    if (row >= lv.rows.length) {
-      result = 1;
-      events.add(const NgEvt('win', 0, '過關', true));
-      return;
-    }
-    _load();
-  }
-}
-
-/// 從第 i 排開頭（站在 lane、人數 count）整段模擬到穿過這一排，回傳剩餘人數（0＝死）
-int ngSegment(NgLevel lv, int i, int lane, int count) {
-  final run = NgRun(lv, perfect: true, row: i, lane: lane, count: count);
-  while (run.result == 0 && run.row == i) {
-    run.step(ngDt);
-  }
-  return run.result == 2 ? 0 : run.count;
-}
-
-// ---------------------------------------------------------------- 求解／驗證
-const _monEmojis = ['👾', '🐛', '🦇', '🕷️', '👻', '🐀'];
-const _bossEmojis = ['👹', '🐉', '👑', '😈', '🦖'];
-
-typedef _P = ({int lanes, int rows, double interval, double mon, double boss, double limit, double period});
-
-_P _params(int idx) {
-  final t = (idx - 1) / (ngLevels - 1);
-  final ease = idx <= 3 ? (4 - idx) * 0.1 : 0.0;
-  return (
-    lanes: idx >= 16 ? 4 : 3,
-    rows: 8 + (idx * 0.5).floor() + (idx >= 10 ? 2 : 0) + (idx >= 20 ? 2 : 0),
-    interval: 2.0 - 0.7 * t,
-    mon: 0.45 + 0.5 * t - ease, // 小怪血量＝這一段火力的幾成
-    boss: 0.72 + 0.27 * t - ease, // 頭目血量＝最佳走法火力的幾成（越後面越貼著最佳解）
-    limit: 9 - 3 * t,
-    period: 2.4 - 1.0 * t,
-  );
-}
-
-NgLevel ngLevel(int idx) {
-  final p = _params(idx);
-  NgLevel? last;
-  for (var attempt = 0; attempt < 400; attempt++) {
-    final lv = _build(idx, p, math.Random(idx * 7919 + attempt * 104729 + 13));
-    last = lv;
-    if (lv.best <= 0) continue;
-    if (idx >= 2 && ngGreedy(lv) > 0) continue;
-    if (idx >= 6 && ngStayInLane(lv) > 0) continue;
-    return lv;
-  }
-  return last!;
-}
-
-NgLevel _one(NgLevel lv, NgRow r) => NgLevel(lv.index, lv.lanes, lv.interval, lv.start, [r], 0);
-
-/// 從上一排的 dp（每條道的最大人數）走一排，回傳這一排後每條道的最大人數
-List<int> _dpRow(NgLevel proto, NgRow r, List<int> dp) {
-  final lanes = proto.lanes;
-  final one = _one(proto, r);
-  final out = List<int>.filled(lanes, 0);
-  for (var l = 0; l < lanes; l++) {
-    var from = 0;
-    for (var d = -1; d <= 1; d++) {
-      final k = l + d;
-      if (k >= 0 && k < lanes) from = math.max(from, dp[k]);
-    }
-    if (from <= 0) continue;
-    out[l] = ngSegment(one, 0, l, from);
-  }
-  return out;
-}
-
-NgLevel _build(int idx, _P p, math.Random rng) {
-  const start = 10;
-  final lanes = p.lanes;
-  final proto = NgLevel(idx, lanes, p.interval, start, const [], 0);
-  final rows = <NgRow>[];
-  var dp = List<int>.filled(lanes, start);
-  final midBoss = idx >= 3 ? p.rows ~/ 2 : -1;
-  for (var r = 0; r < p.rows; r++) {
-    final last = r == p.rows - 1;
-    if (last || r == midBoss) {
-      final best = dp.reduce(math.max);
-      final m = p.boss * (last ? 1.0 : 0.9);
-      final hp = math.max(10, (best * ngK * (p.interval + p.limit) * m).floor());
-      final row = NgRow.boss(hp, _bossEmojis[last ? 1 + rng.nextInt(_bossEmojis.length - 1) : 0], p.limit, p.period, isFinal: last);
-      rows.add(row);
-      dp = _dpRow(proto, row, dp);
-      continue;
-    }
-    NgRow? ok;
-    List<int>? okDp;
-    for (var tries = 0; tries < 30; tries++) {
-      final row = _segRow(rng, idx, p, dp);
-      final nd = _dpRow(proto, row, dp);
-      if (nd.any((c) => c > 0)) {
-        ok = row;
-        okDp = nd;
-        break;
-      }
-    }
-    if (ok == null) return NgLevel(idx, lanes, p.interval, start, rows, 0);
-    rows.add(ok);
-    dp = okDp!;
-  }
-  return NgLevel(idx, lanes, p.interval, start, rows, dp.reduce(math.max));
-}
-
-NgRow _segRow(math.Random rng, int idx, _P p, List<int> dp) {
-  final lanes = p.lanes;
-  final ref = math.max(5, dp.reduce(math.max));
-  final gates = <NgGate>[for (var l = 0; l < lanes; l++) _gate(rng, ref, idx)];
-  if (!gates.any((g) => g.isGood)) gates[rng.nextInt(lanes)] = NgGate(NgOp.add, math.max(2, (ref * 0.3).round()));
-  final mons = <NgMon>[];
-  final T = p.interval;
-  final monP = (0.42 + 0.25 * (idx / ngLevels)).clamp(0.0, 0.8);
-  for (var l = 0; l < lanes; l++) {
-    if (rng.nextDouble() > monP) continue;
-    final n = rng.nextDouble() < 0.35 + 0.3 * (idx / ngLevels) ? 2 : 1;
-    var prev = 0.0;
-    for (var k = 0; k < n; k++) {
-      final a = k == 0 ? T * (0.3 + 0.25 * rng.nextDouble()) : math.min(T * 0.95, prev + T * (0.25 + 0.2 * rng.nextDouble()));
-      if (a <= prev + 0.05) break;
-      final hp = math.max(3, (ref * ngK * (a - prev) * p.mon * (0.6 + 0.4 * rng.nextDouble())).round());
-      mons.add(NgMon(l, a, hp, _monEmojis[rng.nextInt(_monEmojis.length)]));
-      prev = a;
-    }
-  }
-  mons.sort((a, b) => a.arrive.compareTo(b.arrive));
-  return NgRow.seg(gates, mons);
-}
-
-NgGate _gate(math.Random rng, int ref, int idx) {
-  final hard = idx / ngLevels;
-  final x = rng.nextDouble();
-  var subP = 0.18 + 0.1 * hard, divP = 0.1 + 0.08 * hard, mulP = 0.28;
-  if (ref > 150 * (1 + idx)) {
-    // 人數已經太多：多出扣人的門，少出乘法，不然只是數字膨脹不是難
-    subP = 0.38;
-    divP = 0.3;
-    mulP = 0.04;
-  }
-  if (x < subP) return NgGate(NgOp.sub, math.max(1, (ref * (0.08 + (ref > 150 * (1 + idx) ? 0.55 : 0.4) * rng.nextDouble())).round()));
-  if (x < subP + divP) return NgGate(NgOp.div, 2 + rng.nextInt(idx >= 14 ? 3 : 2));
-  if (x < subP + divP + mulP) return NgGate(NgOp.mul, 2 + (rng.nextDouble() < 0.18 ? 2 : rng.nextInt(2)));
-  return NgGate(NgOp.add, math.max(2, (ref * (0.1 + 0.7 * rng.nextDouble())).round()));
-}
-
-/// 最佳解（每段最多換一道，換完在這一段全程待在新的道）的剩餘人數；0＝無解
-int ngSolve(NgLevel lv) {
-  var dp = List<int>.filled(lv.lanes, lv.start);
-  for (final r in lv.rows) {
-    dp = _dpRow(lv, r, dp);
-  }
-  return dp.reduce(math.max);
-}
-
-/// 最佳解路線（每一排站哪條道，頭目那排＝前一排的道）；無解回傳 null
-List<int>? ngSolvePath(NgLevel lv) {
-  final n = lv.rows.length, lanes = lv.lanes;
-  final dp = [for (var i = 0; i <= n; i++) List<int>.filled(lanes, 0)];
-  final par = [for (var i = 0; i <= n; i++) List<int>.filled(lanes, 0)];
-  dp[0] = List<int>.filled(lanes, lv.start);
-  for (var i = 0; i < n; i++) {
-    for (var l = 0; l < lanes; l++) {
-      var from = 0, fk = l;
-      for (var d = -1; d <= 1; d++) {
-        final k = l + d;
-        if (k >= 0 && k < lanes && dp[i][k] > from) {
-          from = dp[i][k];
-          fk = k;
-        }
-      }
-      par[i + 1][l] = fk;
-      if (from > 0) dp[i + 1][l] = ngSegment(lv, i, l, from);
-    }
-  }
-  var bl = 0;
-  for (var l = 1; l < lanes; l++) {
-    if (dp[n][l] > dp[n][bl]) bl = l;
-  }
-  if (dp[n][bl] <= 0) return null;
-  final path = List<int>.filled(n, 0);
-  var l = bl;
-  for (var i = n - 1; i >= 0; i--) {
-    path[i] = l;
-    l = par[i + 1][l];
-  }
-  return path;
-}
-
-/// 照一條路線（每排站哪條道）完美執行的結果；0＝死
-int ngReplay(NgLevel lv, List<int> path) {
-  var c = lv.start;
-  for (var i = 0; i < lv.rows.length; i++) {
-    c = ngSegment(lv, i, path[i], c);
-    if (c <= 0) return 0;
-  }
-  return c;
-}
-
-/// 「每一段挑模擬結果人數最多的那道（只能換一道）」的結果；0＝輸
-int ngGreedy(NgLevel lv) {
-  var lane = lv.lanes ~/ 2, c = lv.start;
-  for (var i = 0; i < lv.rows.length; i++) {
-    var bl = lane, bc = -1;
-    for (var d = -1; d <= 1; d++) {
-      final k = lane + d;
-      if (k < 0 || k >= lv.lanes) continue;
-      final v = ngSegment(lv, i, k, c);
-      if (v > bc) {
-        bc = v;
-        bl = k;
-      }
-    }
-    lane = bl;
-    c = bc;
-    if (c <= 0) return 0;
-  }
-  return c;
-}
-
-/// 一直站同一條道最好的那條
-int ngStayInLane(NgLevel lv) {
-  var best = 0;
-  for (var lane = 0; lane < lv.lanes; lane++) {
-    var c = lv.start;
-    for (var i = 0; i < lv.rows.length; i++) {
-      c = ngSegment(lv, i, lane, c);
-      if (c <= 0) break;
-    }
-    if (c > best) best = c;
-  }
-  return best;
-}
-
-/// 每段隨機換道（−1/0/+1）的過關機率
-double ngRandomWinRate(NgLevel lv, {int n = 600, int seed = 1}) {
-  final rng = math.Random(seed);
-  var win = 0;
-  for (var i = 0; i < n; i++) {
-    var lane = rng.nextInt(lv.lanes), c = lv.start;
-    for (var r = 0; r < lv.rows.length; r++) {
-      lane = (lane + rng.nextInt(3) - 1).clamp(0, lv.lanes - 1);
-      c = ngSegment(lv, r, lane, c);
-      if (c <= 0) break;
-    }
-    if (c > 0) win++;
-  }
-  return win / n;
 }

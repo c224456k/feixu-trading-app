@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'number_gate_logic.dart';
 
 /// 數字門（試玩）：單機、不連伺服器、沒有獎金。
-/// 流程：選關 → 全圖預覽（先規劃路線）→ 開跑（玩家在下面自動機槍掃射，點左／右半邊或 ←→ 換道）→ 結算。
+/// 仿 FB 廣告：手指左右拖動整隊人，一直自動掃射，怪一直來，很久才出現一對加減乘除的大門（左邊是鎖住的大門）。
 class NumberGateScreen extends StatefulWidget {
   const NumberGateScreen({super.key});
 
@@ -16,44 +16,39 @@ class NumberGateScreen extends StatefulWidget {
   State<NumberGateScreen> createState() => _NumberGateScreenState();
 }
 
-enum _Ph { menu, preview, run }
-
 class _Floater {
   final String text;
   final bool good;
-  final double x; // 以道為單位的橫向位置
-  final double y; // 離玩家的高度（px）
+  final double x; // 0~1
+  double y; // 畫面高度比例（0 頂 1 底）
+  final double size;
   double t = 0;
-  _Floater(this.text, this.good, this.x, this.y);
+  _Floater(this.text, this.good, this.x, this.y, this.size);
 }
 
 class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerProviderStateMixin {
   static const _saveKey = 'number_gate_unlocked_v1';
-  static const _lead = 2.2; // 開跑前的準備秒數（可以先選起始道）
-  static const segPx = 200.0; // 一段（兩排門之間）的畫面距離
+  static const _lead = 2.4;
 
   late final Ticker _ticker;
   final _repaint = ValueNotifier<int>(0);
   final _focus = FocusNode();
   Duration _last = Duration.zero;
 
-  _Ph _ph = _Ph.menu;
+  bool _inGame = false;
   int _unlocked = 1;
   int _level = 1;
   late NgLevel _lv;
-  bool _hint = false;
-  List<int>? _hintPath;
+  late NgSim _sim;
 
-  // 跑關狀態
-  late NgRun _run;
   double _acc = 0;
-  double _lead0 = _lead; // 準備倒數剩餘
-  double _laneX = 0;
-  double _lockFlash = 0;
+  double _lead0 = _lead;
+  double _target = 0.5;
+  int _keyDir = 0;
+  double _clock = 0;
   double _hitFlash = 0;
+  double _shake = 0;
   double _bossFlash = 0;
-  double _clock = 0; // 畫面動畫用
-  int _shown = 0;
   final List<_Floater> _floats = [];
   bool _over = false;
 
@@ -87,26 +82,17 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
     } catch (_) {}
   }
 
-  void _openLevel(int i, {bool hint = false}) {
-    setState(() {
-      _level = i;
-      _lv = ngLevel(i);
-      _hint = hint;
-      _hintPath = hint ? ngSolvePath(_lv) : null;
-      _ph = _Ph.preview;
-    });
-  }
-
-  void _start() {
-    _run = NgRun(_lv, lane: _lv.lanes ~/ 2, count: _lv.start);
-    _laneX = _run.lane.toDouble();
-    _lead0 = _lead;
+  void _start(int level) {
+    _level = level;
+    _lv = ngLevel(level);
+    _sim = NgSim(_lv);
     _acc = 0;
-    _shown = _run.count;
+    _lead0 = _lead;
+    _target = 0.5;
     _floats.clear();
-    _lockFlash = _hitFlash = _bossFlash = 0;
+    _hitFlash = _shake = _bossFlash = 0;
     _over = false;
-    setState(() => _ph = _Ph.run);
+    setState(() => _inGame = true);
     _focus.requestFocus();
   }
 
@@ -114,52 +100,62 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
   void _onTick(Duration now) {
     final dt = _last == Duration.zero ? 0.0 : math.min(0.05, (now - _last).inMicroseconds / 1e6);
     _last = now;
-    if (_ph != _Ph.run) return;
+    if (!_inGame) return;
     _clock += dt;
-    _laneX += (_run.lane - _laneX) * math.min(1.0, dt * 16);
-    if (_lockFlash > 0) _lockFlash -= dt;
     if (_hitFlash > 0) _hitFlash -= dt;
+    if (_shake > 0) _shake -= dt;
     if (_bossFlash > 0) _bossFlash -= dt;
     for (final f in _floats) {
       f.t += dt;
+      f.y -= dt * 0.12;
     }
-    _floats.removeWhere((f) => f.t > 1.0);
+    _floats.removeWhere((f) => f.t > 0.9);
+    if (_keyDir != 0) _target = (_target + _keyDir * dt * 1.5).clamp(0.0, 1.0);
     if (_lead0 > 0) {
       _lead0 -= dt;
-    } else if (_run.result == 0) {
+      // 準備期間隊伍也可以先移動
+      final d = (_target - _sim.px).clamp(-ngMoveSpeed * dt, ngMoveSpeed * dt);
+      _sim.px = (_sim.px + d).clamp(0.04, 0.96);
+    } else if (_sim.result == 0) {
       _acc += dt;
       var n = 0;
-      while (_acc >= ngDt && n < 6 && _run.result == 0) {
-        _run.step(ngDt);
-        _acc -= ngDt;
+      while (_acc >= 1 / 60 && n < 6 && _sim.result == 0) {
+        _sim.step(1 / 60, _target);
+        _acc -= 1 / 60;
         n++;
       }
       if (_acc > 0.2) _acc = 0;
     }
-    for (final e in _run.events) {
+    for (final e in _sim.events) {
       switch (e.kind) {
         case 'gate':
-          _floats.add(_Floater(e.text, e.good, _laneX, 60));
-          if (!e.good) _hitFlash = 0.2;
+          _floats.add(_Floater(e.text, e.good, e.x, 0.66, 34));
+          if (!e.good) _hitFlash = 0.25;
+        case 'lock':
+          _floats.add(_Floater(e.text, false, e.x, 0.66, 28));
+          _hitFlash = 0.3;
+          _shake = 0.3;
+        case 'armor':
+          _floats.add(_Floater(e.text, true, 0.25, 0.45, 30));
+          _bossFlash = 0.2;
         case 'bite':
         case 'hit':
-          _floats.add(_Floater(e.text, false, _laneX, 40));
-          _hitFlash = 0.25;
+          _floats.add(_Floater(e.text, false, e.x, 0.72, 24));
+          _hitFlash = 0.2;
+          _shake = 0.2;
         case 'kill':
-          _floats.add(_Floater('💥', true, e.lane.toDouble(), 150));
+          if (_floats.length < 40) _floats.add(_Floater('✦', true, e.x, 0.84 - e.y / ngH * 0.74, 22));
         case 'boss':
-          _floats.add(_Floater(e.text, true, _lv.lanes / 2 - 0.5, 200));
+          _floats.add(_Floater(e.text, true, 0.5, 0.3, 30));
           _bossFlash = 0.5;
         case 'slam':
-          _bossFlash = 0.15;
+          _bossFlash = 0.1;
       }
     }
-    _run.events.clear();
-    final d = _run.count - _shown;
-    _shown += d.abs() < 4 ? d : (d * math.min(1.0, dt * 12)).round();
-    if (!_over && _run.result != 0) {
+    _sim.events.clear();
+    if (!_over && _sim.result != 0) {
       _over = true;
-      if (_run.result == 1 && _level >= _unlocked && _level < ngLevels) {
+      if (_sim.result == 1 && _level >= _unlocked && _level < ngLevels) {
         _unlocked = _level + 1;
         _save();
       }
@@ -168,14 +164,10 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
     _repaint.value++;
   }
 
-  void _shift(int d) {
-    if (_ph != _Ph.run || _run.result != 0) return;
-    if (_lead0 > 0) {
-      // 開跑前可以隨便選起始道
-      _run.lane = (_run.lane + d).clamp(0, _lv.lanes - 1);
-      return;
-    }
-    if (!_run.shift(d)) _lockFlash = 0.35;
+  void _setTargetFromX(double dx, double width) {
+    final roadW = math.min(width, 540.0);
+    final left = (width - roadW) / 2;
+    _target = ((dx - left) / roadW).clamp(0.0, 1.0);
   }
 
   // ---------------- 畫面 ----------------
@@ -185,32 +177,25 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
       focusNode: _focus,
       autofocus: true,
       onKeyEvent: (n, e) {
-        if (e is! KeyDownEvent) return KeyEventResult.ignored;
         final k = e.logicalKey;
-        if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyA) {
-          _shift(-1);
-          return KeyEventResult.handled;
+        final left = k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyA;
+        final right = k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyD;
+        if (!left && !right) return KeyEventResult.ignored;
+        if (e is KeyUpEvent) {
+          if ((left && _keyDir < 0) || (right && _keyDir > 0)) _keyDir = 0;
+        } else {
+          _keyDir = left ? -1 : 1;
         }
-        if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyD) {
-          _shift(1);
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
+        return KeyEventResult.handled;
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0B1020),
         appBar: AppBar(
-          title: Text(_ph == _Ph.menu ? '數字門（試玩）' : '數字門 第 $_level 關'),
+          title: Text(_inGame ? '數字門 第 $_level 關' : '數字門（試玩）'),
           backgroundColor: const Color(0xFF111833),
-          leading: _ph == _Ph.menu ? null : BackButton(onPressed: () => setState(() => _ph = _Ph.menu)),
+          leading: _inGame ? BackButton(onPressed: () => setState(() => _inGame = false)) : null,
         ),
-        body: SafeArea(
-          child: switch (_ph) {
-            _Ph.menu => _menu(),
-            _Ph.preview => _preview(),
-            _Ph.run => _game(),
-          },
-        ),
+        body: SafeArea(child: _inGame ? _game() : _menu()),
       ),
     );
   }
@@ -229,12 +214,12 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
               const Text('試玩版：單機、沒有獎金', style: TextStyle(color: Colors.amberAccent)),
               const SizedBox(height: 12),
               const Text(
-                '• 你在最下面，人數越多火力越強，自動機槍掃射前方\n'
-                '• 路上有小怪：牠在你這條道、而且撞到你時還活著，就咬掉等於牠剩餘血量的人數；別條道的不會咬你\n'
-                '• 數字門會改人數（+ − × ÷），但好的門前面常常有一堆小怪\n'
-                '• 點畫面左半邊／右半邊（或 ← →）換道；兩排之間只能換一次，所以要往前看好幾排\n'
-                '• 中途和最後有頭目：畫面停住，限時打完血條；牠會預告攻擊的道（變紅），要換道閃開\n'
-                '• 每一關開跑前會先給你看整張地圖，先想好路線再開始',
+                '• 手指左右拖動整隊人（電腦用 ← →），一直自動掃射前方\n'
+                '• 怪會一直從前面來；撞到你的隊伍就咬掉人數，躲開的會從旁邊過去\n'
+                '• 人越多火力越強，但隊伍也越寬、越不好躲\n'
+                '• 很久才出現一對大門：右邊是一般的門（＋ − × ÷），\n'
+                '   左邊是「鎖住的大門」，把牠的裝甲血條打光才會開，開了是大獎；沒打開就衝過去會被鎖住、人數砍半\n'
+                '• 中途和最後有頭目：怪停止出現，限時打血條，牠會預告攻擊的位置（紅柱），要閃開',
                 style: TextStyle(color: Colors.white70, height: 1.7),
               ),
               const SizedBox(height: 16),
@@ -247,7 +232,7 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
                 children: [
                   for (var i = 1; i <= ngLevels; i++)
                     InkWell(
-                      onTap: i <= _unlocked ? () => _openLevel(i) : null,
+                      onTap: i <= _unlocked ? () => _start(i) : null,
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
                         alignment: Alignment.center,
@@ -270,134 +255,26 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
     );
   }
 
-  Widget _chip(NgGate g, {bool onPath = false}) {
-    final good = g.isGood;
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.all(3),
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: good ? const Color(0xFF1B5E20) : const Color(0xFFB71C1C),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: onPath ? Colors.amberAccent : Colors.white12, width: onPath ? 3 : 1),
-        ),
-        child: Text(g.label, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-      ),
-    );
-  }
-
-  /// 預覽裡一排門前面的小怪：每條道一格，列出這條道的小怪（依先後）
-  Widget _monStrip(NgRow r) {
-    return Row(children: [
-      for (var l = 0; l < _lv.lanes; l++)
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            alignment: Alignment.center,
-            child: Text(
-              [for (final m in r.mons.reversed.where((m) => m.lane == l)) '${m.emoji}${ngFmt(m.hp)}'].join('  '),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0xFFFFCC80), fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ),
-    ]);
-  }
-
-  Widget _preview() {
-    final rows = _lv.rows;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-          child: Text(
-            '先看地圖想路線：從最下面（起點 ${_lv.start} 人）往上跑，${rows.length} 排・${_lv.lanes} 條道・每段 ${_lv.interval.toStringAsFixed(2)} 秒。'
-            '橘色是門前面的小怪（表情＋血量）',
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
-        ),
-        Expanded(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                children: [
-                  for (var i = rows.length - 1; i >= 0; i--)
-                    if (rows[i].isBoss)
-                      Container(
-                        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4A148C),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.purpleAccent, width: 2),
-                        ),
-                        child: Text(
-                          '${rows[i].emoji} ${rows[i].isFinal ? '最後頭目' : '中途頭目'}  血量 ${ngFmt(rows[i].bossHp)}・限時 ${rows[i].bossLimit.toStringAsFixed(0)} 秒',
-                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                      )
-                    else ...[
-                      if (rows[i].mons.isNotEmpty) _monStrip(rows[i]),
-                      Row(children: [
-                        for (var l = 0; l < _lv.lanes; l++) _chip(rows[i].gates![l], onPath: _hintPath != null && _hintPath![i] == l),
-                      ]),
-                    ],
-                  Container(
-                    margin: const EdgeInsets.all(6),
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(10),
-                    child: Text('🔫 起點 ${_lv.start} 人（開跑前可以自己選起始道）', style: const TextStyle(color: Colors.white54)),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              FilledButton.icon(onPressed: _start, icon: const Icon(Icons.play_arrow), label: const Text('開始')),
-              const SizedBox(width: 12),
-              OutlinedButton(
-                onPressed: () => setState(() {
-                  _hint = !_hint;
-                  _hintPath = _hint ? ngSolvePath(_lv) : null;
-                }),
-                child: Text(_hint ? '藏起解法' : '看解法'),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _game() {
     return LayoutBuilder(builder: (context, c) {
       return Stack(
         children: [
           Positioned.fill(
-            child: GestureDetector(
+            child: Listener(
               behavior: HitTestBehavior.opaque,
-              onTapDown: (d) => _shift(d.localPosition.dx < c.maxWidth / 2 ? -1 : 1),
+              onPointerDown: (e) => _setTargetFromX(e.localPosition.dx, c.maxWidth),
+              onPointerMove: (e) => _setTargetFromX(e.localPosition.dx, c.maxWidth),
               child: CustomPaint(painter: _GatePainter(this, _repaint)),
             ),
           ),
-          if (_run.result != 0) Positioned.fill(child: _result()),
+          if (_sim.result != 0) Positioned.fill(child: _result()),
         ],
       );
     });
   }
 
   Widget _result() {
-    final win = _run.result == 1;
+    final win = _sim.result == 1;
     Widget btn(String s, VoidCallback f, {bool primary = false}) => SizedBox(
           width: 240,
           child: primary
@@ -415,18 +292,17 @@ class _NumberGateScreenState extends State<NumberGateScreen> with SingleTickerPr
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(win ? '最後剩下 ${ngFmt(_run.count)} 人' : _run.why,
+            child: Text(win ? '最後剩下 ${ngFmt(_sim.count)} 人・擊殺 ${_sim.kills}' : '${_sim.why}（擊殺 ${_sim.kills}）',
                 textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 15)),
           ),
           const SizedBox(height: 18),
-          if (win && _level < ngLevels) btn('▶ 下一關', () => _openLevel(_level + 1), primary: true),
+          if (win && _level < ngLevels) btn('▶ 下一關', () => _start(_level + 1), primary: true),
           if (win && _level >= ngLevels) const Text('🏆 30 關全部通過！', style: TextStyle(color: Colors.amberAccent, fontSize: 18)),
-          if (!win) btn('🔄 重新挑戰', () => _openLevel(_level), primary: true),
+          if (!win) btn('🔄 重新挑戰', () => _start(_level), primary: true),
           const SizedBox(height: 8),
-          if (win) btn('🔄 再玩一次', () => _openLevel(_level)),
-          if (!win) btn('💡 看解法', () => _openLevel(_level, hint: true)),
+          if (win) btn('🔄 再玩一次', () => _start(_level)),
           const SizedBox(height: 8),
-          btn('回選關', () => setState(() => _ph = _Ph.menu)),
+          btn('回選關', () => setState(() => _inGame = false)),
         ],
       ),
     );
@@ -437,174 +313,249 @@ class _GatePainter extends CustomPainter {
   final _NumberGateScreenState s;
   _GatePainter(this.s, Listenable repaint) : super(repaint: repaint);
 
-  static const segPx = _NumberGateScreenState.segPx;
+  static const _monEmoji = ['🐛', '🐀', '🧌', '🦇', '🐙'];
 
   @override
   void paint(Canvas c, Size size) {
+    final sim = s._sim;
     final lv = s._lv;
-    final run = s._run;
-    final lanes = lv.lanes;
-    final laneW = math.min(size.width / lanes, 118.0);
-    final left = (size.width - laneW * lanes) / 2;
+    final roadW = math.min(size.width, 540.0);
+    final left = (size.width - roadW) / 2;
     final playerY = size.height * 0.84;
-    final pps = segPx / lv.interval;
-    final trav = run.row * segPx + math.min(run.ts, lv.interval) * pps; // 目前走到的距離
-    double yAt(double world) => playerY - (world - trav);
-    double laneCx(double l) => left + (l + 0.5) * laneW;
+    final topY = size.height * 0.1;
+    double X(double x) => left + x * roadW;
+    double Y(double y) => playerY - (y / ngH) * (playerY - topY);
+    double sc(double y) => 0.7 + 0.3 * (1 - (y / ngH).clamp(0.0, 1.0)); // 越遠越小
 
-    // 背景與道
-    c.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF0B1020));
-    c.drawRect(Rect.fromLTWH(left, 0, laneW * lanes, size.height), Paint()..color = const Color(0xFF141C3A));
-    final line = Paint()
-      ..color = Colors.white10
-      ..strokeWidth = 2;
-    for (var l = 0; l <= lanes; l++) {
-      c.drawLine(Offset(left + l * laneW, 0), Offset(left + l * laneW, size.height), line);
-    }
-    final off = trav % 60;
-    for (var y = -60 + off; y < size.height; y += 60) {
-      c.drawLine(Offset(left, y), Offset(left + laneW * lanes, y), Paint()..color = Colors.white.withValues(alpha: 0.04));
-    }
+    c.save();
+    if (s._shake > 0) c.translate(math.sin(s._clock * 90) * 4 * s._shake / 0.3, math.cos(s._clock * 77) * 3 * s._shake / 0.3);
 
-    // 頭目預告的攻擊道（紅色）
-    if (run.slamAt >= 0) {
-      final k = (1 - (run.slamAt - (run.ts - lv.interval)) / 0.9).clamp(0.0, 1.0);
-      for (final l in run.slamLanes) {
-        c.drawRect(Rect.fromLTWH(left + l * laneW, 0, laneW, size.height),
-            Paint()..color = Colors.redAccent.withValues(alpha: 0.12 + 0.32 * k));
-      }
-    }
-
-    // 子彈要打到的位置：目前這條道上的目標，或下一排門
-    double? stopY;
-    final row = run.row < lv.rows.length ? lv.rows[run.row] : null;
-    if (row != null && !row.isBoss) {
-      stopY = yAt(run.row * segPx + segPx) + 8;
-      if (run.targetMon != null) stopY = yAt(run.row * segPx + row.mons[run.targetMon!].arrive * pps) + 14;
-    } else if (row != null) {
-      stopY = yAt(run.row * segPx + segPx) - 200 + 70;
+    // 背景（沒有格子）：漸層天空 + 路 + 往下流動的光點
+    c.drawRect(
+        Offset.zero & size,
+        Paint()
+          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1A1040), Color(0xFF0E1F3D), Color(0xFF0A1A2A)])
+              .createShader(Offset.zero & size));
+    final road = Rect.fromLTWH(left, 0, roadW, size.height);
+    c.drawRect(
+        road,
+        Paint()
+          ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00FFFFFF), Color(0x14FFFFFF)])
+              .createShader(road));
+    final edge = Paint()
+      ..color = const Color(0xFF7C4DFF).withValues(alpha: 0.25)
+      ..strokeWidth = 3;
+    c.drawLine(Offset(left, 0), Offset(left, size.height), edge);
+    c.drawLine(Offset(left + roadW, 0), Offset(left + roadW, size.height), edge);
+    final flow = (sim.sc * 0.45) % 1.0;
+    final srng = math.Random(11);
+    for (var i = 0; i < 40; i++) {
+      final px = srng.nextDouble(), py = (srng.nextDouble() + flow * (0.5 + srng.nextDouble())) % 1.0;
+      c.drawCircle(Offset(left + px * roadW, py * size.height), 1.2 + srng.nextDouble() * 1.4, Paint()..color = Colors.white.withValues(alpha: 0.05 + 0.1 * py));
     }
 
-    // 排（由遠到近）
-    for (var i = lv.rows.length - 1; i >= run.row; i--) {
-      final r = lv.rows[i];
-      final base = i * segPx;
-      final dim = i > run.row ? 0.55 : 1.0;
-      if (r.isBoss) {
-        final y = yAt(base + segPx) - 200;
-        if (y < -120 || y > size.height + 120) continue;
-        final cx = left + laneW * lanes / 2;
-        final w = laneW * lanes * 0.84;
-        final rect = Rect.fromCenter(center: Offset(cx, y), width: w, height: 120);
-        c.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(18)), Paint()..color = const Color(0xFF4A148C).withValues(alpha: dim));
-        c.drawRRect(
-            RRect.fromRectAndRadius(rect, const Radius.circular(18)),
-            Paint()
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 3
-              ..color = (s._bossFlash > 0 ? Colors.white : Colors.purpleAccent).withValues(alpha: dim));
-        _text(c, r.emoji, Offset(rect.left + 56, y - 6), 62);
-        // 血條
-        final hp = i == run.row ? (run.bossHp / r.bossHp).clamp(0.0, 1.0) : 1.0;
-        final bar = Rect.fromLTWH(rect.left + 100, y - 4, rect.width - 120, 16);
-        c.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(8)), Paint()..color = Colors.black54);
-        c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(bar.left, bar.top, bar.width * hp, bar.height), const Radius.circular(8)),
-            Paint()..color = const Color(0xFFFF5252));
-        _text(c, ngFmt((i == run.row ? run.bossHp : r.bossHp.toDouble()).ceil().clamp(0, 1 << 40)), Offset(bar.center.dx, bar.center.dy), 12, bold: true);
-        if (i == run.row && run.bossFight) {
-          final left0 = (r.bossLimit - (run.ts - lv.interval)).clamp(0.0, r.bossLimit);
-          _text(c, '⏱ ${left0.toStringAsFixed(1)}', Offset(rect.right - 44, y - 34), 15, color: left0 < 3 ? Colors.redAccent : Colors.amberAccent, bold: true);
-        }
-        continue;
-      }
-      // 小怪
-      for (var k = 0; k < r.mons.length; k++) {
-        final m = r.mons[k];
-        if (i == run.row && run.gone[k]) continue;
-        final y = yAt(base + m.arrive * pps);
-        if (y < -40 || y > size.height + 40) continue;
-        final hp = i == run.row ? run.mhp[k] : m.hp.toDouble();
-        final danger = i == run.row && m.lane == run.lane;
-        final cx = laneCx(m.lane.toDouble());
-        c.drawCircle(Offset(cx, y + 4), 25, Paint()..color = (danger ? const Color(0xFFB71C1C) : const Color(0xFF37474F)).withValues(alpha: 0.85 * dim));
-        _text(c, m.emoji, Offset(cx, y), 28);
-        _text(c, ngFmt(hp.ceil().clamp(0, 1 << 40)), Offset(cx, y - 32), 14, color: (danger ? Colors.amberAccent : Colors.white70).withValues(alpha: dim), bold: true);
-      }
-      // 門
-      final gy = yAt(base + segPx);
-      if (gy < -50 || gy > size.height + 50) continue;
-      for (var l = 0; l < lanes; l++) {
-        final g = r.gates![l];
-        final rect = Rect.fromLTWH(left + l * laneW + 5, gy - 28, laneW - 10, 56);
-        final good = g.isGood;
-        c.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)),
-            Paint()..color = (good ? const Color(0xFF2E7D32) : const Color(0xFFC62828)).withValues(alpha: dim));
-        c.drawRRect(
-            RRect.fromRectAndRadius(rect, const Radius.circular(12)),
+    // 頭目預告的攻擊柱
+    final boss = sim.boss;
+    if (boss != null && boss.slamAt >= 0) {
+      final k = (1 - (boss.slamAt - boss.fight) / 0.9).clamp(0.0, 1.0);
+      for (final sx in boss.slamX) {
+        final r = Rect.fromLTRB(X(sx - 0.1), 0, X(sx + 0.1), size.height);
+        c.drawRect(r, Paint()..color = Colors.redAccent.withValues(alpha: 0.10 + 0.34 * k));
+        c.drawRect(
+            r,
             Paint()
               ..style = PaintingStyle.stroke
               ..strokeWidth = 2
-              ..color = (good ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withValues(alpha: dim));
-        _text(c, g.label, rect.center, laneW > 90 ? 26 : 22, bold: true);
+              ..color = Colors.redAccent.withValues(alpha: 0.5 + 0.4 * k));
       }
     }
 
-    // 主角：人群＋機槍
-    final px = laneCx(s._laneX);
-    final shown = math.max(0, s._shown);
-    final dots = math.min(shown, 40);
-    final rng = math.Random(7);
-    for (var i = 0; i < dots; i++) {
-      final a = rng.nextDouble() * 2 * math.pi;
-      final r = math.sqrt(rng.nextDouble()) * (12 + dots * 0.8);
-      c.drawCircle(Offset(px + math.cos(a) * r, playerY + 14 + math.sin(a) * r * 0.6), 5.5,
-          Paint()..color = s._hitFlash > 0 ? Colors.redAccent : const Color(0xFF40C4FF));
+    // 大門（左：鎖住的大門／右：一般的門）
+    for (final g in sim.gates) {
+      final y = Y(g.y);
+      if (y < -60 || y > size.height + 60) continue;
+      final k = sc(g.y);
+      final h = 74 * k;
+      final ld = g.def;
+      final locked = g.armor > 0;
+      final lrect = RRect.fromRectAndRadius(Rect.fromLTRB(X(0.02), y - h / 2, X(0.49), y + h / 2), const Radius.circular(14));
+      final rrect = RRect.fromRectAndRadius(Rect.fromLTRB(X(0.51), y - h / 2, X(0.98), y + h / 2), const Radius.circular(14));
+      // 左
+      c.drawRRect(lrect.inflate(4), Paint()..color = (locked ? Colors.amber : const Color(0xFF40C4FF)).withValues(alpha: 0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10));
+      c.drawRRect(
+          lrect,
+          Paint()
+            ..shader = LinearGradient(colors: locked ? const [Color(0xFF546E7A), Color(0xFF37474F)] : const [Color(0xFF29B6F6), Color(0xFF0277BD)])
+                .createShader(lrect.outerRect));
+      c.drawRRect(
+          lrect,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = locked ? const Color(0xFFFFC107) : Colors.white70);
+      _text(c, ngOpLabel(ld.lop, ld.lv), lrect.center.translate(locked ? 14 : 0, 0), 44 * k, color: locked ? Colors.white70 : Colors.white, bold: true);
+      if (locked) {
+        _text(c, '🔒', lrect.center.translate(-lrect.width * 0.32, 0), 30 * k);
+        final full = g.armor / math.max(1.0, g.armorMax);
+        final bar = Rect.fromLTWH(lrect.left + 8, lrect.top - 14, lrect.width - 16, 10);
+        c.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(5)), Paint()..color = Colors.black54);
+        c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(bar.left, bar.top, bar.width * full.clamp(0.0, 1.0), bar.height), const Radius.circular(5)),
+            Paint()..color = const Color(0xFFFFB300));
+        _text(c, ngFmt(g.armor.ceil()), Offset(bar.center.dx, bar.top - 9), 12, color: Colors.amberAccent, bold: true);
+      }
+      // 右
+      final good = ngOpGood(ld.rop) && !(ld.rop == NgOp.sub);
+      c.drawRRect(rrect.inflate(4), Paint()..color = (good ? const Color(0xFF40C4FF) : Colors.redAccent).withValues(alpha: 0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10));
+      c.drawRRect(
+          rrect,
+          Paint()
+            ..shader = LinearGradient(colors: good ? const [Color(0xFF29B6F6), Color(0xFF0277BD)] : const [Color(0xFFEF5350), Color(0xFFB71C1C)])
+                .createShader(rrect.outerRect));
+      c.drawRRect(
+          rrect,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = Colors.white70);
+      _text(c, ngOpLabel(ld.rop, g.rv), rrect.center, 44 * k, bold: true);
     }
-    // 子彈：從主角往上，打到目標／門為止
-    if (run.result == 0 && s._lead0 <= 0 && stopY != null && stopY < playerY - 20) {
-      final n = math.min(4, 1 + shown ~/ 15);
-      final phase = (s._clock * 18) % 1.0;
+
+    // 怪
+    final mons = List.of(sim.mons)..sort((a, b) => b.y.compareTo(a.y));
+    for (final m in mons) {
+      final y = Y(m.y);
+      if (y < -40 || y > size.height + 40) continue;
+      final k = sc(m.y);
+      final r = m.r * roadW * k;
+      final x = X(m.x);
+      c.drawOval(Rect.fromCenter(center: Offset(x, y + r * 0.9), width: r * 2.2, height: r * 0.7), Paint()..color = Colors.black38);
+      _text(c, _monEmoji[m.kind], Offset(x, y), r * 2.3);
+      final frac = (m.hp / m.maxHp).clamp(0.0, 1.0);
+      final bw = r * 2.0;
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.45, bw, 5), const Radius.circular(3)), Paint()..color = Colors.black54);
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x - bw / 2, y - r * 1.45, bw * frac, 5), const Radius.circular(3)),
+          Paint()..color = Color.lerp(const Color(0xFFFF5252), const Color(0xFF69F0AE), frac)!);
+      _text(c, ngFmt(m.hp.ceil()), Offset(x, y - r * 1.45 - 10), 12 + 2 * k, bold: true);
+    }
+    for (final b in sim.buls) {
+      final y = Y(b.y);
+      c.drawCircle(Offset(X(b.x), y), 7, Paint()..color = const Color(0xFFFF8A80).withValues(alpha: 0.4));
+      c.drawCircle(Offset(X(b.x), y), 4.5, Paint()..color = const Color(0xFFFF1744));
+    }
+
+    // 頭目
+    if (boss != null) {
+      final y = Y(boss.y);
+      final r = roadW * 0.28;
+      c.drawOval(Rect.fromCenter(center: Offset(X(0.5), y + r * 0.8), width: r * 2.4, height: r * 0.6), Paint()..color = Colors.black45);
+      _text(c, boss.def.emoji, Offset(X(0.5), y), r * 1.9);
+      if (s._bossFlash > 0) c.drawCircle(Offset(X(0.5), y), r, Paint()..color = Colors.white.withValues(alpha: 0.25));
+      final bar = Rect.fromLTWH(left + 14, 14, roadW - 28, 18);
+      c.drawRRect(RRect.fromRectAndRadius(bar, const Radius.circular(9)), Paint()..color = Colors.black54);
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(bar.left, bar.top, bar.width * (boss.hp / boss.maxHp).clamp(0.0, 1.0), bar.height), const Radius.circular(9)),
+          Paint()..shader = const LinearGradient(colors: [Color(0xFFFF5252), Color(0xFFD50000)]).createShader(bar));
+      _text(c, '${boss.def.emoji} ${ngFmt(boss.hp.ceil())}', bar.center, 13, bold: true);
+      if (boss.stopped) {
+        final left0 = (boss.def.limit - boss.fight).clamp(0.0, boss.def.limit);
+        _text(c, '⏱ ${left0.toStringAsFixed(1)}', Offset(left + roadW - 44, 46), 16, color: left0 < 4 ? Colors.redAccent : Colors.amberAccent, bold: true);
+      }
+    }
+
+    // 子彈：從隊伍往上掃，寬度＝隊伍寬
+    final px = X(sim.px);
+    final cw = sim.crowdW * roadW;
+    if (sim.result == 0 && s._lead0 <= 0) {
+      final endY = sim.fireTargetY >= 0 ? Y(sim.fireTargetY) + 10 : -10.0;
+      final n = math.min(10, 2 + sim.count ~/ 8);
+      final phase = (s._clock * 16) % 1.0;
       for (var b = 0; b < n; b++) {
-        final dx = (b - (n - 1) / 2) * 7.0;
-        for (var k = 0.0; k < 12; k++) {
-          final y = playerY - 16 - ((k + phase) * 26);
-          if (y < stopY) break;
-          c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(px + dx, y), width: 3.5, height: 12), const Radius.circular(2)),
-              Paint()..color = const Color(0xFFFFEB3B));
+        final bx = px + ((b + 0.5) / n - 0.5) * cw * 0.9;
+        for (var k = 0.0; k < 40; k++) {
+          final y = playerY - 18 - (k + phase) * 30;
+          if (y < endY) break;
+          c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(bx, y), width: 3, height: 13), const Radius.circular(2)),
+              Paint()..color = const Color(0xFFFFEE58).withValues(alpha: 0.95));
         }
       }
-      c.drawCircle(Offset(px, playerY - 18), 8 + 3 * math.sin(s._clock * 60), Paint()..color = const Color(0xFFFFF176).withValues(alpha: 0.7));
-    }
-    final locked = s._lead0 <= 0 && !run.bossFight && run.shifted;
-    c.drawCircle(
-        Offset(px, playerY),
-        20,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..color = s._lockFlash > 0 ? Colors.redAccent : (locked ? Colors.white24 : Colors.amberAccent));
-    _text(c, ngFmt(shown), Offset(px, playerY + 46), 28, bold: true);
-    for (final f in s._floats) {
-      _text(c, f.text, Offset(laneCx(f.x), playerY - f.y - f.t * 50), 24,
-          color: (f.good ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withValues(alpha: (1 - f.t).clamp(0.0, 1.0)), bold: true);
+      if (sim.fireTargetY >= 0) {
+        final sy = Y(sim.fireTargetY);
+        for (var i = 0; i < 4; i++) {
+          final a = (s._clock * 40 + i * 1.7);
+          c.drawCircle(Offset(px + math.cos(a) * cw * 0.3, sy + 8 + math.sin(a * 1.3) * 6), 3, Paint()..color = const Color(0xFFFFF59D));
+        }
+      }
     }
 
+    // 隊伍
+    final shown = math.max(0, sim.count);
+    final dots = math.min(shown, 70);
+    final rng = math.Random(5);
+    final hit = s._hitFlash > 0;
+    final depth = 14 + math.sqrt(dots.toDouble()) * 7;
+    for (var i = 0; i < dots; i++) {
+      final dx = (rng.nextDouble() - 0.5) * (cw - 12);
+      final dy = rng.nextDouble() * depth;
+      final cx = px + dx, cy = playerY + dy;
+      c.drawCircle(Offset(cx, cy), 6.5, Paint()..color = hit ? const Color(0xFFFF8A80) : const Color(0xFF29B6F6));
+      c.drawCircle(Offset(cx - 2, cy - 2), 2.2, Paint()..color = Colors.white.withValues(alpha: 0.85));
+      if (dy < depth * 0.35) {
+        c.drawRect(Rect.fromCenter(center: Offset(cx + 5, cy - 8), width: 3, height: 10), Paint()..color = const Color(0xFF263238));
+      }
+    }
+    final label = ngFmt(shown);
+    final pill = Rect.fromCenter(center: Offset(px, playerY + depth + 28), width: 20.0 + label.length * 17, height: 34);
+    c.drawRRect(RRect.fromRectAndRadius(pill, const Radius.circular(17)), Paint()..color = const Color(0xFF0D47A1).withValues(alpha: 0.9));
+    c.drawRRect(
+        RRect.fromRectAndRadius(pill, const Radius.circular(17)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = const Color(0xFF82B1FF));
+    _text(c, label, pill.center, 22, bold: true, outline: false);
+
+    // 飄字
+    for (final f in s._floats) {
+      final a = (1 - f.t / 0.9).clamp(0.0, 1.0);
+      _text(c, f.text, Offset(X(f.x), f.y * size.height), f.size,
+          color: (f.good ? const Color(0xFF69F0AE) : const Color(0xFFFF8A80)).withValues(alpha: a), bold: true);
+    }
+    c.restore();
+
+    // 紅閃
+    if (s._hitFlash > 0) {
+      c.drawRect(Offset.zero & size, Paint()..color = Colors.red.withValues(alpha: 0.18 * (s._hitFlash / 0.3).clamp(0.0, 1.0)));
+    }
     // 準備倒數
     if (s._lead0 > 0) {
-      _text(c, '${s._lead0.ceil()}', Offset(size.width / 2, size.height * 0.4), 88, color: Colors.white.withValues(alpha: 0.85), bold: true);
-      _text(c, '先點左／右半邊選起始道', Offset(size.width / 2, size.height * 0.4 + 70), 16, color: Colors.white54);
+      _text(c, '👆 手指左右拖動隊伍', Offset(size.width / 2, size.height * 0.36), 22, color: Colors.white, bold: true);
+      _text(c, '${s._lead0.ceil()}', Offset(size.width / 2, size.height * 0.46), 80, color: Colors.white.withValues(alpha: 0.85), bold: true);
     }
-    // 進度
-    final prog = (run.row / lv.rows.length).clamp(0.0, 1.0);
+    // 進度條
+    final prog = boss != null ? 1.0 : (sim.sc / lv.length).clamp(0.0, 1.0);
     c.drawRect(Rect.fromLTWH(0, 0, size.width, 5), Paint()..color = Colors.white10);
     c.drawRect(Rect.fromLTWH(0, 0, size.width * prog, 5), Paint()..color = Colors.amberAccent);
   }
 
-  void _text(Canvas c, String t, Offset center, double size, {Color color = Colors.white, bool bold = false}) {
+  void _text(Canvas c, String t, Offset center, double size, {Color color = Colors.white, bool bold = false, bool outline = true}) {
     final tp = TextPainter(
       text: TextSpan(text: t, style: TextStyle(fontSize: size, color: color, fontWeight: bold ? FontWeight.w900 : FontWeight.w500)),
       textDirection: TextDirection.ltr,
     )..layout();
+    if (outline && bold) {
+      final op = TextPainter(
+        text: TextSpan(
+            text: t,
+            style: TextStyle(
+                fontSize: size,
+                fontWeight: FontWeight.w900,
+                foreground: Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = math.max(2.0, size * 0.12)
+                  ..color = Colors.black.withValues(alpha: 0.6 * color.a))),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      op.paint(c, center - Offset(op.width / 2, op.height / 2));
+    }
     tp.paint(c, center - Offset(tp.width / 2, tp.height / 2));
   }
 
