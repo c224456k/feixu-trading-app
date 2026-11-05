@@ -2,12 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
 import '../models.dart';
 import '../settings_store.dart';
-import '../update_checker.dart';
 import 'boss_screen.dart';
 import 'casino_screen.dart';
 import 'hero_screen.dart';
@@ -48,29 +46,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _bootstrap();
-    _checkForUpdate();
-  }
-
-  Future<void> _checkForUpdate() async {
-    final info = await UpdateChecker().checkForUpdate();
-    if (info == null || !mounted) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('有新版本囉'),
-        content: Text('最新版本是 v${info.latestVersion}，建議更新才能玩到最新功能。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('稍後再說')),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await launchUrl(Uri.parse(info.releaseUrl), mode: LaunchMode.externalApplication);
-            },
-            child: const Text('前往下載'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
