@@ -13,8 +13,31 @@ const ssGold = 30; // 30 把起變金光暴風圈
 const ssRoundSec = 180.0;
 const ssDt = 1 / 60;
 const ssBotCount = 13;
-const ssPickupCount = 110; // 地上最多幾把
-const ssPickupRate = 2.5; // 每秒補幾把（限速，不然光撿就撿到爆，打架反而不划算）
+const ssPickupCount = 100; // 地上最多幾把
+const ssPickupRate = 1.8; // 每秒補幾把（限速，不然光撿就撿到爆，打架反而不划算）
+
+/// 地上鐮刀的等級：顏色代表撿到加幾把（白 1、綠 2、藍 3、紫 5、橘 8）。
+const ssPickupValue = [1, 2, 3, 5, 8];
+const _pickupWeight = [66, 20, 9, 4, 1];
+
+/// 道具
+enum SsItemType { boots, guard, magnet, rage }
+
+const ssItemName = {
+  SsItemType.boots: '跑速鞋',
+  SsItemType.guard: '金鐘罩',
+  SsItemType.magnet: '磁鐵',
+  SsItemType.rage: '狂暴藥水',
+};
+const ssItemDesc = {
+  SsItemType.boots: '跑速 +45%',
+  SsItemType.guard: '刀槍不入，不會被磨損也不會被收割',
+  SsItemType.magnet: '把附近地上的鐮刀吸過來',
+  SsItemType.rage: '撞擊力量 ×1.8',
+};
+const ssItemDur = {SsItemType.boots: 8.0, SsItemType.guard: 5.0, SsItemType.magnet: 10.0, SsItemType.rage: 8.0};
+const ssItemMax = 8; // 場上最多幾個道具
+const ssItemEvery = 5.0; // 幾秒補一個
 
 /// 鐮刀圈半徑：一把也要比身體大一圈，之後隨數量變大（開根號左右，不會大到失控）。
 double ssRingR(int n) => n <= 0 ? ssBodyR : 28 + 4.2 * math.pow(n, 0.65);
@@ -58,6 +81,9 @@ class SsFighter {
   final double aggr; // 積極度 0~1
   final double caution; // 謹慎度：多遠就開始逃
   int? chaseId;
+  // 道具效果剩餘秒數
+  final buffs = <SsItemType, double>{};
+  bool has(SsItemType t) => (buffs[t] ?? 0) > 0;
 
   SsFighter({
     required this.id,
@@ -81,10 +107,21 @@ class SsFighter {
 class SsPickup {
   double x, y;
   final double phase;
-  SsPickup(this.x, this.y, this.phase);
+  final int grade; // 0~4
+  SsPickup(this.x, this.y, this.phase, this.grade);
+  int get value => ssPickupValue[grade];
 }
 
-enum SsEvType { kill, clash, gold, silver, pickup, over }
+class SsItem {
+  final double x, y;
+  final SsItemType type;
+  final double phase;
+  SsItem(this.x, this.y, this.type, this.phase);
+}
+
+const ssItemReach = ssBodyR + 30; // 道具要用身體去碰（不是鐮刀圈）
+
+enum SsEvType { kill, clash, gold, silver, pickup, item, over }
 
 class SsEvent {
   final SsEvType type;
@@ -100,6 +137,7 @@ class SsGame {
   final math.Random rng;
   final List<SsFighter> fighters = [];
   final List<SsPickup> pickups = [];
+  final List<SsItem> items = [];
   final List<SsEvent> events = []; // 畫面每幀取走，做特效用
   final Map<int, double> _pairCd = {};
   double time = 0;
@@ -110,6 +148,7 @@ class SsGame {
   int _nameIdx = 0;
   int? introId; // 開場那個也拿一把鐮刀的路人甲
   double _pickupAcc = 0;
+  double _itemAcc = 0;
 
   SsGame({int? seed}) : rng = math.Random(seed) {
     final a = rng.nextDouble() * math.pi * 2;
@@ -138,6 +177,9 @@ class SsGame {
     }
     while (pickups.length < ssPickupCount) {
       _spawnPickup();
+    }
+    for (var i = 0; i < 4; i++) {
+      _spawnItem();
     }
   }
 
@@ -177,14 +219,29 @@ class SsGame {
     return f;
   }
 
-  void _spawnPickup({double? x, double? y}) {
+  void _spawnPickup({double? x, double? y, int? grade}) {
     if (x == null || y == null) {
       final a = rng.nextDouble() * math.pi * 2;
       final r = math.sqrt(rng.nextDouble()) * (ssArenaR - 60);
       x = math.cos(a) * r;
       y = math.sin(a) * r;
     }
-    pickups.add(SsPickup(x, y, rng.nextDouble() * math.pi * 2));
+    if (grade == null) {
+      var roll = rng.nextInt(100);
+      grade = 0;
+      while (roll >= _pickupWeight[grade!]) {
+        roll -= _pickupWeight[grade];
+        grade++;
+      }
+    }
+    pickups.add(SsPickup(x, y, rng.nextDouble() * math.pi * 2, grade));
+  }
+
+  void _spawnItem() {
+    final a = rng.nextDouble() * math.pi * 2;
+    final r = math.sqrt(rng.nextDouble()) * (ssArenaR - 150);
+    final t = SsItemType.values[rng.nextInt(SsItemType.values.length)];
+    items.add(SsItem(math.cos(a) * r, math.sin(a) * r, t, rng.nextDouble() * math.pi * 2));
   }
 
   static double _dist(double ax, double ay, double bx, double by) {
@@ -202,6 +259,16 @@ class SsGame {
       if (!f.alive) continue;
       if (f.shield > 0) f.shield -= dt;
       if (f.flash > 0) f.flash -= dt;
+      if (f.buffs.isNotEmpty) {
+        for (final t in f.buffs.keys.toList()) {
+          final v = f.buffs[t]! - dt;
+          if (v <= 0) {
+            f.buffs.remove(t);
+          } else {
+            f.buffs[t] = v;
+          }
+        }
+      }
       double wx, wy;
       if (f.player) {
         wx = ix;
@@ -212,7 +279,7 @@ class SsGame {
         wx = f.tx;
         wy = f.ty;
       }
-      final sp = ssSpeed(f.n) * (f.player ? 1 : 0.93);
+      final sp = ssSpeed(f.n) * (f.player ? 1 : 0.93) * (f.has(SsItemType.boots) ? 1.45 : 1);
       // 加速度：起步、轉向有一點點慣性，撞開時的反彈才看得出來
       final k = 1 - math.exp(-9 * dt);
       f.vx += (wx * sp - f.vx) * k;
@@ -254,6 +321,11 @@ class SsGame {
       }
     }
     fighters.removeWhere((f) => !f.alive && !f.player && f.respawnAt == 0);
+    _itemAcc += dt;
+    if (_itemAcc >= ssItemEvery) {
+      _itemAcc = 0;
+      if (items.length < ssItemMax) _spawnItem();
+    }
     _pickupAcc += ssPickupRate * dt;
     while (_pickupAcc >= 1) {
       _pickupAcc -= 1;
@@ -270,15 +342,33 @@ class SsGame {
   void _collectPickups() {
     for (final f in fighters) {
       if (!f.alive) continue;
-      final r = f.ringR + 8;
+      final r = f.ringR + 10;
       final r2 = r * r;
+      // 磁鐵：大範圍內的鐮刀往自己飛過來
+      final mag = f.has(SsItemType.magnet);
+      final mr = r * 2 + 260;
+      final mr2 = mr * mr;
       for (var i = pickups.length - 1; i >= 0; i--) {
         final p = pickups[i];
         final dx = p.x - f.x, dy = p.y - f.y;
-        if (dx * dx + dy * dy < r2) {
+        final d2 = dx * dx + dy * dy;
+        if (d2 < r2) {
           pickups.removeAt(i);
-          _gain(f, 1);
-          if (f.player) events.add(SsEvent(SsEvType.pickup, p.x, p.y, a: f.id, count: 1));
+          _gain(f, p.value);
+          if (f.player) events.add(SsEvent(SsEvType.pickup, p.x, p.y, a: f.id, count: p.value, b: p.grade));
+        } else if (mag && d2 < mr2) {
+          final d = math.sqrt(d2);
+          final pull = math.min(d, 520 * ssDt);
+          p.x -= dx / d * pull;
+          p.y -= dy / d * pull;
+        }
+      }
+      for (var i = items.length - 1; i >= 0; i--) {
+        final it = items[i];
+        if (_dist(it.x, it.y, f.x, f.y) < ssItemReach) {
+          items.removeAt(i);
+          f.buffs[it.type] = ssItemDur[it.type]!;
+          events.add(SsEvent(SsEvType.item, it.x, it.y, a: f.id, count: it.type.index));
         }
       }
     }
@@ -300,7 +390,8 @@ class SsGame {
     final approach = ((a.vx * nx + a.vy * ny) / sp).clamp(0.0, 1.0);
     // 開場路人甲的鐮刀是生鏽的（前 15 秒力量 ×0.3），主角第一戰一定打得贏
     final rusty = a.id == introId && time < 15 ? 0.3 : 1.0;
-    return a.n * (1 + 0.6 * approach) * (a.player ? 1.1 : 1.0) * rusty;
+    final rage = a.has(SsItemType.rage) ? 1.8 : 1.0;
+    return a.n * (1 + 0.6 * approach) * (a.player ? 1.1 : 1.0) * rusty * rage;
   }
 
   void _combat(double dt) {
@@ -331,8 +422,9 @@ class SsGame {
           continue;
         }
         final pa = _power(a, b, nx, ny), pb = _power(b, a, -nx, -ny);
-        final aHits = a.n > 0 && d < a.ringR + ssBodyR * 0.7; // a 的鐮刀掃到 b 的身體
-        final bHits = b.n > 0 && d < b.ringR + ssBodyR * 0.7;
+        final ga = a.has(SsItemType.guard), gb = b.has(SsItemType.guard);
+        final aHits = a.n > 0 && !gb && d < a.ringR + ssBodyR * 0.7; // a 的鐮刀掃到 b 的身體（金鐘罩擋得住）
+        final bHits = b.n > 0 && !ga && d < b.ringR + ssBodyR * 0.7;
         if (aHits || bHits) {
           if (aHits && (!bHits || pa >= pb)) {
             _kill(a, b);
@@ -349,8 +441,8 @@ class SsGame {
           // 多一點點就明顯佔上風；40 把撞 5 把幾乎一次就把對方磨光）
           final base = 0.3 + (pa + pb) * 0.025;
           final ratio = (pa / pb).clamp(0.1, 10.0);
-          a.wear += base * math.pow(1 / ratio, 1.5);
-          b.wear += base * math.pow(ratio, 1.5);
+          if (!ga) a.wear += base * math.pow(1 / ratio, 1.5);
+          if (!gb) b.wear += base * math.pow(ratio, 1.5);
           final cx = a.x + nx * (d * a.ringR / reach), cy = a.y + ny * (d * a.ringR / reach);
           final lostA = _wearOff(a, cx, cy), lostB = _wearOff(b, cx, cy);
           if (lostA > 0) a.flash = 0.12;
@@ -372,7 +464,7 @@ class SsGame {
       if (rng.nextDouble() < 0.5) {
         final a = rng.nextDouble() * math.pi * 2;
         final r = 30 + rng.nextDouble() * 50;
-        _spawnPickup(x: cx + math.cos(a) * r, y: cy + math.sin(a) * r);
+        _spawnPickup(x: cx + math.cos(a) * r, y: cy + math.sin(a) * r, grade: 0);
       }
     }
     if (f.n == 0) f.wear = 0;
@@ -453,10 +545,24 @@ class SsGame {
       return;
     }
     b.chaseId = null;
+    SsItem? item;
+    var id = 380.0;
+    for (final it in items) {
+      final d = _dist(it.x, it.y, b.x, b.y);
+      if (d < id) {
+        id = d;
+        item = it;
+      }
+    }
+    if (item != null) {
+      _aim(b, item.x, item.y);
+      return;
+    }
     SsPickup? near;
     var nd = 650.0;
     for (final p in pickups) {
-      final d = _dist(p.x, p.y, b.x, b.y);
+      // 高等級的鐮刀比較值得繞路
+      final d = _dist(p.x, p.y, b.x, b.y) - p.grade * 70;
       if (d < nd) {
         nd = d;
         near = p;

@@ -95,6 +95,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
   String? _banner;
   Color _bannerColor = _gold;
   double _bannerT = 0;
+  double _bannerDur = 2.2;
   bool _introHint = true;
   int _seedBase = 0;
 
@@ -270,7 +271,26 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
             _fx.waves.add(_Wave(p.x, p.y, 220, const Color(0xFFB3E5FC), 0.6));
           }
         case SsEvType.pickup:
-          _fx.parts.add(_Particle(e.x, e.y, 0, -40, 0.35, 3, Colors.white, 1));
+          final gc = _gradeColors[e.b.clamp(0, 4)];
+          for (var i = 0; i < 2 + e.b * 3; i++) {
+            final a = _rng.nextDouble() * math.pi * 2;
+            final sp = 40 + _rng.nextDouble() * 120;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * sp, math.sin(a) * sp - 40, 0.4 + _rng.nextDouble() * 0.3, 2.5, gc, 1));
+          }
+          if (e.b >= 1) _fx.texts.add(_FloatText(e.x, e.y - 20, '+${e.count}', gc, 16 + e.b * 3.0));
+        case SsEvType.item:
+          final t = SsItemType.values[e.count];
+          final col = _itemColors[t]!;
+          _fx.waves.add(_Wave(e.x, e.y, 90, col, 0.4));
+          for (var i = 0; i < 18; i++) {
+            final a = _rng.nextDouble() * math.pi * 2;
+            final sp = 80 + _rng.nextDouble() * 220;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * sp, math.sin(a) * sp, 0.5 + _rng.nextDouble() * 0.3, 3, col, 1));
+          }
+          if (e.a == p.id) {
+            _showBanner('${_itemEmoji[t]} ${ssItemName[t]}', col, dur: 1.4); // 道具橫幅短一點
+            _pushFeed('撿到 ${ssItemName[t]}：${ssItemDesc[t]}', col);
+          }
         case SsEvType.over:
           break;
       }
@@ -283,10 +303,11 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
     if (_feed.length > 5) _feed.removeLast();
   }
 
-  void _showBanner(String t, Color c) {
+  void _showBanner(String t, Color c, {double dur = 2.2}) {
     _banner = t;
     _bannerColor = c;
     _bannerT = 0;
+    _bannerDur = dur;
   }
 
   void _updateFx(double dt) {
@@ -320,7 +341,15 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
     _fx.shake *= math.exp(-9 * dt);
     if (_banner != null) {
       _bannerT += dt;
-      if (_bannerT > 2.2) _banner = null;
+      if (_bannerT > _bannerDur) _banner = null;
+    }
+    // 跑速鞋：腳下噴風
+    for (final f in _g.fighters) {
+      if (!f.alive || !f.has(SsItemType.boots)) continue;
+      if ((f.vx * f.vx + f.vy * f.vy) > 900 && _rng.nextDouble() < 0.7) {
+        _fx.parts.add(_Particle(f.x + (_rng.nextDouble() - 0.5) * 16, f.y + 10, -f.vx * 0.3 + (_rng.nextDouble() - 0.5) * 60,
+            -f.vy * 0.3 + (_rng.nextDouble() - 0.5) * 60, 0.35, 4, const Color(0xFFB2EBF2), 2));
+      }
     }
     // 金圈持續噴金粉
     for (final f in _g.fighters) {
@@ -467,6 +496,16 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           ),
         ),
       ),
+      if (p.buffs.isNotEmpty)
+        Positioned(
+          left: 10,
+          bottom: 10,
+          child: IgnorePointer(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (final e in p.buffs.entries) _buffChip(e.key, e.value),
+            ]),
+          ),
+        ),
       if (_introHint && _g.time < 12 && _phase == _Phase.play)
         Positioned(
           left: 0,
@@ -480,6 +519,28 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           ),
         ),
     ];
+  }
+
+  Widget _buffChip(SsItemType t, double left) {
+    final col = _itemColors[t]!;
+    final k = (left / ssItemDur[t]!).clamp(0.0, 1.0);
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(6, 5, 10, 5),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: col.withValues(alpha: 0.8), width: 1.5),
+        boxShadow: [BoxShadow(color: col.withValues(alpha: 0.35), blurRadius: 10)],
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 26, height: 26, child: CustomPaint(painter: _ItemIconPainter(t, k))),
+        const SizedBox(width: 6),
+        Text(ssItemName[t]!, style: TextStyle(color: col, fontSize: 13, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 6),
+        Text('${left.ceil()}s', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w700)),
+      ]),
+    );
   }
 
   Widget _rankRow(int i, SsFighter f) {
@@ -511,7 +572,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
   Widget _bannerWidget() {
     final t = _bannerT;
     final scale = t < 0.25 ? 0.6 + Curves.easeOutBack.transform(t / 0.25) * 0.4 : 1.0;
-    final op = t > 1.7 ? (1 - (t - 1.7) / 0.5).clamp(0.0, 1.0) : 1.0;
+    final op = t > _bannerDur - 0.5 ? (1 - (t - _bannerDur + 0.5) / 0.5).clamp(0.0, 1.0) : 1.0;
     return Positioned(
       left: 0,
       right: 0,
@@ -563,7 +624,9 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
             '你手上只有一把小鐮刀。\n'
             '撞上別人時，鐮刀會互相磨損——鐮刀多、正在往前衝的一方佔上風。\n'
             '掃到對方的身體就是「收割」：他全部的鐮刀瞬間歸你！\n'
-            '收集 30 把化身【金光暴風圈】。3 分鐘後鐮刀最多的人獲勝，被收割就出局。',
+            '收集 30 把化身【金光暴風圈】。3 分鐘後鐮刀最多的人獲勝，被收割就出局。\n'
+            '地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
+            '道具：👟跑速鞋、🛡️金鐘罩、🧲磁鐵、🔥狂暴藥水（用身體去碰才撿得到）',
             style: TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
           )),
           const SizedBox(height: 10),
@@ -670,14 +733,14 @@ final List<Paint> _bladeFill = [
         [const Color(0xFFFFFDE7), _gold, _goldDeep], [0, 0.45, 1]),
 ];
 
-void _drawSickle(Canvas c, double x, double y, double ang, double size, int tier, {double alpha = 1, bool handle = true}) {
+void _drawSickle(Canvas c, double x, double y, double ang, double size, int tier, {double alpha = 1, bool handle = true, Paint? fill}) {
   c.save();
   c.translate(x, y);
   c.rotate(ang);
   c.scale(size);
   if (handle) _drawHandle(c, alpha);
   if (alpha >= 1) {
-    c.drawPath(_bladePath, _bladeFill[tier]);
+    c.drawPath(_bladePath, fill ?? _bladeFill[tier]);
   } else {
     c.drawPath(_bladePath, Paint()..color = _tierColor(tier).withValues(alpha: alpha));
   }
@@ -698,6 +761,125 @@ void _drawHandle(Canvas c, double alpha) {
   c.drawLine(const Offset(0, 0.42), const Offset(0, -0.08), handle);
   c.drawLine(const Offset(0, 0.42), const Offset(0, 0.30),
       handle..color = Color.fromRGBO(62, 39, 35, alpha)); // 柄尾
+}
+
+// 地上鐮刀等級的顏色：白 / 綠 / 藍 / 紫 / 橘
+const _gradeColors = [Color(0xFFECEFF1), Color(0xFF69F0AE), Color(0xFF40C4FF), Color(0xFFE040FB), Color(0xFFFFAB40)];
+final List<Paint> _gradeFill = [
+  for (final c in _gradeColors)
+    Paint()
+      ..shader = ui.Gradient.linear(const Offset(0, -0.8), const Offset(0.6, 0), [
+        Colors.white,
+        c,
+        HSLColor.fromColor(c).withLightness((HSLColor.fromColor(c).lightness * 0.55).clamp(0, 1)).toColor(),
+      ], [
+        0,
+        0.45,
+        1
+      ]),
+];
+
+const _itemColors = {
+  SsItemType.boots: Color(0xFF4DD0E1),
+  SsItemType.guard: Color(0xFFFFCA28),
+  SsItemType.magnet: Color(0xFF7C4DFF),
+  SsItemType.rage: Color(0xFFFF3D3D),
+};
+const _itemEmoji = {SsItemType.boots: '👟', SsItemType.guard: '🛡️', SsItemType.magnet: '🧲', SsItemType.rage: '🔥'};
+
+/// 道具圖示，畫在原點、大小約 ±size。
+void _drawItemIcon(Canvas c, SsItemType t, double size) {
+  c.save();
+  c.scale(size);
+  switch (t) {
+    case SsItemType.boots:
+      // 翅膀
+      final wing = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.1
+        ..strokeCap = StrokeCap.round;
+      for (var i = 0; i < 3; i++) {
+        final y = -0.55 + i * 0.22;
+        c.drawLine(Offset(-0.38, y + 0.05), Offset(-0.85 + i * 0.12, y - 0.12), wing);
+      }
+      final boot = Path()
+        ..moveTo(-0.38, -0.75)
+        ..lineTo(0.12, -0.75)
+        ..lineTo(0.14, 0.08)
+        ..lineTo(0.62, 0.2)
+        ..quadraticBezierTo(0.85, 0.3, 0.75, 0.52)
+        ..lineTo(-0.42, 0.52)
+        ..close();
+      c.drawPath(
+          boot,
+          Paint()
+            ..shader = ui.Gradient.linear(const Offset(0, -0.8), const Offset(0, 0.5), [const Color(0xFFE0F7FA), const Color(0xFF00ACC1)]));
+      c.drawLine(const Offset(-0.44, 0.58), const Offset(0.8, 0.58),
+          Paint()
+            ..color = const Color(0xFF263238)
+            ..strokeWidth = 0.14
+            ..strokeCap = StrokeCap.round);
+      c.drawLine(const Offset(-0.3, -0.62), const Offset(0.02, -0.62), Paint()..color = Colors.white..strokeWidth = 0.08);
+    case SsItemType.guard:
+      Path shield(double k) => Path()
+        ..moveTo(0, -0.82 * k)
+        ..lineTo(0.68 * k, -0.56 * k)
+        ..lineTo(0.62 * k, 0.1 * k)
+        ..quadraticBezierTo(0.46 * k, 0.62 * k, 0, 0.86 * k)
+        ..quadraticBezierTo(-0.46 * k, 0.62 * k, -0.62 * k, 0.1 * k)
+        ..lineTo(-0.68 * k, -0.56 * k)
+        ..close();
+      c.drawPath(shield(1), Paint()..shader = ui.Gradient.linear(const Offset(-0.6, -0.8), const Offset(0.6, 0.8), [const Color(0xFFFFF8E1), const Color(0xFFFFB300)]));
+      c.drawPath(shield(0.68), Paint()..shader = ui.Gradient.linear(const Offset(0, -0.6), const Offset(0, 0.6), [const Color(0xFFD32F2F), const Color(0xFF7F0000)]));
+      final star = Path();
+      for (var i = 0; i < 10; i++) {
+        final a = -math.pi / 2 + i * math.pi / 5;
+        final r = i.isEven ? 0.34 : 0.14;
+        final o = Offset(math.cos(a) * r, math.sin(a) * r + 0.02);
+        i == 0 ? star.moveTo(o.dx, o.dy) : star.lineTo(o.dx, o.dy);
+      }
+      c.drawPath(star..close(), Paint()..color = const Color(0xFFFFE082));
+    case SsItemType.magnet:
+      final red = Paint()
+        ..color = const Color(0xFFE53935)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.34;
+      c.drawArc(const Rect.fromLTRB(-0.55, -0.3, 0.55, 0.8), 0, math.pi, false, red);
+      c.drawLine(const Offset(-0.55, 0.25), const Offset(-0.55, -0.4), red);
+      c.drawLine(const Offset(0.55, 0.25), const Offset(0.55, -0.4), red);
+      final tip = Paint()
+        ..color = const Color(0xFFECEFF1)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.34;
+      c.drawLine(const Offset(-0.55, -0.4), const Offset(-0.55, -0.78), tip);
+      c.drawLine(const Offset(0.55, -0.4), const Offset(0.55, -0.78), tip);
+      final spark = Paint()
+        ..color = const Color(0xFFFFF59D)
+        ..strokeWidth = 0.07
+        ..strokeCap = StrokeCap.round;
+      c.drawLine(const Offset(-0.15, -0.75), const Offset(0, -0.5), spark);
+      c.drawLine(const Offset(0, -0.5), const Offset(0.15, -0.75), spark);
+    case SsItemType.rage:
+      c.drawRect(const Rect.fromLTRB(-0.17, -0.82, 0.17, -0.32), Paint()..color = const Color(0xCCE1F5FE));
+      c.drawRRect(RRect.fromLTRBR(-0.22, -0.95, 0.22, -0.74, const Radius.circular(0.05)), Paint()..color = const Color(0xFF8D6E63));
+      c.drawCircle(const Offset(0, 0.2), 0.6, Paint()..color = const Color(0x99E1F5FE));
+      c.save();
+      c.clipPath(Path()..addOval(Rect.fromCircle(center: const Offset(0, 0.2), radius: 0.56)));
+      c.drawRect(const Rect.fromLTRB(-0.6, 0.0, 0.6, 0.8),
+          Paint()..shader = ui.Gradient.linear(const Offset(0, 0), const Offset(0, 0.8), [const Color(0xFFFF5252), const Color(0xFFB71C1C)]));
+      c.restore();
+      final b = Paint()..color = Colors.white.withValues(alpha: 0.85);
+      c.drawCircle(const Offset(-0.18, 0.3), 0.08, b);
+      c.drawCircle(const Offset(0.12, 0.45), 0.06, b);
+      c.drawCircle(const Offset(0.2, 0.15), 0.05, b);
+      c.drawArc(const Rect.fromLTRB(-0.45, -0.25, 0.1, 0.4), math.pi * 1.1, 0.6, false,
+          Paint()
+            ..color = Colors.white70
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.07);
+  }
+  c.restore();
 }
 
 double _bladeSize(int n) => math.min(46.0, 22 + 2.0 * math.sqrt(n));
@@ -747,8 +929,32 @@ class _WorldPainter extends CustomPainter {
     for (final p in g.pickups) {
       if (!view.contains(Offset(p.x, p.y))) continue;
       final bob = math.sin(g.time * 3 + p.phase);
-      canvas.drawCircle(Offset(p.x, p.y), 13, Paint()..color = Colors.white.withValues(alpha: 0.06 + 0.04 * bob));
-      _drawSickle(canvas, p.x, p.y + bob * 1.5, p.phase + g.time * 0.4, 17, 0);
+      final gc = _gradeColors[p.grade];
+      final sz = 25.0 + p.grade * 3.5;
+      if (p.grade > 0) {
+        canvas.drawCircle(
+            Offset(p.x, p.y),
+            sz * 0.85,
+            Paint()
+              ..shader = ui.Gradient.radial(Offset(p.x, p.y), sz * 0.85,
+                  [gc.withValues(alpha: 0.45 + 0.15 * bob), gc.withValues(alpha: 0)]));
+      } else {
+        canvas.drawCircle(Offset(p.x, p.y), sz * 0.55, Paint()..color = Colors.white.withValues(alpha: 0.07 + 0.04 * bob));
+      }
+      if (p.grade >= 3) {
+        // 紫、橘：旋轉的光芒
+        final ray = Paint()
+          ..color = gc.withValues(alpha: 0.35)
+          ..strokeWidth = 3
+          ..strokeCap = StrokeCap.round;
+        for (var i = 0; i < 6; i++) {
+          final a = g.time * 1.5 + p.phase + i * math.pi / 3;
+          canvas.drawLine(Offset(p.x + math.cos(a) * sz * 0.5, p.y + math.sin(a) * sz * 0.5),
+              Offset(p.x + math.cos(a) * sz * 1.05, p.y + math.sin(a) * sz * 1.05), ray);
+        }
+      }
+      _drawSickle(canvas, p.x - sz * 0.2, p.y + bob * 2 + sz * 0.1, p.phase + math.sin(g.time * 1.2 + p.phase) * 0.3, sz, 0,
+          fill: _gradeFill[p.grade]);
       if (bob > 0.85) {
         // 閃一下
         final gx = p.x + 3, gy = p.y - 6;
@@ -758,6 +964,47 @@ class _WorldPainter extends CustomPainter {
         canvas.drawLine(Offset(gx - 4, gy), Offset(gx + 4, gy), gp);
         canvas.drawLine(Offset(gx, gy - 4), Offset(gx, gy + 4), gp);
       }
+    }
+
+    // 道具
+    for (final it in g.items) {
+      if (!view.contains(Offset(it.x, it.y))) continue;
+      final col = _itemColors[it.type]!;
+      final bob = math.sin(g.time * 2.5 + it.phase);
+      final y = it.y + bob * 4;
+      canvas.drawOval(Rect.fromCenter(center: Offset(it.x, it.y + 30), width: 40 - bob * 4, height: 10), Paint()..color = Colors.black26);
+      canvas.drawCircle(
+          Offset(it.x, y),
+          52,
+          Paint()
+            ..shader = ui.Gradient.radial(Offset(it.x, y), 52, [col.withValues(alpha: 0.55), col.withValues(alpha: 0)]));
+      final halo = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round
+        ..color = col.withValues(alpha: 0.9);
+      for (var i = 0; i < 6; i++) {
+        final a = g.time * 1.8 + it.phase + i * math.pi / 3;
+        canvas.drawArc(Rect.fromCircle(center: Offset(it.x, y), radius: 33), a, 0.6, false, halo);
+      }
+      canvas.drawCircle(
+          Offset(it.x, y),
+          26,
+          Paint()
+            ..shader = ui.Gradient.radial(Offset(it.x - 8, y - 10), 34, [Colors.white, const Color(0xFFCFD8DC)]));
+      canvas.drawCircle(
+          Offset(it.x, y),
+          26,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = col);
+      canvas.save();
+      canvas.translate(it.x, y);
+      _drawItemIcon(canvas, it.type, 17);
+      canvas.restore();
+      final tp = _label(ssItemName[it.type]!, col, 12);
+      tp.paint(canvas, Offset(it.x - tp.width / 2, y + 36));
     }
 
     // 衝擊波
@@ -1035,6 +1282,38 @@ class _WorldPainter extends CustomPainter {
       }
     }
 
+    // 道具效果
+    if (f.has(SsItemType.magnet)) {
+      final mr = (R + 10) * 2 + 260;
+      final mp = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = const Color(0xFF7C4DFF).withValues(alpha: 0.35);
+      for (var i = 0; i < 16; i++) {
+        final a = -time * 0.8 + i * math.pi / 8;
+        c.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: mr), a, 0.22, false, mp);
+      }
+    }
+    if (f.has(SsItemType.rage)) {
+      final pulse = 0.5 + 0.5 * math.sin(time * 10);
+      c.drawCircle(
+          Offset(cx, cy),
+          R + bs * 0.4,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = bs * 0.9
+            ..color = const Color(0xFFFF1744).withValues(alpha: 0.12 + 0.12 * pulse));
+    }
+    if (f.has(SsItemType.boots)) {
+      final sp = math.sqrt(f.vx * f.vx + f.vy * f.vy);
+      if (sp > 30) {
+        for (var i = 1; i <= 3; i++) {
+          c.drawCircle(Offset(cx - f.vx * 0.045 * i, cy - f.vy * 0.045 * i), ssBodyR * (1 - i * 0.12),
+              Paint()..color = const Color(0xFF4DD0E1).withValues(alpha: 0.35 - i * 0.09));
+        }
+      }
+    }
+
     // 保護罩
     if (f.shield > 0) {
       c.drawCircle(
@@ -1068,7 +1347,8 @@ class _WorldPainter extends CustomPainter {
     // 兜帽陰影（朝臉的方向開口）
     final fx = f.faceX, fy = f.faceY;
     c.drawCircle(Offset(cx + fx * 6, cy + fy * 6), ssBodyR * 0.62, Paint()..color = const Color(0xFF1A1A1A));
-    final eye = Paint()..color = f.player ? const Color(0xFF80D8FF) : (tier == 2 ? _gold : Colors.white);
+    final eye = Paint()
+      ..color = f.has(SsItemType.rage) ? const Color(0xFFFF1744) : (f.player ? const Color(0xFF80D8FF) : (tier == 2 ? _gold : Colors.white));
     final px = -fy, py = fx;
     c.drawCircle(Offset(cx + fx * 9 + px * 3.4, cy + fy * 9 + py * 3.4), 2.1, eye);
     c.drawCircle(Offset(cx + fx * 9 - px * 3.4, cy + fy * 9 - py * 3.4), 2.1, eye);
@@ -1076,6 +1356,23 @@ class _WorldPainter extends CustomPainter {
     c.drawCircle(Offset(cx - fy * 13 + fx * 4, cy + fx * 13 + fy * 4), 4, Paint()..color = dark);
     if (f.flash > 0) {
       c.drawCircle(Offset(cx, cy), ssBodyR + 1, Paint()..color = Colors.white.withValues(alpha: (f.flash / 0.12).clamp(0, 1) * 0.8));
+    }
+    if (f.has(SsItemType.guard)) {
+      final gp = 0.5 + 0.5 * math.sin(time * 6);
+      c.drawCircle(Offset(cx, cy), ssBodyR + 15, Paint()..color = const Color(0xFFFFCA28).withValues(alpha: 0.16 + 0.08 * gp));
+      c.drawCircle(
+          Offset(cx, cy),
+          ssBodyR + 15,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3
+            ..color = const Color(0xFFFFE082).withValues(alpha: 0.75 + 0.25 * gp));
+      c.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: ssBodyR + 10), math.pi * 1.1, 0.8, false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.5
+            ..strokeCap = StrokeCap.round
+            ..color = Colors.white.withValues(alpha: 0.8));
     }
     if (tier == 2) {
       // 皇冠
@@ -1122,7 +1419,12 @@ class _MiniMap extends CustomPainter {
     final c = Offset(r, r);
     canvas.drawCircle(c, r - 3, Paint()..color = const Color(0xFF2E5628).withValues(alpha: 0.6));
     for (final p in g.pickups) {
-      canvas.drawCircle(c + Offset(p.x * k, p.y * k), 0.8, Paint()..color = Colors.white38);
+      canvas.drawCircle(c + Offset(p.x * k, p.y * k), p.grade >= 2 ? 1.4 : 0.8,
+          Paint()..color = p.grade >= 2 ? _gradeColors[p.grade] : Colors.white38);
+    }
+    for (final it in g.items) {
+      final o = c + Offset(it.x * k, it.y * k);
+      canvas.drawRect(Rect.fromCenter(center: o, width: 5, height: 5), Paint()..color = _itemColors[it.type]!);
     }
     for (final f in g.fighters) {
       if (!f.alive) continue;
@@ -1134,6 +1436,34 @@ class _MiniMap extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _MiniMap old) => true;
+}
+
+class _ItemIconPainter extends CustomPainter {
+  final SsItemType t;
+  final double k; // 剩餘比例，外圈畫倒數
+  _ItemIconPainter(this.t, this.k);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    canvas.drawCircle(c, r, Paint()..color = Colors.white.withValues(alpha: 0.9));
+    canvas.drawArc(
+        Rect.fromCircle(center: c, radius: r - 1.5),
+        -math.pi / 2,
+        math.pi * 2 * k,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = _itemColors[t]!);
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    _drawItemIcon(canvas, t, r * 0.62);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ItemIconPainter old) => old.t != t || (old.k - k).abs() > 0.01;
 }
 
 class _IconSickle extends CustomPainter {
