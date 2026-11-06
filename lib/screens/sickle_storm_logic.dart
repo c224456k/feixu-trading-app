@@ -2,8 +2,8 @@
 //
 // 玩法：每個人身邊繞著一圈旋轉的鐮刀（一格一格、中間有空隙）。刀碰刀會互相磨損（鐮刀多、
 // 正在往前衝的一方磨得比較少）；刀尖從空隙鑽進去碰到「人」就是收割——對方全部的鐮刀瞬間
-// 被吸過來。刀圈分層：每 20 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層那一刻圈上
-// 只剩一把更大更強的刀，再慢慢長回 20 把——大隻的也會露出空隙，小隻的才有反敗的機會。地圖有石柱、斷牆、水池擋路，草叢可以躲。
+// 被吸過來。刀圈分層：每 8 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層那一刻圈上
+// 只剩一把更大更強的刀，再慢慢長回 8 把——大隻的也會露出空隙，小隻的才有反敗的機會。地圖有石柱、斷牆、水池擋路，草叢可以躲。
 //
 // 單機：被收割就結束。多人（房主的瀏覽器跑這份模擬，其他人收畫面）：被收割 3 秒後重生，
 // 3 分鐘時間到鐮刀最多的人贏。
@@ -11,9 +11,9 @@ import 'dart:math' as math;
 
 const ssArenaR = 1500.0; // 圓形場地半徑
 const ssBodyR = 16.0; // 人的身體半徑
-const ssPerLevel = 20; // 每 20 把升一層
-const ssSilver = 21; // 第 2 層（綠）起有淡淡光暈
-const ssGold = 61; // 第 4 層（紫）起變金光暴風圈
+const ssPerLevel = 8; // 每 8 把升一層
+const ssSilver = 9; // 第 2 層（綠）起有淡淡光暈
+const ssGold = 25; // 第 4 層（紫）起變金光暴風圈
 const ssRoundSec = 180.0;
 const ssDt = 1 / 60;
 const ssFighterTotal = 14; // 場上總人數（真人 + NPC）
@@ -54,14 +54,14 @@ const ssItemDur = {SsItemType.boots: 8.0, SsItemType.guard: 5.0, SsItemType.magn
 const ssItemMax = 8; // 場上最多幾個道具
 const ssItemEvery = 5.0; // 幾秒補一個
 
-/// 第幾層（0 起算）：1~20 把是 0、21~40 是 1…
+/// 第幾層（0 起算）：1~8 把是 0、9~16 是 1…
 int ssLevel(int n) => n <= 0 ? 0 : (n - 1) ~/ ssPerLevel;
 
-/// 每一層的刀色（ssBladeColors 索引）：白 綠 藍 紫 橘 紅 琥珀 桃 靛，之後都用最後一色
-const ssLevelColors = [0, 1, 2, 3, 4, 5, 16, 6, 8];
+/// 每一層的刀色（ssBladeColors 索引）：白 綠 藍 紫 橘 紅 琥珀 桃 靛 青 赤銅 薰衣草，之後都用最後一色
+const ssLevelColors = [0, 1, 2, 3, 4, 5, 16, 6, 8, 7, 10, 13];
 int ssLevelColor(int n) => ssLevelColors[math.min(ssLevel(n), ssLevelColors.length - 1)];
 
-/// 圈上實際有幾把刀：這一層長到第幾把（1~20），升層就從 1 把重新長。
+/// 圈上實際有幾把刀：這一層長到第幾把（1~8），升層就從 1 把重新長。
 int ssSlots(int n) => n <= 0 ? 0 : n - ssLevel(n) * ssPerLevel;
 
 /// 每把刀在圈上佔的弧長（刀本身約 0.75 把寬 + 一定要留的縫），倍數是「刀大小」。
@@ -71,11 +71,11 @@ const ssSlotSpacing = 1.75;
 double ssRingR(int n) {
   if (n <= 0) return ssBodyR;
   final m = ssSlots(n);
-  return math.max(30 + 4.0 * math.min(ssLevel(n), 8), m * ssSlotSpacing * ssBladeSize(n) / (2 * math.pi));
+  return math.max(30 + 3.0 * math.min(ssLevel(n), 12), m * ssSlotSpacing * ssBladeSize(n) / (2 * math.pi));
 }
 
 /// 單把鐮刀的大小（畫面與碰撞共用）：層數越高刀越大。
-double ssBladeSize(int n) => math.min(46.0, 24 + 3.0 * ssLevel(n) + 0.2 * ssSlots(n));
+double ssBladeSize(int n) => math.min(46.0, 24 + 1.8 * ssLevel(n) + 0.3 * ssSlots(n));
 
 /// 刀尖最外圈能碰到的距離
 double ssReach(int n) => n <= 0 ? ssBodyR : ssRingR(n) + 0.45 * ssBladeSize(n);
@@ -88,7 +88,7 @@ int ssTier(int n) => n >= ssGold ? 2 : (n >= ssSilver ? 1 : 0);
 /// 轉速（弧度／秒）：刻意慢，看得到刀與刀之間的空隙；層數越高轉得稍快，
 /// 圈撐大以後角速度放慢（刀尖的線速度不要快到縫隙根本鑽不進去）。
 double ssSpin(int level, [double ringR = 0]) =>
-    math.min(2.5, 1.7 + 0.12 * level) * (ringR <= 0 ? 1.0 : (100 / ringR).clamp(0.55, 1.0));
+    math.min(3.8, 2.8 + 0.1 * level) * (ringR <= 0 ? 1.0 : (100 / ringR).clamp(0.55, 1.0));
 
 // 單把鐮刀的碰撞點（刀的區域座標：+x 是旋轉前進方向，-y 朝外），半徑 = 0.15 × 刀大小
 const _bladePts = [0.08, -0.30, 0.30, -0.52, 0.56, -0.42, 0.76, -0.16];
@@ -263,7 +263,7 @@ class SsBush {
   const SsBush(this.x, this.y, this.r, this.seed);
 }
 
-enum SsEvType { kill, clash, gold, silver, pickup, item, over }
+enum SsEvType { kill, clash, gold, silver, pickup, item, over, knock }
 
 class SsEvent {
   final SsEvType type;
@@ -908,7 +908,7 @@ class SsGame {
           final lostA = _wearOff(a, cx, cy, la < lb), lostB = _wearOff(b, cx, cy, lb < la);
           if (lostA > 0) a.flash = 0.12;
           if (lostB > 0) b.flash = 0.12;
-          _push(a, b, nx, ny, 260);
+          _push(a, b, nx, ny, 340);
           // 刀被擋一下：兩圈都往回彈一點點
           a.angle -= 0.12;
           b.angle -= 0.12;
@@ -923,8 +923,11 @@ class SsGame {
     var lost = 0;
     while (f.wear >= 1 && f.n > 0) {
       f.wear -= 1;
+      final lc = f.levelColor;
       final col = f.dropOne(rng);
       lost++;
+      // 畫面用：這把刀從碰撞點往外飛出去（count = 刀色，x2/y2 = 主人位置）
+      events.add(SsEvent(SsEvType.knock, cx, cy, a: f.id, count: lc, x2: f.x, y2: f.y));
       if (knocked && rng.nextDouble() < 0.5) {
         final a = rng.nextDouble() * math.pi * 2;
         final r = 30 + rng.nextDouble() * 50;

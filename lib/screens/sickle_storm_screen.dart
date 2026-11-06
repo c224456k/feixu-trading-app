@@ -37,9 +37,11 @@ enum _Mode { single, host, guest }
 // ---------------- 特效 ----------------
 class _Particle {
   double x, y, vx, vy, life, maxLife, size, rot, vr;
-  final int kind; // 0 火花 1 金粉 2 塵土 3 碎片
+  final int kind; // 0 火花 1 金粉 2 塵土 3 碎片 4 被撞飛的彩色鐮刀
   final Color color;
-  _Particle(this.x, this.y, this.vx, this.vy, this.life, this.size, this.color, this.kind, {this.rot = 0, this.vr = 0}) : maxLife = life;
+  final int ci; // kind 4：刀色（ssBladeColors 索引）
+  _Particle(this.x, this.y, this.vx, this.vy, this.life, this.size, this.color, this.kind, {this.rot = 0, this.vr = 0, this.ci = 0})
+      : maxLife = life;
 }
 
 class _FlyBlade {
@@ -450,13 +452,30 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
             _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.18 + _rng.nextDouble() * 0.25, 1.5 + _rng.nextDouble() * 2,
                 i.isEven ? const Color(0xFFFFF59D) : Colors.white, 0));
           }
-          for (var i = 0; i < math.min(e.count, 6); i++) {
-            final a = _rng.nextDouble() * math.pi * 2;
-            final s = 80 + _rng.nextDouble() * 160;
-            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.6, 10, const Color(0xFFB0BEC5), 3,
-                rot: _rng.nextDouble() * 6, vr: (_rng.nextDouble() - 0.5) * 20));
-          }
           if (mine) _fx.shake = math.max(_fx.shake, 4 + e.count * 1.5);
+        case SsEvType.knock:
+          // 被撞掉的刀：從碰撞點沿著「離開主人」的方向旋轉著飛出去
+          var dx = e.x - e.x2, dy = e.y - e.y2;
+          final d = math.sqrt(dx * dx + dy * dy);
+          if (d > 1e-6) {
+            dx /= d;
+            dy /= d;
+          } else {
+            final a = _rng.nextDouble() * math.pi * 2;
+            dx = math.cos(a);
+            dy = math.sin(a);
+          }
+          final sp = 520 + _rng.nextDouble() * 260;
+          final tw = (_rng.nextDouble() - 0.5) * 0.9; // 稍微偏一點，不要每把都一樣
+          final vx = (dx - dy * tw) * sp, vy = (dy + dx * tw) * sp;
+          final c = e.count.clamp(0, ssBladeColors.length - 1);
+          _fx.parts.add(_Particle(e.x, e.y, vx, vy, 0.75, 26, Color(ssBladeColors[c]), 4,
+              rot: _rng.nextDouble() * 6, vr: (_rng.nextBool() ? 1 : -1) * (18 + _rng.nextDouble() * 10), ci: c));
+          for (var i = 0; i < 5; i++) {
+            final a = _rng.nextDouble() * math.pi * 2;
+            final s = 200 + _rng.nextDouble() * 300;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.25, 2.5, Color(ssBladeColors[c]), 0));
+          }
         case SsEvType.kill:
           final killer = _g.byId(e.a);
           final victim = _g.byId(e.b);
@@ -553,7 +572,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
       p.life -= dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      final drag = p.kind == 1 ? 2.5 : 4.0;
+      final drag = p.kind == 1 ? 2.5 : (p.kind == 4 ? 2.2 : 4.0);
       p.vx *= math.exp(-drag * dt);
       p.vy *= math.exp(-drag * dt);
       p.rot += p.vr * dt;
@@ -911,7 +930,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           '你身邊繞著一圈鐮刀，刀與刀之間有空隙。\n'
           '刀碰刀：同顏色的兩把一起碎掉；高等的刀撞低等的刀，低等的那把被撞掉。\n'
           '刀圈一定有縫——刀尖鑽過縫進到對方圈裡就是「收割」：他全部的鐮刀瞬間歸你！\n'
-          '刀圈每 20 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層時圈上只剩一把更大的刀，再慢慢長回 20 把。\n'
+          '刀圈每 8 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層時圈上只剩一把更大的刀，再慢慢長回 8 把。\n'
           '3 分鐘後鐮刀最多的人獲勝。地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
           '石柱、斷牆、水池會擋路；走進草叢別人就看不到你。\n'
           '道具：👟跑速鞋、🛡️金鐘罩、🧲磁鐵、🔥狂暴藥水（用身體去碰才撿得到）',
@@ -1230,7 +1249,7 @@ class _SsNet {
   }
 }
 
-const _levelNames = ['白', '綠', '藍', '紫', '橘', '紅', '琥珀', '桃', '靛'];
+const _levelNames = ['白', '綠', '藍', '紫', '橘', '紅', '琥珀', '桃', '靛', '青', '赤銅', '薰衣草'];
 String _levelName(int level) => _levelNames[math.min(level, _levelNames.length - 1)];
 
 Color _tierColor(int tier) => const [Color(0xFFE0E0E0), Color(0xFFB3E5FC), _gold][tier];
@@ -1859,6 +1878,12 @@ class _WorldPainter extends CustomPainter {
           canvas.drawCircle(Offset(p.x, p.y), p.size * a, Paint()..color = p.color.withValues(alpha: a * 0.8));
         case 3:
           _drawSickle(canvas, p.x, p.y, p.rot, p.size, 0, alpha: a * 0.8);
+        case 4:
+          if (a < 0.35) {
+            _drawSickle(canvas, p.x, p.y, p.rot, p.size, 0, alpha: a / 0.35, fill: Paint()..color = p.color.withValues(alpha: a / 0.35));
+          } else {
+            _drawBlade(canvas, p.x, p.y, p.rot, p.size, p.ci, 0);
+          }
       }
     }
 
