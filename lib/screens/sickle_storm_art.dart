@@ -18,6 +18,14 @@ Color _shade(Color c, double k) {
 }
 
 Paint _fill(Color c) => Paint()..color = c;
+
+// 漸層筆刷快取：漸層都以原點為中心畫（畫之前先 translate），所以同一種顏色/大小建一次就能一直用，
+// 不用每幀每隻都重建（網頁上建 shader 很貴）。
+final Map<String, Paint> _shaderCache = {};
+Paint _cached(String key, Shader Function() make) {
+  if (_shaderCache.length > 300) _shaderCache.clear();
+  return _shaderCache.putIfAbsent(key, () => Paint()..shader = make());
+}
 Paint _stroke(Color c, double w) => Paint()
   ..style = PaintingStyle.stroke
   ..strokeWidth = w
@@ -25,10 +33,50 @@ Paint _stroke(Color c, double w) => Paint()
   ..strokeJoin = StrokeJoin.round
   ..color = c;
 
+// 角色身體的圖快取：同一種族/顏色/朝向/動畫格只畫一次成 Picture，之後一個 drawPicture 就好；
+// 只有眼珠（會跟著移動方向轉）每幀現畫。
+final Map<String, ui.Picture> _picCache = {};
+
 /// 畫一隻小怪獸角色（正面、圓滾滾），中心 (0,0)，身體半徑 [r]。
 /// [fx],[fy] 臉朝的方向（眼睛會往那邊看、尾巴在反方向）。
 void ssDrawCreature(Canvas c, int species, double r, Color body, double fx, double fy, double time,
     {Color? pupil, bool angry = false}) {
+  final side = fx >= 0 ? 1.0 : -1.0;
+  final frame = (time * 8).floor() % 8;
+  final tq = frame / 8;
+  final key = '$species|${body.toARGB32()}|$side|$frame|$r';
+  var pic = _picCache[key];
+  if (pic == null) {
+    if (_picCache.length > 500) {
+      for (final p in _picCache.values) {
+        p.dispose();
+      }
+      _picCache.clear();
+    }
+    final rec = ui.PictureRecorder();
+    _creature(Canvas(rec), species, r, body, side, 0, tq, pupils: false);
+    pic = rec.endRecording();
+    _picCache[key] = pic;
+  }
+  c.drawPicture(pic);
+  // 眼珠
+  final bob = math.sin(tq * 6) * 0.8;
+  final lx = fx * r * 0.12, ly = fy * r * 0.1;
+  final eyeY = (species == 2 ? -r * 0.55 : -r * 0.12) + bob;
+  final eyeDX = species == 2 ? r * 0.5 : r * 0.36;
+  final eyeR = species == 2 ? r * 0.3 : r * 0.24;
+  final pc = _fill(angry ? const Color(0xFFD50000) : (pupil ?? const Color(0xFF212121)));
+  final hi = _fill(Colors.white);
+  for (final s in [-1.0, 1.0]) {
+    final e = Offset(s * eyeDX, eyeY);
+    c.drawCircle(e + Offset(lx, ly), eyeR * 0.62, pc);
+    c.drawCircle(e + Offset(lx - eyeR * 0.22, ly - eyeR * 0.25), eyeR * 0.22, hi);
+    if (angry) c.drawLine(e + Offset(-s * eyeR, -eyeR * 1.3), e + Offset(s * eyeR * 0.8, -eyeR * 0.75), _stroke(const Color(0xFF212121), 1.6));
+  }
+}
+
+void _creature(Canvas c, int species, double r, Color body, double fx, double fy, double time,
+    {Color? pupil, bool angry = false, bool pupils = true}) {
   final dark = _shade(body, 0.55);
   final light = _shade(body, 1.25);
   final side = fx >= 0 ? 1.0 : -1.0; // 尾巴長在背後那一側
@@ -47,8 +95,11 @@ void ssDrawCreature(Canvas c, int species, double r, Color body, double fx, doub
       c.drawPath(tail, _fill(body));
       final fl = 0.85 + 0.15 * math.sin(time * 18);
       final tip = Offset(-side * r * 1.72, -r * 0.55);
-      c.drawCircle(tip, r * 0.42 * fl,
-          Paint()..shader = ui.Gradient.radial(tip, r * 0.5, [const Color(0xFFFFF59D), const Color(0xFFFF9800), const Color(0x00FF5722)], [0, 0.5, 1]));
+      c.save();
+      c.translate(tip.dx, tip.dy);
+      c.drawCircle(Offset.zero, r * 0.42 * fl,
+          _cached('flame$r', () => ui.Gradient.radial(Offset.zero, r * 0.5, [const Color(0xFFFFF59D), const Color(0xFFFF9800), const Color(0x00FF5722)], [0, 0.5, 1])));
+      c.restore();
       final flame = Path()
         ..moveTo(tip.dx - r * 0.25, tip.dy + r * 0.1)
         ..quadraticBezierTo(tip.dx, tip.dy - r * 0.9 * fl, tip.dx + r * 0.25, tip.dy + r * 0.1)
@@ -130,9 +181,13 @@ void ssDrawCreature(Canvas c, int species, double r, Color body, double fx, doub
       p.quadraticBezierTo(x0 - r * 0.25, r * (i.isEven ? 0.55 : 1.15) + wv, x0 - r * 0.5, r * 0.9);
     }
     p.close();
-    c.drawPath(p, Paint()..shader = ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.8, [light.withValues(alpha: 0.95), body.withValues(alpha: 0.85), dark.withValues(alpha: 0.75)], [0, 0.55, 1]));
+    c.drawPath(
+        p,
+        _cached('ghost${body.toARGB32()}$r', () => ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.8,
+            [light.withValues(alpha: 0.95), body.withValues(alpha: 0.85), dark.withValues(alpha: 0.75)], [0, 0.55, 1])));
   } else {
-    c.drawCircle(Offset.zero, r, Paint()..shader = ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.6, [light, body, dark], [0, 0.55, 1]));
+    c.drawCircle(Offset.zero, r,
+        _cached('body${body.toARGB32()}$r', () => ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.6, [light, body, dark], [0, 0.55, 1])));
     // 肚子
     c.drawOval(Rect.fromCenter(center: Offset(0, r * 0.45), width: r * 1.1, height: r * 0.8), _fill(Colors.white.withValues(alpha: 0.28)));
   }
@@ -228,6 +283,7 @@ void ssDrawCreature(Canvas c, int species, double r, Color body, double fx, doub
     final e = Offset(s * eyeDX, eyeY);
     if (species == 2) c.drawCircle(e, eyeR * 1.25, _fill(body)); // 蛙眼凸起
     c.drawCircle(e, eyeR, _fill(Colors.white));
+    if (!pupils) continue; // 眼珠由 ssDrawCreature 每幀現畫
     final pc = angry ? const Color(0xFFD50000) : (pupil ?? const Color(0xFF212121));
     c.drawCircle(e + Offset(lx, ly), eyeR * 0.62, _fill(pc));
     c.drawCircle(e + Offset(lx - eyeR * 0.22, ly - eyeR * 0.25), eyeR * 0.22, _fill(Colors.white));
@@ -322,8 +378,10 @@ void _turtle(Canvas c, double r, double time, double facing) {
   }
   c.drawOval(Rect.fromCenter(center: head + Offset(facing * r * 0.1, r * 0.1), width: r * 0.16, height: r * 0.08), _fill(const Color(0xFF5D4037)));
   // 殼
-  c.drawCircle(Offset.zero, r * 0.92,
-      Paint()..shader = ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.4, [const Color(0xFF9CCC65), const Color(0xFF558B2F), const Color(0xFF33691E)], [0, 0.55, 1]));
+  c.drawCircle(
+      Offset.zero,
+      r * 0.92,
+      _cached('shell$r', () => ui.Gradient.radial(Offset(-r * 0.3, -r * 0.4), r * 1.4, [const Color(0xFF9CCC65), const Color(0xFF558B2F), const Color(0xFF33691E)], [0, 0.55, 1])));
   final plate = _stroke(const Color(0xFF2E4A12), 2.2);
   Path hex(Offset o, double s) {
     final p = Path();
@@ -350,7 +408,7 @@ void _pumpkin(Canvas c, double r, double time) {
   const base = Color(0xFFFF8F00);
   for (final k in [-0.62, 0.62, -0.32, 0.32, 0.0]) {
     c.drawOval(Rect.fromCenter(center: Offset(k * r, 0), width: r * (k == 0 ? 1.0 : 0.9), height: r * 1.75),
-        Paint()..shader = ui.Gradient.linear(Offset(k * r, -r), Offset(k * r, r), [const Color(0xFFFFB74D), base, const Color(0xFFE65100)], [0, 0.5, 1]));
+        _cached('pump$r', () => ui.Gradient.linear(Offset(0, -r), Offset(0, r), [const Color(0xFFFFB74D), base, const Color(0xFFE65100)], [0, 0.5, 1])));
     c.drawOval(Rect.fromCenter(center: Offset(k * r, 0), width: r * (k == 0 ? 1.0 : 0.9), height: r * 1.75), _stroke(const Color(0x55BF360C), 1.5));
   }
   // 蒂 + 藤
@@ -397,7 +455,7 @@ void _pumpkin(Canvas c, double r, double time) {
     ..quadraticBezierTo(0, r * 0.75, -r * 0.55, r * 0.22)
     ..close();
   c.drawPath(mouth, face);
-  c.drawCircle(Offset.zero, r * 1.1, Paint()..shader = ui.Gradient.radial(Offset.zero, r * 1.1, [const Color(0x00FFEB3B), const Color(0x00FFEB3B), Color.fromRGBO(255, 235, 59, 0.12 * glow)], [0, 0.7, 1]));
+  c.drawCircle(Offset.zero, r * 1.1, _stroke(Color.fromRGBO(255, 235, 59, 0.18 * glow), r * 0.12));
 }
 
 void _cloud(Canvas c, double r, double time) {
@@ -413,9 +471,12 @@ void _cloud(Canvas c, double r, double time) {
   for (final p in puffs) {
     c.drawCircle(Offset(p[0] * r, p[1] * r), p[2] * r + 2, _fill(const Color(0xFFB0BEC5)));
   }
+  final puffFill = _fill(const Color(0xFFF7F9FA));
+  final puffHi = _fill(Colors.white);
   for (final p in puffs) {
     final o = Offset(p[0] * r, p[1] * r);
-    c.drawCircle(o, p[2] * r, Paint()..shader = ui.Gradient.radial(o + Offset(-p[2] * r * 0.3, -p[2] * r * 0.4), p[2] * r * 1.3, [Colors.white, const Color(0xFFECEFF1)]));
+    c.drawCircle(o, p[2] * r, puffFill);
+    c.drawCircle(o + Offset(-p[2] * r * 0.25, -p[2] * r * 0.3), p[2] * r * 0.55, puffHi);
   }
   // 小角
   for (final s in [-1.0, 1.0]) {

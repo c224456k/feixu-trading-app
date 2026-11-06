@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'sfx_engine.dart';
+
 // 鐮刀風暴的音效與背景音樂（原創程式合成，產生腳本：DClab/gen_sickle_audio.py）。
 // 設定獨立存（不跟賭場共用）；瀏覽器擋自動播放時，玩家按一下喇叭選單就會開始。
 class SickleAudio {
@@ -18,6 +20,8 @@ class SickleAudio {
   bool _loaded = false;
   bool _active = false;
   final Map<String, DateTime> _lastPlay = {};
+  final SfxEngine _sfx = SfxEngine();
+  static const _names = ['clash', 'knock', 'bounce', 'pickup', 'pickup_big', 'item', 'kill', 'die', 'level', 'mhit', 'mdie', 'win'];
 
   Future<void> _load() async {
     if (_loaded) return;
@@ -32,6 +36,7 @@ class SickleAudio {
   Future<void> enter() async {
     if (!kIsWeb) return; // 只有網頁版（也讓 widget 測試不用音效外掛）
     await _load();
+    _sfx.load([for (final n in _names) 'assets/audio/sickle_$n.mp3']);
     _active = true;
     if (music.value) await _playMusic();
   }
@@ -67,6 +72,9 @@ class SickleAudio {
     } catch (_) {}
   }
 
+  /// 玩家點一下畫面時叫醒音效（瀏覽器規定要互動後才能出聲）
+  void unlock() => _sfx.unlock();
+
   Future<void> toggleMusic() async {
     music.value = !music.value;
     try {
@@ -98,13 +106,7 @@ class SickleAudio {
     final last = _lastPlay[name];
     if (last != null && now.difference(last).inMilliseconds < 60) return;
     _lastPlay[name] = now;
-    try {
-      final p = AudioPlayer();
-      await p.setReleaseMode(ReleaseMode.release);
-      await p.setVolume(volume);
-      p.onPlayerComplete.first.then((_) => p.dispose());
-      await p.play(AssetSource('audio/sickle_$name.mp3'));
-    } catch (_) {}
+    _sfx.play('assets/audio/sickle_$name.mp3', volume);
   }
 }
 

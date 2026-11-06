@@ -664,7 +664,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
       p.rot += p.vr * dt;
     }
     _fx.parts.removeWhere((p) => p.life <= 0);
-    if (_fx.parts.length > 900) _fx.parts.removeRange(0, _fx.parts.length - 900);
+    if (_fx.parts.length > 450) _fx.parts.removeRange(0, _fx.parts.length - 450);
     for (final f in _fx.flies) {
       f.t += dt;
     }
@@ -733,7 +733,11 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onPanStart: (d) => _joyOrigin = _joyNow = d.localPosition,
+                  onTapDown: (_) => SickleAudio.instance.unlock(),
+                  onPanStart: (d) {
+                    SickleAudio.instance.unlock();
+                    _joyOrigin = _joyNow = d.localPosition;
+                  },
                   onPanUpdate: (d) => _joyNow = d.localPosition,
                   onPanEnd: (_) => _joyOrigin = _joyNow = null,
                   onPanCancel: () => _joyOrigin = _joyNow = null,
@@ -1040,7 +1044,12 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
   }
 
   Widget _bigButton(String t, VoidCallback? onTap, {Color color = _goldDeep, bool small = false}) => FilledButton(
-        onPressed: onTap,
+        onPressed: onTap == null
+            ? null
+            : () {
+                SickleAudio.instance.unlock();
+                onTap();
+              },
         style: FilledButton.styleFrom(
           backgroundColor: color,
           foregroundColor: Colors.white,
@@ -1406,6 +1415,16 @@ void _drawHandle(Canvas c, double alpha) {
       handle..color = Color.fromRGBO(62, 39, 35, alpha)); // 柄尾
 }
 
+final _shadowPaint = Paint()..color = const Color(0x33000000);
+final Map<String, Paint> _auraCache = {};
+final List<Paint> _pickupGlow = [
+  for (var gr = 0; gr < 5; gr++)
+    Paint()
+      ..shader = ui.Gradient.radial(Offset.zero, (25.0 + gr * 3.5) * 0.85, [_gradeColors[gr].withValues(alpha: 0.5), _gradeColors[gr].withValues(alpha: 0)]),
+];
+final Map<SsItemType, Paint> _itemGlow = {};
+final _itemDisc = Paint()..shader = ui.Gradient.radial(const Offset(-8, -10), 34, [Colors.white, const Color(0xFFCFD8DC)]);
+
 // 地上鐮刀等級的顏色：白 / 綠 / 藍 / 紫 / 橘
 const _gradeColors = [Color(0xFFECEFF1), Color(0xFF69F0AE), Color(0xFF40C4FF), Color(0xFFE040FB), Color(0xFFFFAB40)];
 final List<Paint> _gradeFill = [
@@ -1456,8 +1475,8 @@ void _drawItemIcon(Canvas c, SsItemType t, double size) {
         ..close();
       c.drawPath(
           boot,
-          Paint()
-            ..shader = ui.Gradient.linear(const Offset(0, -0.8), const Offset(0, 0.5), [const Color(0xFFE0F7FA), const Color(0xFF00ACC1)]));
+          _auraCache.putIfAbsent(
+              'iconBoot', () => Paint()..shader = ui.Gradient.linear(const Offset(0, -0.8), const Offset(0, 0.5), [const Color(0xFFE0F7FA), const Color(0xFF00ACC1)])));
       c.drawLine(const Offset(-0.44, 0.58), const Offset(0.8, 0.58),
           Paint()
             ..color = const Color(0xFF263238)
@@ -1473,8 +1492,8 @@ void _drawItemIcon(Canvas c, SsItemType t, double size) {
         ..quadraticBezierTo(-0.46 * k, 0.62 * k, -0.62 * k, 0.1 * k)
         ..lineTo(-0.68 * k, -0.56 * k)
         ..close();
-      c.drawPath(shield(1), Paint()..shader = ui.Gradient.linear(const Offset(-0.6, -0.8), const Offset(0.6, 0.8), [const Color(0xFFFFF8E1), const Color(0xFFFFB300)]));
-      c.drawPath(shield(0.68), Paint()..shader = ui.Gradient.linear(const Offset(0, -0.6), const Offset(0, 0.6), [const Color(0xFFD32F2F), const Color(0xFF7F0000)]));
+      c.drawPath(shield(1), _auraCache.putIfAbsent('icon1', () => Paint()..shader = ui.Gradient.linear(const Offset(-0.6, -0.8), const Offset(0.6, 0.8), [const Color(0xFFFFF8E1), const Color(0xFFFFB300)])));
+      c.drawPath(shield(0.68), _auraCache.putIfAbsent('icon2', () => Paint()..shader = ui.Gradient.linear(const Offset(0, -0.6), const Offset(0, 0.6), [const Color(0xFFD32F2F), const Color(0xFF7F0000)])));
       final star = Path();
       for (var i = 0; i < 10; i++) {
         final a = -math.pi / 2 + i * math.pi / 5;
@@ -1510,7 +1529,7 @@ void _drawItemIcon(Canvas c, SsItemType t, double size) {
       c.save();
       c.clipPath(Path()..addOval(Rect.fromCircle(center: const Offset(0, 0.2), radius: 0.56)));
       c.drawRect(const Rect.fromLTRB(-0.6, 0.0, 0.6, 0.8),
-          Paint()..shader = ui.Gradient.linear(const Offset(0, 0), const Offset(0, 0.8), [const Color(0xFFFF5252), const Color(0xFFB71C1C)]));
+          _auraCache.putIfAbsent('icon3', () => Paint()..shader = ui.Gradient.linear(const Offset(0, 0), const Offset(0, 0.8), [const Color(0xFFFF5252), const Color(0xFFB71C1C)])));
       c.restore();
       final b = Paint()..color = Colors.white.withValues(alpha: 0.85);
       c.drawCircle(const Offset(-0.18, 0.3), 0.08, b);
@@ -1575,12 +1594,24 @@ void _drawBlade(Canvas c, double x, double y, double ang, double size, int color
   c.translate(x, y);
   c.rotate(ang);
   c.scale(flip ? -size : size, size);
-  if (handle) _drawHandle(c, 1);
-  c.drawPath(_bladePath, _outlineTier[tier]);
-  c.drawPath(_bladePath, _colorFill[color]);
-  c.drawPath(_edgePath, _edgeTier[tier]);
+  // 同一種顏色／等級／有沒有柄的刀只錄一次 Picture，之後直接重播（少很多繪圖呼叫）
+  final key = (color * 3 + tier) * 2 + (handle ? 1 : 0);
+  var pic = _bladePics[key];
+  if (pic == null) {
+    final rec = ui.PictureRecorder();
+    final pc = Canvas(rec);
+    if (handle) _drawHandle(pc, 1);
+    pc.drawPath(_bladePath, _outlineTier[tier]);
+    pc.drawPath(_bladePath, _colorFill[color]);
+    pc.drawPath(_edgePath, _edgeTier[tier]);
+    pic = rec.endRecording();
+    _bladePics[key] = pic;
+  }
+  c.drawPicture(pic);
   c.restore();
 }
+
+final Map<int, ui.Picture> _bladePics = {};
 
 // ---------------- 地圖底圖 ----------------
 Path _blob(double x, double y, double r, int seed, {int pts = 10, double wobble = 0.16}) {
@@ -1800,7 +1831,9 @@ class _WorldPainter extends CustomPainter {
         text: TextSpan(
             text: t,
             style: TextStyle(color: color, fontSize: size, fontWeight: FontWeight.w800, shadows: const [
-              Shadow(color: Colors.black, blurRadius: 3),
+              // 不用模糊陰影（網頁上很吃效能），改兩層錯開的硬陰影當描邊
+              Shadow(color: Color(0xCC000000), offset: Offset(1.2, 1.2)),
+              Shadow(color: Color(0x99000000), offset: Offset(-1, -1)),
             ])),
         textDirection: TextDirection.ltr,
       )..layout();
@@ -1846,13 +1879,14 @@ class _WorldPainter extends CustomPainter {
       final bob = math.sin(g.time * 3 + p.phase);
       final gc = _gradeColors[p.grade];
       final sz = 25.0 + p.grade * 3.5;
-      canvas.drawOval(Rect.fromCenter(center: Offset(p.x, p.y + sz * 0.45), width: sz * 0.9, height: sz * 0.25), Paint()..color = const Color(0x33000000));
+      canvas.drawOval(Rect.fromCenter(center: Offset(p.x, p.y + sz * 0.45), width: sz * 0.9, height: sz * 0.25), _shadowPaint);
       if (p.grade > 0) {
-        canvas.drawCircle(
-            Offset(p.x, p.y),
-            sz * 0.85,
-            Paint()
-              ..shader = ui.Gradient.radial(Offset(p.x, p.y), sz * 0.85, [gc.withValues(alpha: 0.45 + 0.15 * bob), gc.withValues(alpha: 0)]));
+        // 光暈：筆刷每個等級只建一次（以原點為中心），用平移畫上去
+        canvas.save();
+        canvas.translate(p.x, p.y);
+        canvas.scale(1 + 0.08 * bob);
+        canvas.drawCircle(Offset.zero, sz * 0.85, _pickupGlow[p.grade]);
+        canvas.restore();
       }
       if (p.grade >= 3) {
         // 紫、橘：旋轉的光芒
@@ -1885,8 +1919,15 @@ class _WorldPainter extends CustomPainter {
       final bob = math.sin(g.time * 2.5 + it.phase);
       final y = it.y + bob * 4;
       canvas.drawOval(Rect.fromCenter(center: Offset(it.x, it.y + 30), width: 40 - bob * 4, height: 10), Paint()..color = Colors.black26);
+      canvas.save();
+      canvas.translate(it.x, y);
       canvas.drawCircle(
-          Offset(it.x, y), 52, Paint()..shader = ui.Gradient.radial(Offset(it.x, y), 52, [col.withValues(alpha: 0.55), col.withValues(alpha: 0)]));
+          Offset.zero,
+          52,
+          _itemGlow.putIfAbsent(
+              it.type, () => Paint()..shader = ui.Gradient.radial(Offset.zero, 52, [col.withValues(alpha: 0.55), col.withValues(alpha: 0)])));
+      canvas.drawCircle(Offset.zero, 26, _itemDisc);
+      canvas.restore();
       final halo = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
@@ -1896,8 +1937,6 @@ class _WorldPainter extends CustomPainter {
         final a = g.time * 1.8 + it.phase + i * math.pi / 3;
         canvas.drawArc(Rect.fromCircle(center: Offset(it.x, y), radius: 33), a, 0.6, false, halo);
       }
-      canvas.drawCircle(
-          Offset(it.x, y), 26, Paint()..shader = ui.Gradient.radial(Offset(it.x - 8, y - 10), 34, [Colors.white, const Color(0xFFCFD8DC)]));
       canvas.drawCircle(
           Offset(it.x, y),
           26,
@@ -1964,21 +2003,20 @@ class _WorldPainter extends CustomPainter {
     }
 
     // 粒子
+    final pp = Paint()..strokeCap = StrokeCap.round; // 粒子共用一支筆，不要每顆都 new
     for (final p in s._fx.parts) {
       final a = (p.life / p.maxLife).clamp(0.0, 1.0);
+      if (!view.inflate(40).contains(Offset(p.x, p.y))) continue;
       switch (p.kind) {
         case 0:
-          canvas.drawLine(
-              Offset(p.x, p.y),
-              Offset(p.x - p.vx * 0.03, p.y - p.vy * 0.03),
-              Paint()
-                ..color = p.color.withValues(alpha: a)
-                ..strokeWidth = p.size
-                ..strokeCap = StrokeCap.round);
+          pp
+            ..color = p.color.withValues(alpha: a)
+            ..strokeWidth = p.size;
+          canvas.drawLine(Offset(p.x, p.y), Offset(p.x - p.vx * 0.03, p.y - p.vy * 0.03), pp);
         case 1:
-          canvas.drawCircle(Offset(p.x, p.y), p.size * (0.5 + a * 0.5), Paint()..color = p.color.withValues(alpha: a));
+          canvas.drawCircle(Offset(p.x, p.y), p.size * (0.5 + a * 0.5), pp..color = p.color.withValues(alpha: a));
         case 2:
-          canvas.drawCircle(Offset(p.x, p.y), p.size * a, Paint()..color = p.color.withValues(alpha: a * 0.8));
+          canvas.drawCircle(Offset(p.x, p.y), p.size * a, pp..color = p.color.withValues(alpha: a * 0.8));
         case 3:
           _drawSickle(canvas, p.x, p.y, p.rot, p.size, 0, alpha: a * 0.8);
         case 4:
@@ -2014,7 +2052,8 @@ class _WorldPainter extends CustomPainter {
       canvas.translate(t.x, t.y - 50 * Curves.easeOut.transform(k));
       final sc = k < 0.15 ? 0.5 + k / 0.15 * 0.7 : 1.2 - (k - 0.15) * 0.25;
       canvas.scale(sc / s._zoom.clamp(0.4, 1.0));
-      canvas.saveLayer(null, Paint()..color = Colors.white.withValues(alpha: (1 - math.max(0, k - 0.6) / 0.4).clamp(0, 1)));
+      canvas.saveLayer(Rect.fromCenter(center: Offset.zero, width: tp.width + 8, height: tp.height + 8),
+          Paint()..color = Colors.white.withValues(alpha: (1 - math.max(0, k - 0.6) / 0.4).clamp(0, 1)));
       tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
       canvas.restore();
       canvas.restore();
@@ -2041,9 +2080,11 @@ class _WorldPainter extends CustomPainter {
     // 暗角
     canvas.drawRect(
         Offset.zero & size,
-        Paint()
-          ..shader = ui.Gradient.radial(
-              size.center(Offset.zero), size.longestSide * 0.7, [Colors.transparent, Colors.black.withValues(alpha: 0.35)], [0.6, 1]));
+        _auraCache.putIfAbsent(
+            'vig${size.width.round()}x${size.height.round()}',
+            () => Paint()
+              ..shader = ui.Gradient.radial(
+                  size.center(Offset.zero), size.longestSide * 0.7, [Colors.transparent, Colors.black.withValues(alpha: 0.35)], [0.6, 1])));
   }
 
   void _drawBush(Canvas c, SsBush b, double time) {
@@ -2088,21 +2129,28 @@ class _WorldPainter extends CustomPainter {
     // 金光暴風：外層光暈 + 旋轉風紋
     if (tier == 2) {
       final pulse = 0.5 + 0.5 * math.sin(time * 5 + f.id);
+      final ar = (R + bs * 1.2).roundToDouble();
+      c.save();
+      c.translate(cx, cy);
+      c.scale(1 + 0.04 * pulse);
       c.drawCircle(
-          Offset(cx, cy),
-          R + bs * 1.2,
-          Paint()
-            ..shader = ui.Gradient.radial(Offset(cx, cy), R + bs * 1.2, [
-              _gold.withValues(alpha: 0.0),
-              _gold.withValues(alpha: 0.08 + 0.05 * pulse),
-              _goldDeep.withValues(alpha: 0.22 + 0.08 * pulse),
-              _goldDeep.withValues(alpha: 0),
-            ], [
-              0,
-              0.55,
-              0.8,
-              1
-            ]));
+          Offset.zero,
+          ar,
+          _auraCache.putIfAbsent(
+              'g$ar',
+              () => Paint()
+                ..shader = ui.Gradient.radial(Offset.zero, ar, [
+                  _gold.withValues(alpha: 0.0),
+                  _gold.withValues(alpha: 0.1),
+                  _goldDeep.withValues(alpha: 0.26),
+                  _goldDeep.withValues(alpha: 0),
+                ], [
+                  0,
+                  0.55,
+                  0.8,
+                  1
+                ])));
+      c.restore();
       final wind = Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round;
@@ -2115,12 +2163,17 @@ class _WorldPainter extends CustomPainter {
         c.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: rr), a0, 0.8, false, wind);
       }
     } else if (tier == 1) {
+      final ar = (R + bs * 0.6).roundToDouble();
+      c.save();
+      c.translate(cx, cy);
       c.drawCircle(
-          Offset(cx, cy),
-          R + bs * 0.6,
-          Paint()
-            ..shader = ui.Gradient.radial(
-                Offset(cx, cy), R + bs * 0.6, [const Color(0x0081D4FA), const Color(0x1C81D4FA), const Color(0x0081D4FA)], [0.5, 0.85, 1]));
+          Offset.zero,
+          ar,
+          _auraCache.putIfAbsent(
+              's$ar',
+              () => Paint()
+                ..shader = ui.Gradient.radial(Offset.zero, ar, [const Color(0x0081D4FA), const Color(0x1C81D4FA), const Color(0x0081D4FA)], [0.5, 0.85, 1])));
+      c.restore();
     }
 
     // 很淡的軌道線（看得出圈的範圍，但空隙還是看得清楚）
