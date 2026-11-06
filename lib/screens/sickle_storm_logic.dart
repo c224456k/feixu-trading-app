@@ -48,7 +48,7 @@ const ssItemDesc = {
   SsItemType.boots: '跑速 +45%',
   SsItemType.guard: '刀槍不入，不會被磨損也不會被收割',
   SsItemType.magnet: '把附近地上的鐮刀吸過來',
-  SsItemType.rage: '撞擊力量 ×1.8',
+  SsItemType.rage: '刀的等級 +1，同色的刀也撞得掉',
 };
 const ssItemDur = {SsItemType.boots: 8.0, SsItemType.guard: 5.0, SsItemType.magnet: 10.0, SsItemType.rage: 8.0};
 const ssItemMax = 8; // 場上最多幾個道具
@@ -64,8 +64,15 @@ int ssLevelColor(int n) => ssLevelColors[math.min(ssLevel(n), ssLevelColors.leng
 /// 圈上實際有幾把刀：這一層長到第幾把（1~20），升層就從 1 把重新長。
 int ssSlots(int n) => n <= 0 ? 0 : n - ssLevel(n) * ssPerLevel;
 
-/// 鐮刀圈半徑：看圈上有幾把，層數高的稍微大一點。
-double ssRingR(int n) => n <= 0 ? ssBodyR : 30 + 4.0 * math.pow(ssSlots(n), 0.8) + 4.0 * math.min(ssLevel(n), 8);
+/// 每把刀在圈上佔的弧長（刀本身約 0.75 把寬 + 一定要留的縫），倍數是「刀大小」。
+const ssSlotSpacing = 1.75;
+
+/// 鐮刀圈半徑：刀多了圈就撐大，保證刀與刀之間永遠有縫可以鑽。
+double ssRingR(int n) {
+  if (n <= 0) return ssBodyR;
+  final m = ssSlots(n);
+  return math.max(30 + 4.0 * math.min(ssLevel(n), 8), m * ssSlotSpacing * ssBladeSize(n) / (2 * math.pi));
+}
 
 /// 單把鐮刀的大小（畫面與碰撞共用）：層數越高刀越大。
 double ssBladeSize(int n) => math.min(46.0, 24 + 3.0 * ssLevel(n) + 0.2 * ssSlots(n));
@@ -78,8 +85,10 @@ double ssSpeed(int n) => 250 / (1 + n * 0.004);
 
 int ssTier(int n) => n >= ssGold ? 2 : (n >= ssSilver ? 1 : 0);
 
-/// 轉速（弧度／秒）：刻意慢，看得到刀與刀之間的空隙；層數越高轉得稍快。
-double ssSpin(int level) => math.min(2.5, 1.7 + 0.12 * level);
+/// 轉速（弧度／秒）：刻意慢，看得到刀與刀之間的空隙；層數越高轉得稍快，
+/// 圈撐大以後角速度放慢（刀尖的線速度不要快到縫隙根本鑽不進去）。
+double ssSpin(int level, [double ringR = 0]) =>
+    math.min(2.5, 1.7 + 0.12 * level) * (ringR <= 0 ? 1.0 : (100 / ringR).clamp(0.55, 1.0));
 
 // 單把鐮刀的碰撞點（刀的區域座標：+x 是旋轉前進方向，-y 朝外），半徑 = 0.15 × 刀大小
 const _bladePts = [0.08, -0.30, 0.30, -0.52, 0.56, -0.42, 0.76, -0.16];
@@ -163,7 +172,7 @@ class SsFighter {
   int get tier => ssTier(n);
   int get level => ssLevel(n);
   int get levelColor => ssLevelColor(n);
-  double get spin => ssSpin(level);
+  double get spin => ssSpin(level, ringR);
 
   void addBlades(int color, int k) {
     mix[color] += k;
@@ -741,7 +750,7 @@ class SsGame {
   void _collectPickups() {
     for (final f in fighters) {
       if (!f.alive) continue;
-      final r = f.ringR + 10;
+      final r = math.min(f.ringR, 70.0) + 10; // 圈撐大以後不要變成大吸塵器
       final r2 = r * r;
       // 磁鐵：大範圍內的鐮刀往自己飛過來
       final mag = f.has(SsItemType.magnet);
@@ -800,10 +809,11 @@ class SsGame {
 
   bool _dull(SsFighter a, SsFighter b) => a.id == introId && b.human && time < 15;
 
-  /// a 的刀尖有沒有碰到 b 的身體
+  /// a 的刀尖有沒有鑽過 b 刀圈的縫、進到圈裡面（或直接碰到 b 的身體）＝收割
   bool _bladeHitsBody(SsFighter a, SsFighter b) {
     final pts = a.bladePoints(tick);
-    final lim = ssBodyR + a.bladeSize * _bladePtR * 0.8;
+    final inner = b.n > 0 ? math.max(ssBodyR, b.ringR - b.bladeSize * 0.2) : ssBodyR;
+    final lim = inner + a.bladeSize * _bladePtR * 0.8;
     final l2 = lim * lim;
     for (var i = 0; i < pts.length; i += 2) {
       final dx = pts[i] - b.x, dy = pts[i + 1] - b.y;
@@ -811,6 +821,9 @@ class SsGame {
     }
     return false;
   }
+
+  /// 刀碰刀時比的等級：層數，狂暴藥水 +1
+  int _clashLevel(SsFighter f) => f.level + (f.has(SsItemType.rage) ? 1 : 0);
 
   /// 兩圈刀有沒有真的碰在一起，有的話回傳碰撞點
   (double, double)? _bladeClash(SsFighter a, SsFighter b) {
@@ -886,16 +899,13 @@ class SsGame {
           if (_pairCd.containsKey(key)) continue;
           final hit = _bladeClash(a, b);
           if (hit == null) continue;
-          _pairCd[key] = 0.12;
-          final pa = _power(a, nx, ny), pb = _power(b, -nx, -ny);
-          // 每次碰撞的磨損：雙方平均力量決定打多兇，力量比決定誰吃虧（比例 1.5 次方，
-          // 多一點點就明顯佔上風；40 把撞 5 把幾乎一次就把對方磨光）
-          final base = 0.3 + (pa + pb) * 0.025;
-          final ratio = (pa / pb).clamp(0.1, 10.0);
-          if (!ga) a.wear += base * math.pow(1 / ratio, 1.5);
-          if (!gb) b.wear += base * math.pow(ratio, 1.5);
+          _pairCd[key] = 0.15;
+          // 同色（同層）互撞：兩把一起碎掉；高層撞低層：低的那把被撞掉，高的沒事
+          final la = _clashLevel(a), lb = _clashLevel(b);
           final (cx, cy) = hit;
-          final lostA = _wearOff(a, cx, cy), lostB = _wearOff(b, cx, cy);
+          if (!ga && la <= lb) a.wear = 1;
+          if (!gb && lb <= la) b.wear = 1;
+          final lostA = _wearOff(a, cx, cy, la < lb), lostB = _wearOff(b, cx, cy, lb < la);
           if (lostA > 0) a.flash = 0.12;
           if (lostB > 0) b.flash = 0.12;
           _push(a, b, nx, ny, 260);
@@ -908,14 +918,14 @@ class SsGame {
     }
   }
 
-  int _wearOff(SsFighter f, double cx, double cy) {
+  /// 掉一把刀。[knocked]：被高等刀撞掉的有一半會掉在地上給人撿；同色互撞的直接碎掉。
+  int _wearOff(SsFighter f, double cx, double cy, bool knocked) {
     var lost = 0;
     while (f.wear >= 1 && f.n > 0) {
       f.wear -= 1;
       final col = f.dropOne(rng);
       lost++;
-      // 斷掉的鐮刀有一半掉在地上，誰都能撿（彩色的掉下去還是彩色）
-      if (rng.nextDouble() < 0.5) {
+      if (knocked && rng.nextDouble() < 0.5) {
         final a = rng.nextDouble() * math.pi * 2;
         final r = 30 + rng.nextDouble() * 50;
         final px = cx + math.cos(a) * r, py = cy + math.sin(a) * r;

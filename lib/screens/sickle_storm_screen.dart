@@ -909,8 +909,8 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
         const SizedBox(height: 18),
         _glass(const Text(
           '你身邊繞著一圈鐮刀，刀與刀之間有空隙。\n'
-          '刀碰刀會互相磨損——鐮刀多、正在往前衝的一方佔上風。\n'
-          '看準空隙，讓刀尖叉到對方的身體就是「收割」：他全部的鐮刀瞬間歸你！\n'
+          '刀碰刀：同顏色的兩把一起碎掉；高等的刀撞低等的刀，低等的那把被撞掉。\n'
+          '刀圈一定有縫——刀尖鑽過縫進到對方圈裡就是「收割」：他全部的鐮刀瞬間歸你！\n'
           '刀圈每 20 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層時圈上只剩一把更大的刀，再慢慢長回 20 把。\n'
           '3 分鐘後鐮刀最多的人獲勝。地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
           '石柱、斷牆、水池會擋路；走進草叢別人就看不到你。\n'
@@ -2036,7 +2036,7 @@ class _WorldPainter extends CustomPainter {
 
     // 道具效果
     if (f.has(SsItemType.magnet)) {
-      final mr = (R + 10) * 2 + 260;
+      final mr = (math.min(R, 70.0) + 10) * 2 + 260;
       final mp = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
