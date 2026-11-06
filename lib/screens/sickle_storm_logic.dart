@@ -26,12 +26,39 @@ const ssRespawnSec = 3.0; // 多人模式被收割後幾秒重生
 const ssPickupValue = [1, 2, 3, 5, 8];
 const _pickupWeight = [66, 20, 9, 4, 1];
 
-/// 鐮刀顏色表：0~4 是地上鐮刀的等級色，5 以後是每個人自己的本命色。
-const ssBladeColors = [
+/// 鐮刀顏色表：0~4 是地上鐮刀的等級色，5~16 是每個人自己的本命色，
+/// 17~28 是第 13~24 層的高階色，29~40 是彩虹刀用的 12 種色相。
+const _baseBladeColors = [
   0xFFECEFF1, 0xFF69F0AE, 0xFF40C4FF, 0xFFE040FB, 0xFFFFAB40, // 白 綠 藍 紫 橘
   0xFFFF5252, 0xFFFF4081, 0xFF18FFFF, 0xFF536DFE, 0xFF90A4AE, 0xFFFF6E40, // 紅 桃 青 靛 鋼 赤銅
   0xFFEEFF41, 0xFF80D8FF, 0xFFB388FF, 0xFFF8BBD0, 0xFF64FFDA, 0xFFFFD740, // 檸檬 天藍 薰衣草 櫻 薄荷 琥珀
+  // 第 13~24 層：金 銀河 熔岩 冰晶 翡翠 紫晶 黑曜 星光 極光 深淵 神聖 混沌
+  0xFFFFD700, 0xFF5C6BC0, 0xFFFF3D00, 0xFFB3E5FC, 0xFF00C853, 0xFFAA00FF,
+  0xFF546E7A, 0xFFFFF59D, 0xFF1DE9B6, 0xFF3949AB, 0xFFFFFDE7, 0xFFD500F9,
 ];
+const ssHighFirst = 17;
+const ssRainbowFirst = 29;
+final List<int> ssBladeColors = [
+  ..._baseBladeColors,
+  for (var i = 0; i < 12; i++) _hsv(i * 30.0, 0.85, 1.0),
+];
+
+int _hsv(double h, double s, double v) {
+  final c = v * s, x = c * (1 - ((h / 60) % 2 - 1).abs()), m = v - c;
+  final (r, g, b) = h < 60
+      ? (c, x, 0.0)
+      : h < 120
+          ? (x, c, 0.0)
+          : h < 180
+              ? (0.0, c, x)
+              : h < 240
+                  ? (0.0, x, c)
+                  : h < 300
+                      ? (x, 0.0, c)
+                      : (c, 0.0, x);
+  int ch(double t) => ((t + m) * 255).round().clamp(0, 255);
+  return 0xFF000000 | (ch(r) << 16) | (ch(g) << 8) | ch(b);
+}
 const ssSkinFirst = 5;
 const ssPlayerSkin = 12; // 單機主角：天藍
 
@@ -57,9 +84,29 @@ const ssItemEvery = 5.0; // 幾秒補一個
 /// 第幾層（0 起算）：1~8 把是 0、9~16 是 1…
 int ssLevel(int n) => n <= 0 ? 0 : (n - 1) ~/ ssPerLevel;
 
-/// 每一層的刀色（ssBladeColors 索引）：白 綠 藍 紫 橘 紅 琥珀 桃 靛 青 赤銅 薰衣草，之後都用最後一色
+/// 每一層的刀色（ssBladeColors 索引）：前 12 層 白 綠 藍 紫 橘 紅 琥珀 桃 靛 青 赤銅 薰衣草，
+/// 第 13~24 層是高階色，第 25 層起是彩虹刀（每把刀不同色），每再 12 層多一顆星，無限往上。
 const ssLevelColors = [0, 1, 2, 3, 4, 5, 16, 6, 8, 7, 10, 13];
-int ssLevelColor(int n) => ssLevelColors[math.min(ssLevel(n), ssLevelColors.length - 1)];
+const _levelNames = ['白', '綠', '藍', '紫', '橘', '紅', '琥珀', '桃', '靛', '青', '赤銅', '薰衣草'];
+const _highNames = ['金', '銀河', '熔岩', '冰晶', '翡翠', '紫晶', '黑曜', '星光', '極光', '深淵', '神聖', '混沌'];
+const ssRainbowLevel = 24;
+
+/// 這一層的代表色（HUD、提示用；彩虹層每層換一個色相）
+int ssLevelColorOf(int level) {
+  if (level < 12) return ssLevelColors[level];
+  if (level < ssRainbowLevel) return ssHighFirst + level - 12;
+  return ssRainbowFirst + (level - ssRainbowLevel) % 12;
+}
+
+/// 這一層的名字：白、綠…薰衣草、金…混沌、彩虹、彩虹★2…
+String ssLevelName(int level) {
+  if (level < 12) return _levelNames[level];
+  if (level < ssRainbowLevel) return _highNames[level - 12];
+  final star = (level - ssRainbowLevel) ~/ 12 + 1;
+  return star <= 1 ? '彩虹' : '彩虹★$star';
+}
+
+int ssLevelColor(int n) => ssLevelColorOf(ssLevel(n));
 
 /// 圈上實際有幾把刀：這一層長到第幾把（1~8），升層就從 1 把重新長。
 int ssSlots(int n) => n <= 0 ? 0 : n - ssLevel(n) * ssPerLevel;
@@ -181,7 +228,7 @@ class SsFighter {
   bool get armed => slots > 0;
   int get tier => ssTier(n);
   int get level => lv;
-  int get levelColor => ssLevelColors[math.min(lv, ssLevelColors.length - 1)];
+  int get levelColor => ssLevelColorOf(lv);
   double get spin => ssSpin(level, ringR);
 
   void addBlades(int color, int k) {
@@ -218,7 +265,11 @@ class SsFighter {
   }
 
   /// 圈上刀的顏色：看在第幾層（同一層全部同色）。
-  int slotColor(int k, int m, [int layer = 0]) => levelColor;
+  int slotColor(int k, int m, [int layer = 0]) {
+    if (lv < ssRainbowLevel || m <= 0) return levelColor;
+    // 彩虹刀：一圈刀把色相平均分配（起點跟著層數轉一點）
+    return ssRainbowFirst + ((k * 12) ~/ m + lv) % 12;
+  }
 
   /// 每一格刀的碰撞點（世界座標，x,y 交錯），同一幀只算一次。
   List<double> bladePoints(int tick) {

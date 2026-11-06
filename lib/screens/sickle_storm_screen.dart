@@ -546,7 +546,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           }
         case SsEvType.gold:
           final f = _g.byId(e.a);
-          final lc = Color(ssBladeColors[ssLevelColors[math.min(e.count, ssLevelColors.length - 1)]]);
+          final lc = Color(ssBladeColors[ssLevelColorOf(e.count)]);
           if (e.a == meId && f != null) {
             _showBanner('⚡ 第 ${e.count + 1} 層・${_levelName(e.count)}刀 ⚡', lc);
             _fx.shake = 14;
@@ -562,7 +562,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           }
         case SsEvType.silver:
           final f = _g.byId(e.a);
-          final lc = Color(ssBladeColors[ssLevelColors[math.min(e.count, ssLevelColors.length - 1)]]);
+          final lc = Color(ssBladeColors[ssLevelColorOf(e.count)]);
           if (e.a == meId && f != null) {
             _showBanner('第 ${e.count + 1} 層・${_levelName(e.count)}刀', lc);
             _fx.waves.add(_Wave(f.x, f.y, 220, lc, 0.6));
@@ -1348,8 +1348,7 @@ class _SsNet {
   }
 }
 
-const _levelNames = ['白', '綠', '藍', '紫', '橘', '紅', '琥珀', '桃', '靛', '青', '赤銅', '薰衣草'];
-String _levelName(int level) => _levelNames[math.min(level, _levelNames.length - 1)];
+String _levelName(int level) => ssLevelName(level);
 
 Color _tierColor(int tier) => const [Color(0xFFE0E0E0), Color(0xFFB3E5FC), _gold][tier];
 
@@ -2174,6 +2173,44 @@ class _WorldPainter extends CustomPainter {
               () => Paint()
                 ..shader = ui.Gradient.radial(Offset.zero, ar, [const Color(0x0081D4FA), const Color(0x1C81D4FA), const Color(0x0081D4FA)], [0.5, 0.85, 1])));
       c.restore();
+    }
+
+    // 高階刀（第 13 層起）：刀圈外一圈自己顏色的光環；彩虹刀是會轉的彩虹光環
+    if (f.level >= 12 && f.armed) {
+      final ar = (R + bs * 0.15).roundToDouble();
+      final w = (bs * 0.9).roundToDouble();
+      final rainbow = f.level >= ssRainbowLevel;
+      final key = rainbow ? 'rb$ar|$w' : 'hl${f.levelColor}|$ar|$w';
+      final paint = _auraCache.putIfAbsent(key, () {
+        final p = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w;
+        if (rainbow) {
+          p.shader = ui.Gradient.sweep(Offset.zero, [
+            for (var i = 0; i <= 12; i++) Color(ssBladeColors[ssRainbowFirst + i % 12]).withValues(alpha: 0.32),
+          ], [
+            for (var i = 0; i <= 12; i++) i / 12,
+          ]);
+        } else {
+          final lc = Color(ssBladeColors[f.levelColor]);
+          p.shader = ui.Gradient.radial(Offset.zero, ar + w / 2,
+              [lc.withValues(alpha: 0), lc.withValues(alpha: 0.3), lc.withValues(alpha: 0)], [(ar - w / 2) / (ar + w / 2), ar / (ar + w / 2), 1]);
+        }
+        return p;
+      });
+      c.save();
+      c.translate(cx, cy);
+      if (rainbow) c.rotate(-time * 1.5);
+      c.drawCircle(Offset.zero, ar, paint);
+      c.restore();
+      // 每 12 層多一顆小星星繞著轉（彩虹★2 起）
+      final stars = f.level >= ssRainbowLevel ? (f.level - ssRainbowLevel) ~/ 12 + 1 : 0;
+      for (var i = 0; i < math.min(stars, 8); i++) {
+        final a = time * 2 + i * math.pi * 2 / math.min(stars, 8);
+        final sp = Offset(cx + math.cos(a) * (R + bs * 0.75), cy + math.sin(a) * (R + bs * 0.75));
+        c.drawCircle(sp, 3.2, Paint()..color = Colors.white);
+        c.drawCircle(sp, 6, Paint()..color = const Color(0x66FFF59D));
+      }
     }
 
     // 很淡的軌道線（看得出圈的範圍，但空隙還是看得清楚）
