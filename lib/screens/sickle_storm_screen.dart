@@ -105,6 +105,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
   _Mode _mode = _Mode.single;
   Duration _last = Duration.zero;
   double _acc = 0;
+  double _hitStop = 0; // 單機：撞刀瞬間停格一下，打擊感
   double _hudAcc = 0;
   Offset? _joyOrigin, _joyNow;
   // 鏡頭
@@ -222,6 +223,10 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
       final (ix, iy) = playing ? _input() : (0.0, 0.0);
       switch (_mode) {
         case _Mode.single:
+          if (_hitStop > 0) {
+            _hitStop -= dt;
+            break;
+          }
           _acc += dt;
           while (_acc >= ssDt) {
             _acc -= ssDt;
@@ -445,14 +450,17 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
       switch (e.type) {
         case SsEvType.clash:
           final mine = e.a == meId || e.b == meId;
-          final n = math.min(14, 4 + e.count * 2);
+          // 打擊感：一圈白光爆開 + 很快的火花，自己有份的話鏡頭震一下、停格一瞬間
+          _fx.waves.add(_Wave(e.x, e.y, 38 + e.count * 10.0, Colors.white, 0.14));
+          final n = math.min(20, 8 + e.count * 3);
           for (var i = 0; i < n; i++) {
             final a = _rng.nextDouble() * math.pi * 2;
-            final s = 150 + _rng.nextDouble() * 380;
-            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.18 + _rng.nextDouble() * 0.25, 1.5 + _rng.nextDouble() * 2,
-                i.isEven ? const Color(0xFFFFF59D) : Colors.white, 0));
+            final s = 260 + _rng.nextDouble() * 520;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.12 + _rng.nextDouble() * 0.2, 2 + _rng.nextDouble() * 2.5,
+                i % 3 == 0 ? const Color(0xFFFFE082) : Colors.white, 0));
           }
-          if (mine) _fx.shake = math.max(_fx.shake, 4 + e.count * 1.5);
+          if (mine && _mode == _Mode.single) _hitStop = math.max(_hitStop, e.count > 0 ? 0.07 : 0.04);
+          if (mine) _fx.shake = math.max(_fx.shake, 6 + e.count * 3.0);
         case SsEvType.knock:
           // 被撞掉的刀：從碰撞點沿著「離開主人」的方向旋轉著飛出去
           var dx = e.x - e.x2, dy = e.y - e.y2;
@@ -713,6 +721,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           const SizedBox(width: 6),
           Text('${p.n}', style: TextStyle(color: Color(ssBladeColors[p.levelColor]), fontSize: 24, fontWeight: FontWeight.w900, height: 1)),
           Text(' 第${p.level + 1}層', style: TextStyle(color: Color(ssBladeColors[p.levelColor]).withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.w700)),
+          if (!p.armed) const Text(' 刀被撞光了！撿刀才會長回來', style: TextStyle(color: Color(0xFFFF5252), fontSize: 12, fontWeight: FontWeight.w900)),
           const SizedBox(width: 10),
           const Icon(Icons.dangerous, size: 16, color: Colors.white54),
           Text(' ${p.kills}', style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w700)),
@@ -931,6 +940,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           '刀碰刀：同顏色的兩把一起碎掉；高等的刀撞低等的刀，低等的那把被撞掉。\n'
           '刀圈一定有縫——刀尖鑽過縫進到對方圈裡就是「收割」：他全部的鐮刀瞬間歸你！\n'
           '刀圈每 8 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層時圈上只剩一把更大的刀，再慢慢長回 8 把。\n'
+          '被撞掉的刀不會自己長回來，撞光就變空手；要撿刀或收割別人才會再長。\n'
           '3 分鐘後鐮刀最多的人獲勝。地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
           '石柱、斷牆、水池會擋路；走進草叢別人就看不到你。\n'
           '道具：👟跑速鞋、🛡️金鐘罩、🧲磁鐵、🔥狂暴藥水（用身體去碰才撿得到）',
@@ -2021,7 +2031,7 @@ class _WorldPainter extends CustomPainter {
     }
 
     // 很淡的軌道線（看得出圈的範圍，但空隙還是看得清楚）
-    if (f.n > 0) {
+    if (f.armed) {
       c.drawCircle(
           Offset(cx, cy),
           R + bs * 0.12,
