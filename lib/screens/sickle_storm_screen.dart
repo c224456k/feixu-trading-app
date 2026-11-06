@@ -12,6 +12,8 @@ import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api_client.dart';
+import '../widgets/sickle_audio.dart';
+import 'sickle_storm_art.dart';
 import 'sickle_storm_logic.dart';
 
 const _gold = Color(0xFFFFD54F);
@@ -145,10 +147,12 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
     _snapCamera();
     _ticker = createTicker(_onTick)..start();
     if (widget.autoStart) _phase = _Phase.play;
+    SickleAudio.instance.enter();
   }
 
   @override
   void dispose() {
+    SickleAudio.instance.leave();
     _ticker.dispose();
     _repaint.dispose();
     _focus.dispose();
@@ -447,6 +451,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
   void _consumeEvents() {
     final meId = _meId;
     for (final e in _g.events) {
+      _eventSound(e, meId);
       switch (e.type) {
         case SsEvType.clash:
           final mine = e.a == meId || e.b == meId;
@@ -483,6 +488,34 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
             final a = _rng.nextDouble() * math.pi * 2;
             final s = 200 + _rng.nextDouble() * 300;
             _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * s, math.sin(a) * s, 0.25, 2.5, Color(ssBladeColors[c]), 0));
+          }
+        case SsEvType.mhit:
+          // 砍到大怪：碎石／南瓜屑／棉花飛出來
+          final mk = _g.monsters.where((m) => m.id == e.b).firstOrNull?.kind ?? 0;
+          final mc = const [Color(0xFF9CCC65), Color(0xFFFFB74D), Colors.white][mk.clamp(0, 2)];
+          for (var i = 0; i < 7; i++) {
+            final a = _rng.nextDouble() * math.pi * 2;
+            final sp = 120 + _rng.nextDouble() * 260;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * sp, math.sin(a) * sp, 0.3 + _rng.nextDouble() * 0.25, 2.5 + _rng.nextDouble() * 2.5, mc, 2));
+          }
+          _fx.waves.add(_Wave(e.x, e.y, 30, Colors.white, 0.12));
+          if (e.a == meId) _fx.shake = math.max(_fx.shake, 3);
+        case SsEvType.mdie:
+          _fx.waves.add(_Wave(e.x, e.y, 260, const Color(0xFFFFD54F), 0.6));
+          _fx.waves.add(_Wave(e.x, e.y, 160, Colors.white, 0.4));
+          for (var i = 0; i < 50; i++) {
+            final a = _rng.nextDouble() * math.pi * 2;
+            final sp = 150 + _rng.nextDouble() * 450;
+            _fx.parts.add(_Particle(e.x, e.y, math.cos(a) * sp, math.sin(a) * sp, 0.6 + _rng.nextDouble() * 0.5, 2 + _rng.nextDouble() * 3,
+                i.isEven ? const Color(0xFFFFD54F) : Colors.white, 1));
+          }
+          final mname = ssMonsterNames[e.b.clamp(0, ssMonsterNames.length - 1)];
+          if (e.a == meId) {
+            _fx.shake = math.max(_fx.shake, 12);
+            _showBanner('打倒 $mname！鐮刀雨 ×${e.count}', const Color(0xFFFFD54F));
+          } else {
+            final killer = _g.byId(e.a);
+            _pushFeed('${_nameOf(killer)} 打倒了 $mname', const Color(0xFFFFE082));
           }
         case SsEvType.kill:
           final killer = _g.byId(e.a);
@@ -563,6 +596,51 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
     _g.events.clear();
   }
 
+  /// 音效：自己有份的全音量；別人的照距離變小聲，太遠就不播
+  void _eventSound(SsEvent e, int meId) {
+    final au = SickleAudio.instance;
+    final me = _g.byId(meId);
+    void near(String name, double x, double y, [double base = 0.55]) {
+      if (me == null) return;
+      final d = math.sqrt((x - me.x) * (x - me.x) + (y - me.y) * (y - me.y));
+      if (d > 650) return;
+      au.play(name, volume: base * (1 - d / 650));
+    }
+
+    final mine = e.a == meId || e.b == meId;
+    switch (e.type) {
+      case SsEvType.clash:
+        if (e.b == -1) {
+          e.a == meId ? au.play('bounce', volume: 0.7) : near('bounce', e.x, e.y, 0.35);
+        } else {
+          mine ? au.play('clash', volume: 0.85) : near('clash', e.x, e.y);
+        }
+      case SsEvType.knock:
+        e.a == meId ? au.play('knock', volume: 0.9) : near('knock', e.x, e.y);
+      case SsEvType.kill:
+        if (e.a == meId) {
+          au.play('kill', volume: 1.0);
+        } else if (e.b == meId) {
+          au.play('die', volume: 1.0);
+        } else {
+          near('kill', e.x, e.y, 0.45);
+        }
+      case SsEvType.gold:
+      case SsEvType.silver:
+        if (e.a == meId) au.play('level', volume: 0.85);
+      case SsEvType.pickup:
+        if (e.a == meId) au.play(e.b >= 1 ? 'pickup_big' : 'pickup', volume: 0.6);
+      case SsEvType.item:
+        if (e.a == meId) au.play('item', volume: 0.85);
+      case SsEvType.mhit:
+        e.a == meId ? au.play('mhit', volume: 0.8) : near('mhit', e.x, e.y, 0.4);
+      case SsEvType.mdie:
+        e.a == meId ? au.play('mdie', volume: 1.0) : near('mdie', e.x, e.y, 0.7);
+      case SsEvType.over:
+        if (me != null && me.alive && _g.rankOf(me) == 1) au.play('win', volume: 0.9);
+    }
+  }
+
   void _pushFeed(String t, Color c) {
     _feed.insert(0, _Feed(t, c));
     if (_feed.length > 5) _feed.removeLast();
@@ -636,6 +714,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
         title: Text(_online && _roomId != null ? '鐮刀風暴・房間 $_roomId' : '鐮刀風暴（試玩）'),
         backgroundColor: const Color(0xFF13241A),
         foregroundColor: Colors.white,
+        actions: const [SickleAudioButton()],
       ),
       body: Focus(
         focusNode: _focus,
@@ -943,6 +1022,7 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           '被撞掉的刀不會自己長回來，撞光就變空手；要撿刀或收割別人才會再長。\n'
           '3 分鐘後鐮刀最多的人獲勝。地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
           '石柱、斷牆、水池會擋路；走進草叢別人就看不到你。\n'
+          '地圖上有大怪（岩甲巨龜、南瓜大王、棉花雲獸）不會攻擊人，用刀砍牠會噴鐮刀，打倒爆一大堆！\n'
           '道具：👟跑速鞋、🛡️金鐘罩、🧲磁鐵、🔥狂暴藥水（用身體去碰才撿得到）',
           style: TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
         )),
@@ -1833,6 +1913,19 @@ class _WorldPainter extends CustomPainter {
       tp.paint(canvas, Offset(it.x - tp.width / 2, y + 36));
     }
 
+    // 大怪
+    for (final m in g.monsters) {
+      if (!view.inflate(m.r + 40).contains(Offset(m.x, m.y))) continue;
+      ssDrawMonster(canvas, m, g.time);
+      final w = m.r * 1.5, y = m.y - m.r - 22;
+      final k = (m.hp / m.maxHp).clamp(0.0, 1.0);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(m.x - w / 2 - 2, y - 2, w + 4, 10), const Radius.circular(5)), Paint()..color = Colors.black54);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(m.x - w / 2, y, w * k, 6), const Radius.circular(3)),
+          Paint()..color = Color.lerp(const Color(0xFFFF5252), const Color(0xFF69F0AE), k)!);
+      final tp = _label(ssMonsterNames[m.kind], const Color(0xFFFFE082), 12);
+      tp.paint(canvas, Offset(m.x - tp.width / 2, y - tp.height - 2));
+    }
+
     // 衝擊波
     for (final w in s._fx.waves) {
       final k = w.t / w.dur;
@@ -2112,11 +2205,8 @@ class _WorldPainter extends CustomPainter {
             ..color = Colors.white.withValues(alpha: 0.3 + 0.3 * math.sin(time * 12)));
     }
 
-    // 身體：斗篷 + 兜帽 + 眼睛
+    // 身體：原創小怪獸
     final col = Color(f.color);
-    final hsl = HSLColor.fromColor(col);
-    final dark = hsl.withLightness((hsl.lightness * 0.45).clamp(0, 1)).toColor();
-    final light = hsl.withLightness((hsl.lightness * 1.15).clamp(0, 0.92)).toColor();
     if (isMe || (f.human && s._online)) {
       c.drawCircle(
           Offset(cx, cy + 2),
@@ -2126,16 +2216,12 @@ class _WorldPainter extends CustomPainter {
             ..strokeWidth = 2.5
             ..color = (isMe ? const Color(0xFF64B5F6) : col).withValues(alpha: 0.85));
     }
-    c.drawCircle(Offset(cx, cy), ssBodyR, Paint()..shader = ui.Gradient.radial(Offset(cx - 5, cy - 6), ssBodyR * 1.6, [light, col, dark], [0, 0.5, 1]));
-    // 兜帽陰影（朝臉的方向開口）
-    final fx = f.faceX, fy = f.faceY;
-    c.drawCircle(Offset(cx + fx * 6, cy + fy * 6), ssBodyR * 0.62, Paint()..color = const Color(0xFF1A1A1A));
-    final eye = Paint()..color = f.has(SsItemType.rage) ? const Color(0xFFFF1744) : (isMe ? const Color(0xFF80D8FF) : (tier == 2 ? _gold : Colors.white));
-    final px = -fy, py = fx;
-    c.drawCircle(Offset(cx + fx * 9 + px * 3.4, cy + fy * 9 + py * 3.4), 2.1, eye);
-    c.drawCircle(Offset(cx + fx * 9 - px * 3.4, cy + fy * 9 - py * 3.4), 2.1, eye);
-    // 手（握柄）
-    c.drawCircle(Offset(cx - fy * 13 + fx * 4, cy + fx * 13 + fy * 4), 4, Paint()..color = dark);
+    // 原創小怪獸造型（種族看 ssSpeciesOf）
+    c.save();
+    c.translate(cx, cy);
+    ssDrawCreature(c, ssSpeciesOf(f), ssBodyR, col, f.faceX, f.faceY, time + f.id * 0.37,
+        pupil: tier == 2 ? const Color(0xFF6D4C00) : null, angry: f.has(SsItemType.rage));
+    c.restore();
     if (f.flash > 0) {
       c.drawCircle(Offset(cx, cy), ssBodyR + 1, Paint()..color = Colors.white.withValues(alpha: (f.flash / 0.12).clamp(0, 1) * 0.8));
     }
@@ -2162,14 +2248,15 @@ class _WorldPainter extends CustomPainter {
     }
     if (tier == 2) {
       // 皇冠
+      const cy0 = ssBodyR + 12; // 戴在耳朵／角上面
       final crown = Path()
-        ..moveTo(cx - 9, cy - ssBodyR - 2)
-        ..lineTo(cx - 10, cy - ssBodyR - 12)
-        ..lineTo(cx - 4, cy - ssBodyR - 6)
-        ..lineTo(cx, cy - ssBodyR - 14)
-        ..lineTo(cx + 4, cy - ssBodyR - 6)
-        ..lineTo(cx + 10, cy - ssBodyR - 12)
-        ..lineTo(cx + 9, cy - ssBodyR - 2)
+        ..moveTo(cx - 9, cy - cy0 - 2)
+        ..lineTo(cx - 10, cy - cy0 - 12)
+        ..lineTo(cx - 4, cy - cy0 - 6)
+        ..lineTo(cx, cy - cy0 - 14)
+        ..lineTo(cx + 4, cy - cy0 - 6)
+        ..lineTo(cx + 10, cy - cy0 - 12)
+        ..lineTo(cx + 9, cy - cy0 - 2)
         ..close();
       c.drawPath(crown, Paint()..color = _gold);
       c.drawPath(
@@ -2226,6 +2313,17 @@ class _MiniMap extends CustomPainter {
     for (final it in g.items) {
       final o = c + Offset(it.x * k, it.y * k);
       canvas.drawRect(Rect.fromCenter(center: o, width: 4.5, height: 4.5), Paint()..color = _itemColors[it.type]!);
+    }
+    for (final m in g.monsters) {
+      final o = c + Offset(m.x * k, m.y * k);
+      canvas.drawCircle(o, math.max(3.5, m.r * k), Paint()..color = const Color(0xFFFFB300));
+      canvas.drawCircle(
+          o,
+          math.max(3.5, m.r * k),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = Colors.black54);
     }
     SsFighter? me;
     for (final f in g.fighters) {

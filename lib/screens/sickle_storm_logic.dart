@@ -261,6 +261,31 @@ class SsItem {
 
 const ssItemReach = ssBodyR + 30; // 道具要用身體去碰（不是鐮刀圈）
 
+/// 大怪：在地圖上慢慢晃，不會攻擊人。用刀砍牠會噴出地上鐮刀，打死爆一大堆。
+const ssMonsterCount = 3;
+const ssMonsterRespawn = 15.0;
+const ssMonsterNames = ['岩甲巨龜', '南瓜大王', '棉花雲獸'];
+const ssMonsterHp = [120.0, 90.0, 105.0];
+const ssMonsterR = [58.0, 50.0, 54.0];
+
+class SsMonster {
+  final int id;
+  final int kind;
+  double x, y;
+  double vx = 0, vy = 0;
+  double hp;
+  double flash = 0;
+  double think = 0;
+  double tx = 0, ty = 0;
+  double sx = 0, sy = 0; // 客人端：房主傳來的位置
+  SsMonster(this.id, this.kind, this.x, this.y) : hp = ssMonsterHp[kind] {
+    sx = x;
+    sy = y;
+  }
+  double get r => ssMonsterR[kind];
+  double get maxHp => ssMonsterHp[kind];
+}
+
 /// 地圖障礙物：0 石塊、1 石柱、2 水池、3 斷牆（x,y→x2,y2 的膠囊形）
 class SsObstacle {
   final int kind;
@@ -277,7 +302,7 @@ class SsBush {
   const SsBush(this.x, this.y, this.r, this.seed);
 }
 
-enum SsEvType { kill, clash, gold, silver, pickup, item, over, knock }
+enum SsEvType { kill, clash, gold, silver, pickup, item, over, knock, mhit, mdie }
 
 class SsEvent {
   final SsEvType type;
@@ -295,6 +320,10 @@ class SsGame {
   final List<SsFighter> fighters = [];
   final List<SsPickup> pickups = [];
   final List<SsItem> items = [];
+  final List<SsMonster> monsters = [];
+  final List<double> _monsterRespawnAt = [];
+  int _nextMonster = 0;
+  final Map<int, double> _monCd = {};
   final List<SsObstacle> obstacles = [];
   final List<SsBush> bushes = [];
   final List<double> _avoid = []; // NPC 避障用的圓（x,y,r 三個一組，牆拆成好幾顆）
@@ -352,6 +381,135 @@ class SsGame {
     }
     for (var i = 0; i < 4; i++) {
       _spawnItem();
+    }
+    for (var i = 0; i < ssMonsterCount; i++) {
+      _spawnMonster(i % ssMonsterNames.length);
+    }
+  }
+
+  void _spawnMonster([int? kind]) {
+    final k = kind ?? rng.nextInt(ssMonsterNames.length);
+    final (x, y) = _randomFree(ssMonsterR[k] + 30, maxR: 0.8);
+    monsters.add(SsMonster(_nextMonster++, k, x, y));
+  }
+
+  /// 大怪：慢慢晃、擋路、被刀砍。
+  void _updateMonsters(double dt) {
+    for (final k in _monCd.keys.toList()) {
+      final v = _monCd[k]! - dt;
+      if (v <= 0) {
+        _monCd.remove(k);
+      } else {
+        _monCd[k] = v;
+      }
+    }
+    for (final m in monsters.toList()) {
+      if (m.flash > 0) m.flash -= dt;
+      m.think -= dt;
+      if (m.think <= 0) {
+        m.think = 2 + rng.nextDouble() * 3;
+        if (rng.nextDouble() < 0.3) {
+          m.tx = m.ty = 0;
+        } else {
+          // 偏向往場中央走一點，不要一直貼著邊
+          final a = rng.nextDouble() * math.pi * 2;
+          var dx = math.cos(a) - m.x / ssArenaR * 0.8, dy = math.sin(a) - m.y / ssArenaR * 0.8;
+          final l = math.sqrt(dx * dx + dy * dy);
+          dx /= l;
+          dy /= l;
+          m.tx = dx;
+          m.ty = dy;
+        }
+      }
+      final kk = 1 - math.exp(-3 * dt);
+      m.vx += (m.tx * 38 - m.vx) * kk;
+      m.vy += (m.ty * 38 - m.vy) * kk;
+      final nx = m.x + m.vx * dt, ny = m.y + m.vy * dt;
+      if (_free(nx, ny, m.r) && math.sqrt(nx * nx + ny * ny) < ssArenaR * 0.85) {
+        m.x = nx;
+        m.y = ny;
+      } else {
+        m.tx = -m.tx;
+        m.ty = -m.ty;
+        m.vx = m.vy = 0;
+        m.think = 1.5;
+      }
+      // 人撞到大怪會被擋住
+      for (final f in fighters) {
+        if (!f.alive) continue;
+        final dx = f.x - m.x, dy = f.y - m.y;
+        final lim = m.r + ssBodyR;
+        final d2 = dx * dx + dy * dy;
+        if (d2 >= lim * lim || d2 < 1e-6) continue;
+        final d = math.sqrt(d2);
+        f.x = m.x + dx / d * lim;
+        f.y = m.y + dy / d * lim;
+        final vn = f.vx * dx / d + f.vy * dy / d;
+        if (vn < 0) {
+          f.vx -= vn * dx / d;
+          f.vy -= vn * dy / d;
+        }
+      }
+      // 被刀砍：刀碰到就彈開（像砍到硬物），每一刀掉鐮刀
+      for (final f in fighters) {
+        if (!f.alive || !f.armed) continue;
+        final pr = f.bladeSize * _bladePtR;
+        if (_dist(f.x, f.y, m.x, m.y) > m.r + f.reach + pr) continue;
+        f._ptsTick = -1;
+        final pts = f.bladePoints(tick);
+        for (var i = 0; i < pts.length; i += 2) {
+          final px = pts[i], py = pts[i + 1];
+          if (_dist(px, py, m.x, m.y) >= m.r + pr) continue;
+          if (f.bounceCd <= 0) {
+            f.angle -= f.spin * f.dir * dt * 2;
+            f.dir = -f.dir;
+            f.bounceCd = 0.12;
+            f._ptsTick = -1;
+          }
+          final key = f.id * 1000 + m.id;
+          if (!_monCd.containsKey(key)) {
+            _monCd[key] = 0.16;
+            m.hp -= 1 + f.level * 0.3;
+            m.flash = 0.1;
+            events.add(SsEvent(SsEvType.mhit, px, py, a: f.id, b: m.id));
+            if (rng.nextDouble() < 0.35) _dropAround(m, 1, 0);
+            if (m.hp <= 0) {
+              monsters.remove(m);
+              _monsterRespawnAt.add(time + ssMonsterRespawn);
+              final k = 14 + rng.nextInt(9);
+              _dropAround(m, k, 1);
+              events.add(SsEvent(SsEvType.mdie, m.x, m.y, a: f.id, b: m.kind, count: k));
+            }
+          }
+          break;
+        }
+        if (!monsters.contains(m)) break;
+      }
+    }
+    for (var i = _monsterRespawnAt.length - 1; i >= 0; i--) {
+      if (time >= _monsterRespawnAt[i]) {
+        _monsterRespawnAt.removeAt(i);
+        _spawnMonster();
+      }
+    }
+  }
+
+  /// 在大怪身邊撒鐮刀。[bonus]：打死時比較容易掉高等的。
+  void _dropAround(SsMonster m, int k, int bonus) {
+    for (var i = 0; i < k; i++) {
+      for (var t = 0; t < 8; t++) {
+        final a = rng.nextDouble() * math.pi * 2;
+        final r = m.r + 18 + rng.nextDouble() * (bonus > 0 ? 110 : 50);
+        final x = m.x + math.cos(a) * r, y = m.y + math.sin(a) * r;
+        if (!_free(x, y, 10)) continue;
+        int? grade;
+        if (bonus > 0) {
+          final roll = rng.nextInt(100);
+          grade = roll < 40 ? 0 : (roll < 70 ? 1 : (roll < 88 ? 2 : (roll < 97 ? 3 : 4)));
+        }
+        _spawnPickup(x: x, y: y, grade: grade);
+        break;
+      }
     }
   }
 
@@ -749,6 +907,7 @@ class SsGame {
 
     _collectPickups();
     _combat(dt);
+    _updateMonsters(dt);
 
     // 重生：NPC 換一個新的（後期重生的帶比較多鐮刀，不然金圈沒東西吃）；多人模式的真人原地復活
     for (final f in fighters.toList()) {
@@ -1091,6 +1250,22 @@ class SsGame {
       return;
     }
     b.chaseId = null;
+    // 有刀又沒人可追：附近有大怪就去砍
+    if (b.armed && b.aggr > 0.55) {
+      SsMonster? mon;
+      var md = 520.0;
+      for (final m in monsters) {
+        final d = _dist(m.x, m.y, b.x, b.y);
+        if (d < md) {
+          md = d;
+          mon = m;
+        }
+      }
+      if (mon != null) {
+        _aim(b, mon.x, mon.y);
+        return;
+      }
+    }
     SsItem? item;
     var id = 380.0;
     for (final it in items) {
@@ -1211,6 +1386,7 @@ class SsGame {
           ],
       ],
       'it': [for (final it in items) [it.x.round(), it.y.round(), it.type.index]],
+      'mo': [for (final mo in monsters) [mo.id, mo.kind, mo.x.round(), mo.y.round(), mo.vx.round(), mo.vy.round(), (mo.hp * 10).round(), mo.flash > 0 ? 1 : 0]],
       'ev': [
         for (final e in evs ?? events) [e.type.index, e.x.round(), e.y.round(), e.a, e.b, e.count, e.x2.round(), e.y2.round()],
       ],
@@ -1329,6 +1505,24 @@ class SsGame {
         for (final raw in m['it'] as List)
           SsItem(((raw as List)[0] as num).toDouble(), (raw[1] as num).toDouble(), SsItemType.values[raw[2] as int], (raw[0] as num) * 0.37),
       ]);
+    final mos = m['mo'] as List?;
+    if (mos != null) {
+      final old = {for (final mo in monsters) mo.id: mo};
+      monsters.clear();
+      for (final raw in mos) {
+        final r = raw as List;
+        final id = r[0] as int;
+        final x = (r[2] as num).toDouble(), y = (r[3] as num).toDouble();
+        final mo = old[id] ?? SsMonster(id, r[1] as int, x, y);
+        mo.sx = x;
+        mo.sy = y;
+        mo.vx = (r[4] as num).toDouble();
+        mo.vy = (r[5] as num).toDouble();
+        mo.hp = (r[6] as num) / 10;
+        if (r[7] == 1) mo.flash = 0.1;
+        monsters.add(mo);
+      }
+    }
     if (m['pf'] != null) {
       pickups
         ..clear()
@@ -1356,6 +1550,25 @@ class SsGame {
   void mirrorTick(double dt, int meId, double ix, double iy) {
     if (!over) time += dt;
     final k = 1 - math.exp(-10 * dt);
+    for (final mo in monsters) {
+      if (mo.flash > 0) mo.flash -= dt;
+      mo.sx += mo.vx * dt;
+      mo.sy += mo.vy * dt;
+      mo.x += mo.vx * dt + (mo.sx - mo.x) * k;
+      mo.y += mo.vy * dt + (mo.sy - mo.y) * k;
+      // 自己撞到大怪也要被擋住（本機移動）
+      final me = byId(meId);
+      if (me != null && me.alive) {
+        final dx = me.x - mo.x, dy = me.y - mo.y;
+        final lim = mo.r + ssBodyR;
+        final d2 = dx * dx + dy * dy;
+        if (d2 < lim * lim && d2 > 1e-6) {
+          final d = math.sqrt(d2);
+          me.x = mo.x + dx / d * lim;
+          me.y = mo.y + dy / d * lim;
+        }
+      }
+    }
     for (final f in fighters) {
       if (f.flash > 0) f.flash -= dt;
       if (!f.alive) continue;

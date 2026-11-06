@@ -89,6 +89,19 @@ flutter:
     - assets/audio/reelstop.mp3
     - assets/audio/reelspin.mp3
     - assets/audio/jackpot.mp3
+    - assets/audio/sickle_theme.mp3
+    - assets/audio/sickle_clash.mp3
+    - assets/audio/sickle_knock.mp3
+    - assets/audio/sickle_bounce.mp3
+    - assets/audio/sickle_pickup.mp3
+    - assets/audio/sickle_pickup_big.mp3
+    - assets/audio/sickle_item.mp3
+    - assets/audio/sickle_kill.mp3
+    - assets/audio/sickle_die.mp3
+    - assets/audio/sickle_level.mp3
+    - assets/audio/sickle_mhit.mp3
+    - assets/audio/sickle_mdie.mp3
+    - assets/audio/sickle_win.mp3
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
