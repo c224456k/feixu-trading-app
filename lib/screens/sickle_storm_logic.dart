@@ -126,6 +126,8 @@ class SsFighter {
   int lv = 0; // 刀圈在第幾層：只會因為「撿到／收割」往上升，被撞掉刀不會降層（刀不會自己長回來）
   double wear = 0; // 磨損累積到 1 就掉一把
   double angle;
+  int dir = 1; // 刀圈旋轉方向：碰到障礙物就反過來轉（刀穿不過石頭、柱子、牆）
+  double bounceCd = 0;
   bool alive = true;
   bool hidden = false; // 躲在草叢裡
   int kills = 0;
@@ -232,7 +234,7 @@ class SsFighter {
       final a = angle + k * gap;
       final ca = math.cos(a), sa = math.sin(a);
       for (var j = 0; j < _bladePts.length; j += 2) {
-        final lx = _bladePts[j] * bs, out = rb - _bladePts[j + 1] * bs;
+        final lx = _bladePts[j] * bs * dir, out = rb - _bladePts[j + 1] * bs;
         _pts.add(x + ca * out - sa * lx);
         _pts.add(y + sa * out + ca * lx);
       }
@@ -597,7 +599,7 @@ class SsGame {
 
   // ---------------- 移動 ----------------
   /// 一個人往 (wx,wy) 走一步：慣性、障礙物、場地邊界、轉刀。客人端自己的角色也用這個。
-  void moveFighter(SsFighter f, double wx, double wy, double dt) {
+  void moveFighter(SsFighter f, double wx, double wy, double dt, {bool blades = true}) {
     final sp = ssSpeed(f.n) * (f.human ? 1 : 0.93) * (f.has(SsItemType.boots) ? 1.45 : 1);
     // 加速度：起步、轉向有一點點慣性，撞開時的反彈才看得出來
     final k = 1 - math.exp(-9 * dt);
@@ -612,7 +614,48 @@ class SsGame {
       f.faceY = f.vy / l;
     }
     collide(f);
-    f.angle += f.spin * dt;
+    f.angle += f.spin * f.dir * dt;
+    if (blades) _bladeVsObstacles(f, dt);
+  }
+
+  /// 刀碰到石頭／柱子／牆：刀穿不過去，整圈反彈改成反方向轉，人也被輕輕推開。（水池刀可以掃過）
+  void _bladeVsObstacles(SsFighter f, double dt) {
+    if (f.bounceCd > 0) f.bounceCd -= dt;
+    if (!f.armed) return;
+    final reach = f.reach;
+    final pr = f.bladeSize * _bladePtR;
+    for (final o in obstacles) {
+      if (o.kind == 2) continue;
+      if (_obsDist(o, f.x, f.y) > o.r + reach + pr) continue;
+      f._ptsTick = -1;
+      final pts = f.bladePoints(tick);
+      for (var i = 0; i < pts.length; i += 2) {
+        final px = pts[i], py = pts[i + 1];
+        if (_obsDist(o, px, py) >= o.r + pr) continue;
+        if (f.bounceCd <= 0) {
+          f.angle -= f.spin * f.dir * dt * 2; // 退回撞到之前
+          f.dir = -f.dir;
+          f.bounceCd = 0.15;
+          f._ptsTick = -1;
+          // 人往障礙物反方向退一點
+          double cx, cy;
+          if (o.wall) {
+            (cx, cy) = _closestOnSeg(o, f.x, f.y);
+          } else {
+            cx = o.x;
+            cy = o.y;
+          }
+          final dx = f.x - cx, dy = f.y - cy;
+          final d = math.sqrt(dx * dx + dy * dy);
+          if (d > 1e-6) {
+            f.vx += dx / d * 110;
+            f.vy += dy / d * 110;
+          }
+          events.add(SsEvent(SsEvType.clash, px, py, a: f.id, b: -1));
+        }
+        return;
+      }
+    }
   }
 
   /// 把人推出障礙物與場地外
@@ -911,7 +954,7 @@ class SsGame {
           if (_pairCd.containsKey(key)) continue;
           final hit = _bladeClash(a, b);
           if (hit == null) continue;
-          _pairCd[key] = 0.15;
+          _pairCd[key] = 0.07;
           // 同色（同層）互撞：兩把一起碎掉；高層撞低層：低的那把被撞掉，高的沒事
           final la = _clashLevel(a), lb = _clashLevel(b);
           final (cx, cy) = hit;
@@ -1155,7 +1198,7 @@ class SsGame {
           [
             f.id, f.x.round(), f.y.round(), f.vx.round(), f.vy.round(), f.n, //
             ((f.angle % (math.pi * 2)) * 1000).round(),
-            (f.alive ? 1 : 0) | (f.hidden ? 2 : 0) | (f.flash > 0 ? 4 : 0) | (f.human ? 8 : 0),
+            (f.alive ? 1 : 0) | (f.hidden ? 2 : 0) | (f.flash > 0 ? 4 : 0) | (f.human ? 8 : 0) | (f.dir < 0 ? 16 : 0),
             f.kills, f.peak, f.color, f.skin, f.respawns,
             (f.shield * 10).round(),
             [for (final t in SsItemType.values) ((f.buffs[t] ?? 0) * 10).round()],
@@ -1229,6 +1272,7 @@ class SsGame {
       final wasAlive = f.alive;
       f.alive = flags & 1 != 0;
       f.hidden = flags & 2 != 0;
+      f.dir = flags & 16 != 0 ? -1 : 1;
       if (flags & 4 != 0) f.flash = 0.12;
       f.kills = r[8] as int;
       f.peak = r[9] as int;
@@ -1316,17 +1360,22 @@ class SsGame {
       if (f.flash > 0) f.flash -= dt;
       if (!f.alive) continue;
       if (f.id == meId) {
-        moveFighter(f, ix, iy, dt);
+        // 自己：位置用本機搖桿，刀圈角度跟著房主（收割是房主判定的）
+        moveFighter(f, ix, iy, dt, blades: false);
+        f.sa += f.spin * f.dir * dt;
+        var da = (f.sa - f.angle) % (math.pi * 2);
+        if (da > math.pi) da -= math.pi * 2;
+        f.angle += da * k;
         continue;
       }
       f.sx += f.vx * dt;
       f.sy += f.vy * dt;
       f.x += f.vx * dt + (f.sx - f.x) * k;
       f.y += f.vy * dt + (f.sy - f.y) * k;
-      f.sa += f.spin * dt;
+      f.sa += f.spin * f.dir * dt;
       var da = (f.sa - f.angle) % (math.pi * 2);
       if (da > math.pi) da -= math.pi * 2;
-      f.angle += f.spin * dt + da * k;
+      f.angle += f.spin * f.dir * dt + da * k;
       final sv = f.vx * f.vx + f.vy * f.vy;
       if (sv > 400) {
         final l = math.sqrt(sv);

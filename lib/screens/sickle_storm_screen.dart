@@ -473,12 +473,12 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
             dx = math.cos(a);
             dy = math.sin(a);
           }
-          final sp = 520 + _rng.nextDouble() * 260;
+          final sp = 950 + _rng.nextDouble() * 400;
           final tw = (_rng.nextDouble() - 0.5) * 0.9; // 稍微偏一點，不要每把都一樣
           final vx = (dx - dy * tw) * sp, vy = (dy + dx * tw) * sp;
           final c = e.count.clamp(0, ssBladeColors.length - 1);
-          _fx.parts.add(_Particle(e.x, e.y, vx, vy, 0.75, 26, Color(ssBladeColors[c]), 4,
-              rot: _rng.nextDouble() * 6, vr: (_rng.nextBool() ? 1 : -1) * (18 + _rng.nextDouble() * 10), ci: c));
+          _fx.parts.add(_Particle(e.x, e.y, vx, vy, 0.6, 26, Color(ssBladeColors[c]), 4,
+              rot: _rng.nextDouble() * 6, vr: (_rng.nextBool() ? 1 : -1) * (26 + _rng.nextDouble() * 12), ci: c));
           for (var i = 0; i < 5; i++) {
             final a = _rng.nextDouble() * math.pi * 2;
             final s = 200 + _rng.nextDouble() * 300;
@@ -1490,11 +1490,11 @@ final _outlineTier = [
 ];
 
 /// 圈上的一把彩色鐮刀：刀身用自己的顏色，外框代表等級（鐵 / 銀 / 金）
-void _drawBlade(Canvas c, double x, double y, double ang, double size, int color, int tier, {bool handle = true}) {
+void _drawBlade(Canvas c, double x, double y, double ang, double size, int color, int tier, {bool handle = true, bool flip = false}) {
   c.save();
   c.translate(x, y);
   c.rotate(ang);
-  c.scale(size);
+  c.scale(flip ? -size : size, size);
   if (handle) _drawHandle(c, 1);
   c.drawPath(_bladePath, _outlineTier[tier]);
   c.drawPath(_bladePath, _colorFill[color]);
@@ -2055,7 +2055,7 @@ class _WorldPainter extends CustomPainter {
       for (var k = 0; k < m; k++) {
         final a = f.angle + k * gap;
         final col = Color(ssBladeColors[f.slotColor(k, m)]);
-        c.drawArc(rect, a - trailLen, trailLen * 0.6, false, trail..color = col.withValues(alpha: tier == 2 ? 0.35 : 0.22));
+        c.drawArc(rect, f.dir > 0 ? a - trailLen : a + trailLen * 0.4, trailLen * 0.6, false, trail..color = col.withValues(alpha: tier == 2 ? 0.35 : 0.22));
       }
       for (var k = 0; k < m; k++) {
         final a = f.angle + k * gap;
@@ -2064,7 +2064,7 @@ class _WorldPainter extends CustomPainter {
           final sz = bs * (1 - 0.08 * l);
           final rb = R - sz * 0.15 - l * 2;
           _drawBlade(c, cx + math.cos(la) * rb, cy + math.sin(la) * rb, la + math.pi / 2, sz, f.slotColor(k, m, l), tier,
-              handle: l == 0 && m <= 10);
+              handle: l == 0 && m <= 10, flip: f.dir < 0);
         }
       }
     }
