@@ -486,8 +486,9 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           }
         case SsEvType.gold:
           final f = _g.byId(e.a);
+          final lc = Color(ssBladeColors[ssLevelColors[math.min(e.count, ssLevelColors.length - 1)]]);
           if (e.a == meId && f != null) {
-            _showBanner('⚡ 金光暴風圈 ⚡', _gold);
+            _showBanner('⚡ 第 ${e.count + 1} 層・${_levelName(e.count)}刀 ⚡', lc);
             _fx.shake = 14;
             _fx.waves.add(_Wave(f.x, f.y, 420, _gold, 0.8));
             _fx.waves.add(_Wave(f.x, f.y, 260, Colors.white, 0.5));
@@ -497,13 +498,14 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
               _fx.parts.add(_Particle(f.x, f.y, math.cos(a) * s, math.sin(a) * s, 0.8 + _rng.nextDouble() * 0.6, 2 + _rng.nextDouble() * 3, _gold, 1));
             }
           } else if (f != null) {
-            _pushFeed('${f.name} 化身金光暴風圈！', _gold);
+            _pushFeed('${f.name} 升到第 ${e.count + 1} 層・${_levelName(e.count)}刀！', lc);
           }
         case SsEvType.silver:
           final f = _g.byId(e.a);
+          final lc = Color(ssBladeColors[ssLevelColors[math.min(e.count, ssLevelColors.length - 1)]]);
           if (e.a == meId && f != null) {
-            _showBanner('銀月旋風', const Color(0xFFB3E5FC));
-            _fx.waves.add(_Wave(f.x, f.y, 220, const Color(0xFFB3E5FC), 0.6));
+            _showBanner('第 ${e.count + 1} 層・${_levelName(e.count)}刀', lc);
+            _fx.waves.add(_Wave(f.x, f.y, 220, lc, 0.6));
           }
         case SsEvType.pickup:
           if (e.a != meId) break;
@@ -690,7 +692,8 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
         child: _glass(Row(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(width: 26, height: 26, child: CustomPaint(painter: _IconSickle(p.tier))),
           const SizedBox(width: 6),
-          Text('${p.n}', style: TextStyle(color: _tierColor(p.tier), fontSize: 24, fontWeight: FontWeight.w900, height: 1)),
+          Text('${p.n}', style: TextStyle(color: Color(ssBladeColors[p.levelColor]), fontSize: 24, fontWeight: FontWeight.w900, height: 1)),
+          Text(' 第${p.level + 1}層', style: TextStyle(color: Color(ssBladeColors[p.levelColor]).withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.w700)),
           const SizedBox(width: 10),
           const Icon(Icons.dangerous, size: 16, color: Colors.white54),
           Text(' ${p.kills}', style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w700)),
@@ -908,8 +911,8 @@ class _SickleStormScreenState extends State<SickleStormScreen> with SingleTicker
           '你身邊繞著一圈鐮刀，刀與刀之間有空隙。\n'
           '刀碰刀會互相磨損——鐮刀多、正在往前衝的一方佔上風。\n'
           '看準空隙，讓刀尖叉到對方的身體就是「收割」：他全部的鐮刀瞬間歸你！\n'
-          '收集 30 把化身【金光暴風圈】。3 分鐘後鐮刀最多的人獲勝。\n'
-          '地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8，撿到的顏色會出現在你的刀圈上。\n'
+          '刀圈每 20 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層時圈上只剩一把更大的刀，再慢慢長回 20 把。\n'
+          '3 分鐘後鐮刀最多的人獲勝。地上鐮刀看顏色：白 +1、綠 +2、藍 +3、紫 +5、橘 +8。\n'
           '石柱、斷牆、水池會擋路；走進草叢別人就看不到你。\n'
           '道具：👟跑速鞋、🛡️金鐘罩、🧲磁鐵、🔥狂暴藥水（用身體去碰才撿得到）',
           style: TextStyle(color: Colors.white, fontSize: 14, height: 1.6),
@@ -1226,6 +1229,9 @@ class _SsNet {
     _ch?.sink.close();
   }
 }
+
+const _levelNames = ['白', '綠', '藍', '紫', '橘', '紅', '琥珀', '桃', '靛'];
+String _levelName(int level) => _levelNames[math.min(level, _levelNames.length - 1)];
 
 Color _tierColor(int tier) => const [Color(0xFFE0E0E0), Color(0xFFB3E5FC), _gold][tier];
 
@@ -2004,7 +2010,7 @@ class _WorldPainter extends CustomPainter {
     final m = f.slots;
     if (m > 0) {
       final gap = math.pi * 2 / m;
-      final layers = math.min(3, (f.n / m).ceil());
+      const layers = 1;
       final rect = Rect.fromCircle(center: Offset(cx, cy), radius: R + bs * 0.3);
       final trailLen = math.min(0.6, gap * 0.4);
       final trail = Paint()
@@ -2023,7 +2029,7 @@ class _WorldPainter extends CustomPainter {
           final sz = bs * (1 - 0.08 * l);
           final rb = R - sz * 0.15 - l * 2;
           _drawBlade(c, cx + math.cos(la) * rb, cy + math.sin(la) * rb, la + math.pi / 2, sz, f.slotColor(k, m, l), tier,
-              handle: l == 0 && m <= 8);
+              handle: l == 0 && m <= 10);
         }
       }
     }

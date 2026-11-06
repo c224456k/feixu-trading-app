@@ -2,8 +2,8 @@
 //
 // 玩法：每個人身邊繞著一圈旋轉的鐮刀（一格一格、中間有空隙）。刀碰刀會互相磨損（鐮刀多、
 // 正在往前衝的一方磨得比較少）；刀尖從空隙鑽進去碰到「人」就是收割——對方全部的鐮刀瞬間
-// 被吸過來，圈越轉越大，30 把以上變成金光暴風圈。地上散落的鐮刀碰到就撿，顏色會跟著進到
-// 你的刀圈裡。地圖有石柱、斷牆、水池擋路，草叢可以躲。
+// 被吸過來。刀圈分層：每 20 把升一層換顏色（白→綠→藍→紫→橘→紅…），升層那一刻圈上
+// 只剩一把更大更強的刀，再慢慢長回 20 把——大隻的也會露出空隙，小隻的才有反敗的機會。地圖有石柱、斷牆、水池擋路，草叢可以躲。
 //
 // 單機：被收割就結束。多人（房主的瀏覽器跑這份模擬，其他人收畫面）：被收割 3 秒後重生，
 // 3 分鐘時間到鐮刀最多的人贏。
@@ -11,8 +11,9 @@ import 'dart:math' as math;
 
 const ssArenaR = 1500.0; // 圓形場地半徑
 const ssBodyR = 16.0; // 人的身體半徑
-const ssSilver = 12; // 12 把起變銀圈
-const ssGold = 30; // 30 把起變金光暴風圈
+const ssPerLevel = 20; // 每 20 把升一層
+const ssSilver = 21; // 第 2 層（綠）起有淡淡光暈
+const ssGold = 61; // 第 4 層（紫）起變金光暴風圈
 const ssRoundSec = 180.0;
 const ssDt = 1 / 60;
 const ssFighterTotal = 14; // 場上總人數（真人 + NPC）
@@ -53,15 +54,21 @@ const ssItemDur = {SsItemType.boots: 8.0, SsItemType.guard: 5.0, SsItemType.magn
 const ssItemMax = 8; // 場上最多幾個道具
 const ssItemEvery = 5.0; // 幾秒補一個
 
-/// 鐮刀圈半徑：一把也要比身體大一圈，之後隨數量變大。
-double ssRingR(int n) => n <= 0 ? ssBodyR : 30 + 4.6 * math.pow(n, 0.65);
+/// 第幾層（0 起算）：1~20 把是 0、21~40 是 1…
+int ssLevel(int n) => n <= 0 ? 0 : (n - 1) ~/ ssPerLevel;
 
-/// 單把鐮刀的大小（畫面與碰撞共用）。
-double ssBladeSize(int n) => math.min(46.0, 22 + 2.0 * math.sqrt(n));
+/// 每一層的刀色（ssBladeColors 索引）：白 綠 藍 紫 橘 紅 琥珀 桃 靛，之後都用最後一色
+const ssLevelColors = [0, 1, 2, 3, 4, 5, 16, 6, 8];
+int ssLevelColor(int n) => ssLevelColors[math.min(ssLevel(n), ssLevelColors.length - 1)];
 
-/// 圈上實際有幾「格」刀：少的時候一把一格，多了以後一格疊好幾把，
-/// 這樣圈再大中間也還有空隙，刀尖才有機會鑽進去叉到人。
-int ssSlots(int n) => n <= 3 ? n : math.min(12, 3 + math.sqrt(n - 3).floor());
+/// 圈上實際有幾把刀：這一層長到第幾把（1~20），升層就從 1 把重新長。
+int ssSlots(int n) => n <= 0 ? 0 : n - ssLevel(n) * ssPerLevel;
+
+/// 鐮刀圈半徑：看圈上有幾把，層數高的稍微大一點。
+double ssRingR(int n) => n <= 0 ? ssBodyR : 30 + 4.0 * math.pow(ssSlots(n), 0.8) + 4.0 * math.min(ssLevel(n), 8);
+
+/// 單把鐮刀的大小（畫面與碰撞共用）：層數越高刀越大。
+double ssBladeSize(int n) => math.min(46.0, 24 + 3.0 * ssLevel(n) + 0.2 * ssSlots(n));
 
 /// 刀尖最外圈能碰到的距離
 double ssReach(int n) => n <= 0 ? ssBodyR : ssRingR(n) + 0.45 * ssBladeSize(n);
@@ -71,8 +78,8 @@ double ssSpeed(int n) => 250 / (1 + n * 0.004);
 
 int ssTier(int n) => n >= ssGold ? 2 : (n >= ssSilver ? 1 : 0);
 
-/// 轉速（弧度／秒）：刻意慢，看得到刀與刀之間的空隙。
-double ssSpin(int tier) => const [1.7, 2.05, 2.5][tier];
+/// 轉速（弧度／秒）：刻意慢，看得到刀與刀之間的空隙；層數越高轉得稍快。
+double ssSpin(int level) => math.min(2.5, 1.7 + 0.12 * level);
 
 // 單把鐮刀的碰撞點（刀的區域座標：+x 是旋轉前進方向，-y 朝外），半徑 = 0.15 × 刀大小
 const _bladePts = [0.08, -0.30, 0.30, -0.52, 0.56, -0.42, 0.76, -0.16];
@@ -154,7 +161,9 @@ class SsFighter {
   double get bladeSize => ssBladeSize(n);
   int get slots => ssSlots(n);
   int get tier => ssTier(n);
-  double get spin => ssSpin(tier);
+  int get level => ssLevel(n);
+  int get levelColor => ssLevelColor(n);
+  double get spin => ssSpin(level);
 
   void addBlades(int color, int k) {
     mix[color] += k;
@@ -185,18 +194,8 @@ class SsFighter {
     n = 0;
   }
 
-  /// 第 k 格刀要畫什麼顏色：把各顏色依數量排成一圈，取該格位置的顏色。
-  /// 同一格疊了好幾把時，[layer] 往後取下一種顏色（畫成一疊彩色刀片）。
-  int slotColor(int k, int m, [int layer = 0]) {
-    if (n <= 0) return skin;
-    final per = n / m;
-    var pos = ((k + layer / 3) * per).floor() % n;
-    for (var i = 0; i < mix.length; i++) {
-      if (pos < mix[i]) return i;
-      pos -= mix[i];
-    }
-    return skin;
-  }
+  /// 圈上刀的顏色：看在第幾層（同一層全部同色）。
+  int slotColor(int k, int m, [int layer = 0]) => levelColor;
 
   /// 每一格刀的碰撞點（世界座標，x,y 交錯），同一幀只算一次。
   List<double> bladePoints(int tick) {
@@ -776,11 +775,16 @@ class SsGame {
   }
 
   void _gain(SsFighter f, int k, int color) {
-    final before = f.tier;
+    final before = f.level;
     f.addBlades(color, k);
-    final after = f.tier;
+    _levelUp(f, before);
+  }
+
+  /// 升層了：發事件（count = 新的層數，0 起算）
+  void _levelUp(SsFighter f, int before) {
+    final after = f.level;
     if (after > before) {
-      events.add(SsEvent(after == 2 ? SsEvType.gold : SsEvType.silver, f.x, f.y, a: f.id));
+      events.add(SsEvent(f.n >= ssGold ? SsEvType.gold : SsEvType.silver, f.x, f.y, a: f.id, count: after));
     }
   }
 
@@ -942,7 +946,7 @@ class SsGame {
 
   void _kill(SsFighter killer, SsFighter victim) {
     final got = math.max(1, victim.n); // 空手的人也至少吸到他身上那把柄
-    final before = killer.tier;
+    final before = killer.level;
     if (victim.n == 0) {
       killer.addBlades(victim.skin, 1);
     } else {
@@ -955,8 +959,7 @@ class SsGame {
     victim.killedBy = killer.id;
     victim.buffs.clear();
     killer.kills++;
-    final after = killer.tier;
-    if (after > before) events.add(SsEvent(after == 2 ? SsEvType.gold : SsEvType.silver, killer.x, killer.y, a: killer.id));
+    _levelUp(killer, before);
     events.add(SsEvent(SsEvType.kill, victim.x, victim.y, a: killer.id, b: victim.id, count: got, x2: killer.x, y2: killer.y));
     if (victim.human && !multi) {
       over = true;
