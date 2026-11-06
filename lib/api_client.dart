@@ -475,6 +475,11 @@ class ApiClient {
     return (url.replaceFirst(RegExp(r'/ws/volley$'), '/ws/rogue2'), key, token);
   }
 
+  Future<(String, String, String)> sickleConnectInfo() async {
+    final (url, key, token) = await volleyConnectInfo();
+    return (url.replaceFirst(RegExp(r'/ws/volley$'), '/ws/sickle'), key, token);
+  }
+
   Future<bool> healthCheck() async {
     final base = await _baseUrl();
     try {
