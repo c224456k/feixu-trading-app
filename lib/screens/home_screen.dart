@@ -8,13 +8,8 @@ import '../models.dart';
 import '../settings_store.dart';
 import 'boss_screen.dart';
 import 'casino_screen.dart';
-import 'hero_screen.dart';
+import 'games_screen.dart';
 import 'leaderboard_screen.dart';
-import 'td_screen.dart';
-import 'archer_rogue_screen.dart';
-import 'magic_tower_screen.dart';
-import 'sickle_storm_screen.dart';
-import 'volley_screen.dart';
 import 'fx_screen.dart';
 
 // 台股習慣：紅漲、綠跌（跟美股相反），這個 App 是給台灣玩家用的，顏色要照這個規則，
@@ -120,45 +115,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HeroScreen()),
+              MaterialPageRoute(builder: (_) => const GamesScreen()),
             ),
-            icon: const Icon(Icons.shield),
-            tooltip: '勇者裝備',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TdScreen()),
-            ),
-            icon: const Icon(Icons.castle),
-            tooltip: '塔防',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const VolleyScreen()),
-            ),
-            icon: const Icon(Icons.sports_volleyball),
-            tooltip: '怪物打排球',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const MagicTowerScreen()),
-            ),
-            icon: const Icon(Icons.domain),
-            tooltip: '魔塔（試玩）',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ArcherRogueScreen()),
-            ),
-            icon: const Icon(Icons.gps_fixed),
-            tooltip: '弓箭肉鴿',
-          ),
-          IconButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SickleStormScreen()),
-            ),
-            icon: const Icon(Icons.cyclone),
-            tooltip: '鐮刀風暴（試玩）',
+            icon: const Icon(Icons.sports_esports),
+            tooltip: '遊戲區',
           ),
           IconButton(
             onPressed: () => Navigator.of(context).push(

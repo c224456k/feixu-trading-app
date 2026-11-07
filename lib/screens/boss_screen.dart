@@ -240,7 +240,7 @@ class _BossScreenState extends State<BossScreen> with SingleTickerProviderStateM
     _attacking = false;
     if (r != null && r.ok && r.defeated) {
       _status = r.status;
-      _showResultDialog('🎉 打倒了！', '${r.message}\n\n🎁 掉落的裝備已經放進勇者物品欄（首頁右上角盾牌）');
+      _showResultDialog('🎉 打倒了！', '${r.message}\n\n🎁 掉落的裝備已經放進勇者物品欄（首頁右上角「遊戲區」→ 勇者裝備）');
     }
   }
 

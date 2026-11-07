@@ -6,3 +6,9 @@ void reloadForNewVersion(String build) {
   final uri = Uri.base.replace(queryParameters: {'v': build});
   web.window.location.replace(uri.toString());
 }
+
+// 在新分頁開外部網址（例如獨立部署的萌獸大冒險）。
+bool openInNewTab(String url) {
+  web.window.open(url, '_blank');
+  return true;
+}
