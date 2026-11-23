@@ -7,12 +7,12 @@
 <style>
 :root {
   --bg: #f6f7fb; --card: #ffffff; --text: #1d2130; --muted: #6b7280; --line: #e5e7eb;
-  --kmt: #1f5fbf; --kmt-bg: #e8f0fc; --dpp: #1a8a4a; --dpp-bg: #e6f5ec; --accent: #6366f1;
+  --kmt: #1f5fbf; --kmt-bg: #e8f0fc; --dpp: #1a8a4a; --dpp-bg: #e6f5ec; --accent: #6366f1; --warn: #d92d20;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #11131a; --card: #1b1e28; --text: #e8eaf0; --muted: #9aa1b2; --line: #2c3040;
-    --kmt: #7aa7ee; --kmt-bg: #1c2a44; --dpp: #6fd39a; --dpp-bg: #173527; --accent: #8b8ef5;
+    --kmt: #7aa7ee; --kmt-bg: #1c2a44; --dpp: #6fd39a; --dpp-bg: #173527; --accent: #8b8ef5; --warn: #ff6b5e;
   }
 }
 * { box-sizing: border-box; }
@@ -39,6 +39,7 @@ code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
 .total { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .amt { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font: inherit; }
 .total b { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.warn { color: var(--warn); }
 .muted { color: var(--muted); font-size: .9rem; }
 .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: .85rem; }
 </style>
@@ -54,7 +55,7 @@ code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
       <li>在 Discord 交易頻道輸入 <code>@股市小幫手 選舉</code>，按「下注／改單」。</li>
       <li>每人 <b>100 預測幣</b>，<b>六都都要下注</b>，每都最少 5 幣（以 5 幣為單位），總額不超過 100。</li>
       <li><b>猜錯 0～1 都</b>：各都分開算，猜中拿回「金額 × 賠率」，猜錯那一都輸掉。</li>
-      <li><b>猜錯 2 都以上、或沒下滿六都</b>：押的全部歸零。沒押的幣原封保留。</li>
+      <li class="warn"><b>猜錯 2 都以上、或沒下滿六都：押的全部歸零。</b>沒押的幣原封保留。</li>
       <li>截止前可以隨時改候選人、改金額。</li>
       <li>預測幣綁 Discord 帳號、不能轉移；Discord 帳號需建立滿 30 天。</li>
       <li>開票後由管理員確認結果開獎，Bot 會在交易頻道公告排行榜（依剩下的預測幣排名）。</li>
