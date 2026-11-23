@@ -37,6 +37,7 @@ code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
 .opt.dpp[aria-pressed="true"] { border-color: var(--dpp); background: var(--dpp-bg); }
 .opt.kmt .odds { color: var(--kmt); } .opt.dpp .odds { color: var(--dpp); }
 .total { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.amt { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font: inherit; }
 .total b { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); font-size: .9rem; }
 .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: .85rem; }
@@ -51,21 +52,22 @@ code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
     <h2>怎麼玩</h2>
     <ul>
       <li>在 Discord 交易頻道輸入 <code>@股市小幫手 選舉</code>，按「下注／改單」。</li>
-      <li>每人 <b>100 預測幣全押</b>一張六都串關單，<b>六都全中</b>才贏；錯一都就歸零。</li>
-      <li>獎金 = 100 × 六都賠率相乘。截止前可以隨時改單。</li>
+      <li>每人 <b>100 預測幣</b>，可以自由分配到各都（總額不超過 100，每都以 5 幣為單位）。</li>
+      <li><b>每一都各自結算</b>：猜中拿回「金額 × 賠率」，猜錯輸掉那一都的金額；沒押的幣原封保留。</li>
+      <li>截止前可以隨時改候選人、改金額或取消。</li>
       <li>預測幣綁 Discord 帳號、不能轉移；Discord 帳號需建立滿 30 天。</li>
-      <li>開票後由管理員確認結果開獎，Bot 會在交易頻道公告全中名單。</li>
+      <li>開票後由管理員確認結果開獎，Bot 會在交易頻道公告排行榜（依剩下的預測幣排名）。</li>
     </ul>
   </section>
 
   <section class="card">
     <h2>賠率試算</h2>
-    <p class="muted">點選每一都你看好的候選人，看看全中能拿多少（這裡只是試算，真正下注請到 Discord）。</p>
+    <p class="muted">點選看好的候選人、輸入金額，看看猜中能拿回多少（這裡只是試算，真正下注請到 Discord）。</p>
     <div class="cities" id="cities"></div>
     <div class="total">
-      <div>總賠率 <b id="odds">—</b></div>
-      <div>全中可得 <b id="payout">—</b></div>
-      <div class="muted" id="hint">還差 6 都沒選</div>
+      <div>已押 <b id="staked">0</b> / 100</div>
+      <div>全部猜中最多剩 <b id="best">100</b> 幣</div>
+      <div class="muted" id="hint"></div>
     </div>
   </section>
 
@@ -82,7 +84,8 @@ const CITIES = [
   ["台南", [["KMT", "謝龍介", 3.63], ["DPP", "陳亭妃", 1.38]]],
   ["高雄", [["KMT", "柯志恩", 2.25], ["DPP", "賴瑞隆", 1.80]]],
 ];
-const picks = {};
+const picks = {};  // city -> odds
+const amts = {};   // city -> amount
 const box = document.getElementById("cities");
 for (const [city, cands] of CITIES) {
   const el = document.createElement("div");
@@ -100,14 +103,26 @@ for (const [city, cands] of CITIES) {
     };
     el.appendChild(b);
   }
+  const inp = document.createElement("input");
+  inp.type = "number"; inp.min = 0; inp.max = 100; inp.step = 5; inp.placeholder = "押多少幣";
+  inp.className = "amt"; inp.setAttribute("aria-label", city + " 下注金額");
+  inp.oninput = () => { amts[city] = Math.max(0, Number(inp.value) || 0); update(); };
+  el.appendChild(inp);
   box.appendChild(el);
 }
 function update() {
-  const n = Object.keys(picks).length;
-  const odds = Object.values(picks).reduce((a, b) => a * b, 1);
-  document.getElementById("odds").textContent = n ? "×" + odds.toFixed(2) : "—";
-  document.getElementById("payout").textContent = n === 6 ? Math.round(STAKE * odds).toLocaleString() + " 幣" : "—";
-  document.getElementById("hint").textContent = n === 6 ? "" : `還差 ${6 - n} 都沒選`;
+  let staked = 0, back = 0;
+  for (const [city] of CITIES) {
+    const a = amts[city] || 0;
+    if (!a || !picks[city]) continue;
+    staked += a; back += a * picks[city];
+  }
+  document.getElementById("staked").textContent = staked;
+  document.getElementById("best").textContent = (100 - staked + back).toFixed(1);
+  const hint = document.getElementById("hint");
+  if (staked > 100) hint.textContent = "⚠️ 超過 100 幣了";
+  else if (Object.values(amts).some(a => a % 5)) hint.textContent = "⚠️ 金額要是 5 的倍數";
+  else hint.textContent = "";
 }
 if (new Date() >= DEADLINE) document.getElementById("status").textContent = "已截止";
 </script>
