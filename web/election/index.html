@@ -52,9 +52,10 @@ code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
     <h2>怎麼玩</h2>
     <ul>
       <li>在 Discord 交易頻道輸入 <code>@股市小幫手 選舉</code>，按「下注／改單」。</li>
-      <li>每人 <b>100 預測幣</b>，可以自由分配到各都（總額不超過 100，每都以 5 幣為單位）。</li>
-      <li><b>每一都各自結算</b>：猜中拿回「金額 × 賠率」，猜錯輸掉那一都的金額；沒押的幣原封保留。</li>
-      <li>截止前可以隨時改候選人、改金額或取消。</li>
+      <li>每人 <b>100 預測幣</b>，<b>六都都要下注</b>，每都最少 5 幣（以 5 幣為單位），總額不超過 100。</li>
+      <li><b>猜錯 0～1 都</b>：各都分開算，猜中拿回「金額 × 賠率」，猜錯那一都輸掉。</li>
+      <li><b>猜錯 2 都以上、或沒下滿六都</b>：押的全部歸零。沒押的幣原封保留。</li>
+      <li>截止前可以隨時改候選人、改金額。</li>
       <li>預測幣綁 Discord 帳號、不能轉移；Discord 帳號需建立滿 30 天。</li>
       <li>開票後由管理員確認結果開獎，Bot 會在交易頻道公告排行榜（依剩下的預測幣排名）。</li>
     </ul>
@@ -120,8 +121,10 @@ function update() {
   document.getElementById("staked").textContent = staked;
   document.getElementById("best").textContent = (100 - staked + back).toFixed(1);
   const hint = document.getElementById("hint");
+  const missing = CITIES.filter(([c]) => !(amts[c] >= 5 && picks[c])).length;
   if (staked > 100) hint.textContent = "⚠️ 超過 100 幣了";
   else if (Object.values(amts).some(a => a % 5)) hint.textContent = "⚠️ 金額要是 5 的倍數";
+  else if (missing) hint.textContent = `⚠️ 還有 ${missing} 都沒下（每都最少 5 幣），沒下滿會全部歸零`;
   else hint.textContent = "";
 }
 if (new Date() >= DEADLINE) document.getElementById("status").textContent = "已截止";
