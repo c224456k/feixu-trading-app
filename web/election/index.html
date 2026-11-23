@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六都選舉預測</title>
+<style>
+:root {
+  --bg: #f6f7fb; --card: #ffffff; --text: #1d2130; --muted: #6b7280; --line: #e5e7eb;
+  --kmt: #1f5fbf; --kmt-bg: #e8f0fc; --dpp: #1a8a4a; --dpp-bg: #e6f5ec; --accent: #6366f1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11131a; --card: #1b1e28; --text: #e8eaf0; --muted: #9aa1b2; --line: #2c3040;
+    --kmt: #7aa7ee; --kmt-bg: #1c2a44; --dpp: #6fd39a; --dpp-bg: #173527; --accent: #8b8ef5;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; line-height: 1.6; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+.card h2 { font-size: 1.1rem; margin: 0 0 10px; }
+ul { margin: 0; padding-left: 1.2em; }
+li { margin: 4px 0; }
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.cities { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.city { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.city h3 { margin: 0 0 8px; font-size: 1rem; }
+.opt { display: flex; justify-content: space-between; align-items: center; width: 100%;
+  border: 2px solid var(--line); background: transparent; color: var(--text); border-radius: 10px;
+  padding: 8px 10px; margin-top: 6px; font: inherit; cursor: pointer; }
+.opt .odds { font-weight: 700; font-variant-numeric: tabular-nums; }
+.opt.kmt[aria-pressed="true"] { border-color: var(--kmt); background: var(--kmt-bg); }
+.opt.dpp[aria-pressed="true"] { border-color: var(--dpp); background: var(--dpp-bg); }
+.opt.kmt .odds { color: var(--kmt); } .opt.dpp .odds { color: var(--dpp); }
+.total { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.total b { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); font-size: .9rem; }
+.tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 999px; padding: 2px 10px; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🗳️ 2026 六都選舉預測</h1>
+  <p class="sub"><span class="tag" id="status">下注中</span>　截止：11/28（六）00:00 · 純虛擬預測幣，不能換錢</p>
+
+  <section class="card">
+    <h2>怎麼玩</h2>
+    <ul>
+      <li>在 Discord 交易頻道輸入 <code>@股市小幫手 選舉</code>，按「下注／改單」。</li>
+      <li>每人 <b>100 預測幣全押</b>一張六都串關單，<b>六都全中</b>才贏；錯一都就歸零。</li>
+      <li>獎金 = 100 × 六都賠率相乘。截止前可以隨時改單。</li>
+      <li>預測幣綁 Discord 帳號、不能轉移；Discord 帳號需建立滿 30 天。</li>
+      <li>開票後由管理員確認結果開獎，Bot 會在交易頻道公告全中名單。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>賠率試算</h2>
+    <p class="muted">點選每一都你看好的候選人，看看全中能拿多少（這裡只是試算，真正下注請到 Discord）。</p>
+    <div class="cities" id="cities"></div>
+    <div class="total">
+      <div>總賠率 <b id="odds">—</b></div>
+      <div>全中可得 <b id="payout">—</b></div>
+      <div class="muted" id="hint">還差 6 都沒選</div>
+    </div>
+  </section>
+
+  <p class="muted">本活動僅供群組娛樂，預測幣沒有任何價值，不得兌換現金或遊戲內資產。</p>
+</main>
+<script>
+const STAKE = 100;
+const DEADLINE = new Date("2026-11-28T00:00:00+08:00");
+const CITIES = [
+  ["台北", [["KMT", "蔣萬安", 2.03], ["DPP", "沈伯洋", 1.97]]],
+  ["新北", [["KMT", "李四川", 2.00], ["DPP", "蘇巧慧", 2.00]]],
+  ["桃園", [["KMT", "張善政", 1.89], ["DPP", "黃世杰", 2.13]]],
+  ["台中", [["KMT", "江啟臣", 1.97], ["DPP", "何欣純", 2.03]]],
+  ["台南", [["KMT", "謝龍介", 3.63], ["DPP", "陳亭妃", 1.38]]],
+  ["高雄", [["KMT", "柯志恩", 2.25], ["DPP", "賴瑞隆", 1.80]]],
+];
+const picks = {};
+const box = document.getElementById("cities");
+for (const [city, cands] of CITIES) {
+  const el = document.createElement("div");
+  el.className = "city";
+  el.innerHTML = `<h3>${city}</h3>`;
+  for (const [party, name, odds] of cands) {
+    const b = document.createElement("button");
+    b.className = "opt " + party.toLowerCase();
+    b.setAttribute("aria-pressed", "false");
+    b.innerHTML = `<span>${name}</span><span class="odds">×${odds.toFixed(2)}</span>`;
+    b.onclick = () => {
+      picks[city] = odds;
+      el.querySelectorAll(".opt").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      update();
+    };
+    el.appendChild(b);
+  }
+  box.appendChild(el);
+}
+function update() {
+  const n = Object.keys(picks).length;
+  const odds = Object.values(picks).reduce((a, b) => a * b, 1);
+  document.getElementById("odds").textContent = n ? "×" + odds.toFixed(2) : "—";
+  document.getElementById("payout").textContent = n === 6 ? Math.round(STAKE * odds).toLocaleString() + " 幣" : "—";
+  document.getElementById("hint").textContent = n === 6 ? "" : `還差 ${6 - n} 都沒選`;
+}
+if (new Date() >= DEADLINE) document.getElementById("status").textContent = "已截止";
+</script>
+</body>
+</html>
